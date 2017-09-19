@@ -1,0 +1,6 @@
+.vagrant
+zyn/Cargo.lock
+zyn/target
+**/__pycache__
+**/*egg-info*
+**/*pyc
