@@ -1,0 +1,63 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+
+  # Every Vagrant development environment requires a box. You can search for
+  # boxes at https://atlas.hashicorp.com/search.
+  config.vm.box = "debian/contrib-jessie64"
+
+  # Create a forwarded port mapping which allows access to a specific port
+  # within the machine from a port on the host machine. In the example below,
+  # accessing "localhost:8080" will access port 80 on the guest machine.
+  # config.vm.network "forwarded_port", guest: 80, host: 8080
+
+  # Create a private network, which allows host-only access to the machine
+  # using a specific IP.
+  # config.vm.network "private_network", ip: "192.168.33.10"
+
+  # Create a public network, which generally matched to bridged network.
+  # Bridged networks make the machine appear as another physical device on
+  # your network.
+  # config.vm.network "public_network"
+
+  # Share project with VM
+  config.vm.synced_folder "../..", "/vagrant_data"
+  config.vm.synced_folder "../../", "/home/developer/zyn", create: true, mount_options: ["uid=1234", "gid=1234"]
+
+  # Provider-specific configuration so you can fine-tune various
+  # backing providers for Vagrant. These expose provider-specific options.
+  # Example for VirtualBox:
+  #
+  config.vm.provider "virtualbox" do |vb|
+  #   # Display the VirtualBox GUI when booting the machine
+  #   vb.gui = true
+  #
+    # Customize the amount of memory on the VM:
+    vb.memory = "4096"
+    vb.cpus = 2
+
+    # Set VM name to someting that makes it easier to
+    vb.name = "dev-zyn-" + File.dirname(__FILE__).gsub(":", "").gsub("/", "-").downcase
+  end
+
+  # Install puppet on VM
+  config.vm.provision "shell", inline: <<-SHELL
+     apt-get update
+     apt-get install -y puppet
+  SHELL
+
+  config.vm.provision "puppet" do |puppet|
+    puppet.manifests_path = "zyn-manifests"
+    puppet.manifest_file = "default.pp"
+
+    # Uncomment to debug
+    puppet.options = "--verbose --debug"
+  end
+
+  # Log in with developer account when connecting with ssh
+  if ARGV[0] == "ssh"
+    config.ssh.username = 'developer'
+    config.ssh.private_key_path = 'files/developer_id_rsa'
+  end
+end
