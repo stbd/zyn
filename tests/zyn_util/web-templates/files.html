@@ -1,0 +1,128 @@
+<!doctype html>
+<head>
+  <title>Zyn</title>
+  <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.3/socket.io.slim.js"></script>
+  <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
+  <script type="text/javascript" src="{{ static_url('zyn.js') }}"></script>
+</head>
+<body>
+
+  <div id="login-modal" class="w3-modal" style="display: none;">
+    <div class="w3-modal-content">
+      <div class="w3-container">
+        <p>Login</p>
+
+        <form class="w3-container" method="post">
+          <label>Username</label>
+          <input class="w3-input" type="text" name="username">
+
+          <label>Password</label>
+          <input class="w3-input" type="text" name="password">
+
+          <input type="submit" value="{{ _("login") }}">
+
+        </form>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="w3-bar w3-black">
+    <button class="w3-bar-item w3-button" onclick="_set_vissible_tab(tab_name_files)">Files</button>
+    <button class="w3-bar-item w3-button" onclick="_set_vissible_tab(tab_name_settings)">Settings</button>
+  </div>
+
+  <div id="tab-files" class="zyn-tabs" style="display:none">
+
+    <p>Files</p>
+
+    <div id="file-list" class="w3-sidebar w3-bar-block w3-green" style="width:200px;">
+    </div>
+
+    <div style="margin-left:200px">
+        <div id="zyn-document-content" class="w3-blue">
+            <h1>Content</h1>
+        </div>
+    </div>
+  </div>
+
+  <div id="tab-settings" class="zyn-tabs" style="display:none">
+    <h2>Settings</h2>
+  </div>
+
+  <script>
+   function _handle_zyn_error(error_description) {
+       alert("Zyn error");
+   }
+
+   function _handle_load_file_rsp(msg, content) {
+       var content_element = document.getElementById('zyn-document-content');
+       var parent_element = content_element.parentElement;
+       parent_element.removeChild(content_element);
+
+       var document_element = document.createElement('p');
+       document_element.appendChild(document.createTextNode(content));
+       parent_element.appendChild(document_element);
+   }
+
+   function _handle_folder_content_list_item_clicked(node_id) {
+       zyn_load_file(node_id, _handle_load_file_rsp)
+   }
+
+   function _create_folder_list_element(element_data) {
+       var element = document.createElement('a');
+       element.setAttribute('class', 'w3-bar-item w3-button')
+       element.addEventListener('click', function() { _handle_folder_content_list_item_clicked(element_data['node-id']); });
+
+       element.appendChild(document.createTextNode(element_data['name']));
+       return element;
+   }
+
+   function _handle_load_folder_content_response(rsp) {
+       var file_list = document.getElementById("file-list");
+       var files = rsp['files'];
+
+       for (let file of files) {
+           file_list.appendChild(_create_folder_list_element(file));
+       }
+   }
+
+   var tab_name_files = "tab-files";
+   var tab_name_settings = "tab-settings";
+   function _set_vissible_tab(tab_name) {
+       var tabs = document.getElementsByClassName("zyn-tabs");
+       for(let tab of tabs) {
+           tab.style.display = "none";
+       }
+       document.getElementById(tab_name).style.display = "block";
+   }
+
+   function _fetch_and_set_folder_content(path) {
+       zyn_load_folder_contents(path, _handle_load_folder_content_response, _handle_zyn_error);
+   }
+
+   function _handle_socket_initialized(rsp) {
+       _fetch_and_set_folder_content('/');
+   }
+
+  </script>
+
+  <script type="text/javascript">
+
+   // Initialization
+   _set_vissible_tab(tab_name_files);
+
+   {% if is_logged_in == 0 %}
+
+   document.getElementById("login-modal").style.display="block"
+
+   {% elif is_logged_in == 1 %}
+
+   zyn_init("{{ user_id }}", _handle_socket_initialized, _handle_zyn_error);
+
+   {% end %}
+
+  </script>
+
+</body>
+</html>

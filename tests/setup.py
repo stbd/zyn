@@ -9,5 +9,6 @@ setup(name='Zyn Util',
       install_requires=[
           'nose==1.3.7',
           'flake8==3.3.0',
+          'tornado==4.5.2',
       ],
 )
