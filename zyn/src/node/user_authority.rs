@@ -97,6 +97,14 @@ impl UserAuthority {
         }
     }
 
+    pub fn resolve_user_id(& self, name: & str) -> Result<Id, ()> {
+        self.users
+            .iter()
+            .find(| & (_, user) | user.name == name)
+            .map(| (& id, _) | Id::User(id))
+            .ok_or(())
+    }
+
     pub fn store(& self, crypto_context: Context, path_basename: & PathBuf)
                  -> Result<(), ()> {
 
@@ -288,7 +296,6 @@ impl UserAuthority {
         for (_, user) in self.users.iter() {
             if user.name == name {
                 return Err(());
-
             }
         }
 
@@ -301,10 +308,41 @@ impl UserAuthority {
                 name: String::from(name),
                 expiration: expiration,
                 password: hashed_password,
-            }
+           }
         );
 
         Ok(Id::User(id))
+    }
+
+    pub fn modify_user_expiration(
+        & mut self,
+        id: & Id,
+        expiration: Option<Timestamp>
+    ) -> Result<(), ()> {
+
+        if let & Id::Group(_) = id {
+            return Err(());
+        }
+
+        let ref mut user = self.users.get_mut(& id.id()).ok_or(()) ? ;
+        user.expiration = expiration;
+        Ok(())
+    }
+
+    pub fn modify_user_password(
+        & mut self,
+        id: & Id,
+        password: & str
+    ) -> Result<(), ()> {
+
+        if let & Id::Group(_) = id {
+            return Err(());
+        }
+
+        let hashed_password = self.hash(password);
+        let ref mut user = self.users.get_mut(& id.id()).ok_or(()) ? ;
+        user.password = hashed_password;
+        Ok(())
     }
 
     pub fn is_authorized(

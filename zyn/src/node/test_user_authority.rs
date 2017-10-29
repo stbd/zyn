@@ -78,6 +78,29 @@ fn test_validating_user_with_incorrect_password() {
 }
 
 #[test]
+fn test_modify_user_expiration() {
+    let mut state = State::new();
+    state.auth.add_user(& State::username(), & State::password(),  Some(State::datetime_plus(-1))).unwrap();
+    assert!(state.auth.validate_user(& State::username(), & State::password(), State::datetime_plus(0)).is_err());
+    let user_id = state.auth.resolve_user_id(& State::username()).unwrap();
+    assert!(state.auth.modify_user_expiration(& user_id, Some(State::datetime_plus(5))).is_ok());
+    assert!(state.auth.validate_user(& State::username(), & State::password(), State::datetime_plus(0)).is_ok());
+}
+
+#[test]
+fn test_modify_user_password() {
+    let new_password = String::from("qwerty");
+    let mut state = State::new();
+    state.auth.add_user(& State::username(), & State::password(), None).unwrap();
+    assert!(state.auth.validate_user(& State::username(), & State::password(), State::datetime_plus(0)).is_ok());
+    assert!(state.auth.validate_user(& State::username(), & new_password, State::datetime_plus(0)).is_err());
+    let user_id = state.auth.resolve_user_id(& State::username()).unwrap();
+    assert!(state.auth.modify_user_password(& user_id, & new_password).is_ok());
+    assert!(state.auth.validate_user(& State::username(), & State::password(), State::datetime_plus(0)).is_err());
+    assert!(state.auth.validate_user(& State::username(), & new_password, State::datetime_plus(0)).is_ok());
+}
+
+#[test]
 fn test_user_is_member_of_group() {
     let mut state = State::new();
     let group_id = state.auth.add_group(& State::groupname(), None).unwrap();
