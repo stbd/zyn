@@ -38,12 +38,20 @@ impl State {
         String::from("username")
     }
 
+    pub fn username_2() -> String {
+        String::from("username-2")
+    }
+
     pub fn password() -> String {
         String::from("password")
     }
 
     pub fn groupname() -> String {
         String::from("group name")
+    }
+
+    pub fn groupname_2() -> String {
+        String::from("group name 2")
     }
 }
 
@@ -107,6 +115,33 @@ fn test_user_is_member_of_group() {
     let user_id = state.auth.add_user(& State::username(), & State::password(), None).unwrap();
     assert!(state.auth.modify_group_add_user(& group_id, & user_id, State::datetime_plus(1)).is_ok());
     assert!(state.auth.is_authorized(& group_id, & user_id, State::datetime_plus(1)).is_ok());
+}
+
+#[test]
+fn test_modify_group() {
+    let mut state = State::new();
+    let user_id = state.auth.add_user(& State::username(), & State::password(),  Some(State::datetime_plus(-1))).unwrap();
+    let group_id = state.auth.add_group(& State::groupname(), Some(State::datetime_plus(-5))).unwrap();
+    assert!(state.auth.modify_group_add_user(& group_id, & user_id, State::datetime_plus(1)).is_ok());
+    assert!(state.auth.is_authorized(& group_id, & user_id, State::datetime_plus(0)).is_err());
+    assert!(state.auth.modify_group_expiration(& group_id, Some(State::datetime_plus(5))).is_ok());
+    assert!(state.auth.is_authorized(& group_id, & user_id, State::datetime_plus(0)).is_ok());
+}
+
+#[test]
+fn test_resolve_user() {
+    let mut state = State::new();
+    let user_id_1 = state.auth.add_user(& State::username(), & State::password(),  Some(State::datetime_plus(-1))).unwrap();
+    state.auth.add_user(& State::username_2(), & State::password(),  Some(State::datetime_plus(-1))).unwrap();
+    assert!(user_id_1 == state.auth.resolve_user_id(& State::username()).unwrap());
+}
+
+#[test]
+fn test_resolve_group() {
+    let mut state = State::new();
+    let group_id_1 = state.auth.add_group(& State::groupname(), Some(State::datetime_plus(-5))).unwrap();
+    state.auth.add_group(& State::groupname_2(), Some(State::datetime_plus(-5))).unwrap();
+    assert!(group_id_1 == state.auth.resolve_group_id(& State::groupname()).unwrap());
 }
 
 #[test]

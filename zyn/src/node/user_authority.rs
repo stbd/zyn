@@ -82,7 +82,7 @@ impl UserAuthority {
         }
     }
 
-    pub fn resolve_name(& self, id: & Id) -> Result<String, ()> {
+    pub fn resolve_name(& self, id: & Id) -> Result<String, ()> { // todo: Rename resolve_username
         match *id {
             Id::User(user_id) => {
                 self.users.get(& user_id)
@@ -102,6 +102,14 @@ impl UserAuthority {
             .iter()
             .find(| & (_, user) | user.name == name)
             .map(| (& id, _) | Id::User(id))
+            .ok_or(())
+    }
+
+    pub fn resolve_group_id(& self, name: & str) -> Result<Id, ()> {
+        self.groups
+            .iter()
+            .find(| & (_, group) | group.name == name)
+            .map(| (& id, _) | Id::Group(id))
             .ok_or(())
     }
 
@@ -214,11 +222,30 @@ impl UserAuthority {
         Ok(Id::Group(id))
     }
 
+    pub fn modify_group_expiration(
+        & mut self,
+        group_id: & Id,
+        expiration: Option<Timestamp>,
+    ) -> Result<(), ()> {
+
+        if let & Id::User(_) = group_id {
+            return Err(());
+        }
+
+        let ref mut group = self.groups.get_mut(& group_id.id())
+            .ok_or(())
+            ? ;
+
+        group.expiration = expiration;
+
+        Ok(())
+    }
+
     pub fn modify_group_remove_user(
         & mut self,
         group_id: & Id,
         user_id: & Id,
-        current_time: Timestamp
+        _current_time: Timestamp
     ) -> Result<(), ()> {
 
         if let & Id::User(_) = group_id {
@@ -231,12 +258,6 @@ impl UserAuthority {
         let ref mut group = self.groups.get_mut(& group_id.id())
             .ok_or(())
             ? ;
-
-        if let Some(ref expiration) = group.expiration {
-            if *expiration < current_time {
-                return Err(());
-            }
-        }
 
         if group.members.remove(user_id) {
             return Ok(());
@@ -248,7 +269,7 @@ impl UserAuthority {
         & mut self,
         group_id: & Id,
         user_id: & Id,
-        current_time: Timestamp
+        _current_time: Timestamp
     ) -> Result<(), ()> {
 
         if let & Id::User(_) = group_id {
@@ -261,12 +282,6 @@ impl UserAuthority {
         let ref mut group = self.groups.get_mut(& group_id.id())
             .ok_or(())
             ? ;
-
-        if let Some(ref expiration) = group.expiration {
-            if *expiration < current_time {
-                return Err(());
-            }
-        }
 
         if group.members.insert((*user_id).clone()) {
             return Ok(());
