@@ -281,3 +281,26 @@ class TestBasic(zyn_util.tests.common.TestZyn):
         rsp, data = self._connection.read_file(node_id_2, 0, 100)
         self._validate_response(rsp)
         self.assertEqual(data, data_2)
+
+    def test_create_modify_user(self):
+        username = 'user-1'
+        self._start_and_connect_to_node_and_handle_auth()
+        rsp = self._connection.create_user(username)
+        self._validate_response(rsp)
+        rsp = self._connection.modify_user(
+            username,
+            expiration=self.utc_timestamp() + zyn_util.tests.common.DAY_SECONDS,
+            password='password'
+        )
+        self._validate_response(rsp)
+
+    def test_create_modify_group(self):
+        group_name = 'group-1'
+        self._start_and_connect_to_node_and_handle_auth()
+        rsp = self._connection.create_group(group_name)
+        self._validate_response(rsp)
+        rsp = self._connection.modify_group(
+            group_name,
+            expiration=self.utc_timestamp() + zyn_util.tests.common.DAY_SECONDS,
+        )
+        self._validate_response(rsp)

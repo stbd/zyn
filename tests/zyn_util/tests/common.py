@@ -1,3 +1,4 @@
+import datetime
 import glob
 import logging
 import os
@@ -15,6 +16,9 @@ PATH_BIN = PATH_FILE + '/../../../zyn/target/debug/zyn'
 PATH_CERT = os.path.expanduser("~/.zyn-certificates/cert.pem")
 PATH_KEY = os.path.expanduser("~/.zyn-certificates/key.pem")
 PATH_GPG_FINGERPRINT = os.path.expanduser("~/.zyn-test-user-gpg-fingerprint")
+
+HOUR_SECONDS = 60 * 60
+DAY_SECONDS = HOUR_SECONDS * 24
 
 
 class TestZyn(unittest.TestCase):
@@ -89,3 +93,6 @@ class TestZyn(unittest.TestCase):
 
         for f in files:
             assert os.path.basename(f) in expected_files
+
+    def utc_timestamp(self):
+        return int(datetime.datetime.utcnow().timestamp())

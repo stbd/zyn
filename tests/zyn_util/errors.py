@@ -9,6 +9,8 @@ UnauthorizedOperation = 102
 InternalCommunicationError = 103
 InternalError = 104
 UnknownFile = 105
+UnknownAuthority = 106
+AuthorityError = 107
 InvalidNodeId = 200
 FolderIsNotEmpty = 201
 InvalidPathSize = 202
@@ -48,6 +50,10 @@ def error_to_string(error):
         return "InternalError"
     elif error == 105:
         return "UnknownFile"
+    elif error == 106:
+        return "UnknownAuthority"
+    elif error == 107:
+        return "AuthorityError"
     elif error == 200:
         return "InvalidNodeId"
     elif error == 201:

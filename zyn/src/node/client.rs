@@ -1,6 +1,7 @@
+use std::collections::{ HashMap };
+use std::fmt::{ Display, Formatter, Result as FmtResult };
 use std::path::{ PathBuf };
 use std::result::{ Result };
-use std::fmt::{ Display, Formatter, Result as FmtResult };
 use std::sync::mpsc::{ Receiver, Sender, TryRecvError };
 use std::thread::{ sleep };
 use std::time::{ Duration };
@@ -56,8 +57,11 @@ BL:[Uint: offset][Uint: size];
 Key-value-pair-of-TYPE:
 KVP:[String: key][TYPE: value];
 
+List-element-of-TYPE
+LE:[TYPE: element];
+
 List-of-TYPE:
-L:[uint: list length] LE:[TYPE];..;
+L:[uint: list length][List-element-of-TYPE]...;
 
 End: End of message
 E:;
@@ -107,6 +111,9 @@ fn map_node_error_to_uint(error: ErrorResponse) -> u32 {
                 NodeError::InternalCommunicationError => 103,
                 NodeError::InternalError => 104,
                 NodeError::UnknownFile => 105,
+                NodeError::UnknownAuthority => 106,
+                NodeError::AuthorityError => 107,
+
             }
         },
         ErrorResponse::FilesystemError { error } => {
@@ -140,6 +147,8 @@ const READ_WRITE: u64 = 1;
 const FILE: u64 = 0;
 const FOLDER: u64 = 1;
 const RANDOM_ACCESS_FILE: u64 = 0;
+const TYPE_USER: u64 = 0;
+const TYPE_GROUP: u64 = 1;
 
 /*
 ## Messages:
@@ -232,22 +241,22 @@ Delete:
 -> [Version]RSP:[Transaction Id][Uint: error code];[End]
  */
 
-// todo
-
 /*
 Configure: Add user/group:
-<- [Version]C:AUG:[Transaction Id][Uint: type][String: name];[End]
+<- [Version]C:ADD-USER-GROUP:[Transaction Id][Uint: type][String: name];[End]
  * type: 0: user, 1: group
 -> [Version]RSP:[Transaction Id][Uint: error code];[End]
 */
 
 /*
 Configure: Modify user/group:
-<- [Version]C:MUG:[Transaction Id][uint: type][String: name][Key-value-list];[End]
+<- [Version]C:MOD-USER-GROUP:[Transaction Id][uint: type][String: name][Key-value-list];[End]
  * type: 0: user, 1: group
 -> [Version]RSP:[Transaction Id][Uint: error code];[End]
 */
 
+
+// todo
 /*
 Query: User/group:
 <- [Version]Q:UG:[Transaction Id][Uint: type][String: name];[End]
@@ -328,6 +337,13 @@ macro_rules! try_send {
         }
     }}
 }
+
+enum Value {
+    Unsigned { set: bool, value: u64 },
+    String { set: bool, value: String },
+}
+
+type KeyValueMap = HashMap<String, Value>;
 
 enum Status {
     Ok,
@@ -621,6 +637,12 @@ impl Client {
                     let _ = self.handle_query_list_req();
                 } else if self.expect("Q-FILESYSTEM:").is_ok() {
                     let _ = self.handle_query_fs_req();
+
+                } else if self.expect("ADD-USER-GROUP:").is_ok() {
+                    let _ = self.handle_add_user_group();
+
+                } else if self.expect("MOD-USER-GROUP:").is_ok() {
+                    let _ = self.handle_mod_user_group();
                 } else {
                     warn!("Unhandled message, client={}", self);
                 }
@@ -1430,7 +1452,7 @@ impl Client {
 
     fn handle_query_fs_req(& mut self) -> Result<(), ()> {
         let transaction_id = try_parse!(self.parse_transaction_id(), self, 0);
-        let fd = try_parse!(self.parse_file_descriptor(), self, 0);
+        let fd = try_parse!(self.parse_file_descriptor(), self, 0); //  todo: user transaction id, check other usages as well
         try_parse!(self.expect(";"), self, 0);
         try_parse!(self.parse_end_of_message(), self, transaction_id);
 
@@ -1497,6 +1519,212 @@ impl Client {
                     other => {
                         (Some(other), None)
                     }
+                }
+            })
+            ? ;
+
+        Ok(())
+    }
+
+    fn handle_add_user_group(& mut self) -> Result<(), ()> {
+        let transaction_id = try_parse!(self.parse_transaction_id(), self, 0);
+        let type_of = try_parse!(self.parse_unsigned(), self, transaction_id);
+        let name = try_parse!(self.parse_string(), self, transaction_id);
+        try_parse!(self.expect(";"), self, transaction_id);
+        try_parse!(self.parse_end_of_message(), self, transaction_id);
+
+        trace!("Create user/group, user={}, name={}, type_of={}", self, name, type_of);
+
+        let user = self.user.as_ref().unwrap().clone();
+        let msg = match type_of {
+            TYPE_USER => NodeProtocol::AddUserRequest {
+                user: user,
+                name: name,
+            },
+            TYPE_GROUP => NodeProtocol::AddGroupRequest {
+                user: user,
+                name: name,
+            },
+            _ => {
+                try_send_rsp!(
+                    self,
+                    transaction_id,
+                    CommonErrorCodes::ErrorMalformedMessage as u32,
+                    EMPTY
+                );
+                return Err(());
+            },
+        };
+
+        self.send_to_node(transaction_id, msg) ? ;
+
+        node_receive::<()>(
+            self,
+            & | msg, client | {
+                match msg {
+                    ClientProtocol::AddUserGroupResponse {
+                        result: Ok(()),
+                    } => {
+                        try_send_rsp!(
+                            client,
+                            transaction_id,
+                            CommonErrorCodes::NoError as u32,
+                            EMPTY
+                        );
+
+                        (None, Some(Ok(())))
+                    },
+                    ClientProtocol::AddUserGroupResponse {
+                        result: Err(error),
+                    } => {
+                        try_send_rsp!(
+                            client,
+                            transaction_id,
+                            map_node_error_to_uint(error),
+                            EMPTY
+                        );
+                        (None, Some(Err(())))
+                    },
+                    other => {
+                        (Some(other), None)
+                    },
+                }
+            })
+            ? ;
+
+        Ok(())
+    }
+
+    fn handle_mod_user_group(& mut self) -> Result<(), ()> {
+
+        let transaction_id = try_parse!(self.parse_transaction_id(), self, 0);
+        let type_of = try_parse!(self.parse_unsigned(), self, transaction_id);
+        let name = try_parse!(self.parse_string(), self, transaction_id);
+
+        let user = self.user.as_ref().unwrap().clone();
+        let msg = match type_of {
+            TYPE_USER => {
+                let mut key_value_map = KeyValueMap::new();
+                key_value_map.insert(String::from("password"), Value::String { set: false, value: String::with_capacity(50) });
+                key_value_map.insert(String::from("expiration"), Value::Unsigned { set: false, value: 0 });
+                try_parse!(self.parse_key_value_list(& mut key_value_map), self, transaction_id);
+                try_parse!(self.expect(";"), self, transaction_id);
+                try_parse!(self.parse_end_of_message(), self, transaction_id);
+
+                trace!("Modify user, user={}, name={}", self, name);
+
+                let password: Option<String> = {
+                    match key_value_map.get("password").unwrap() {
+                        & Value::String { ref set, ref value } => {
+                            if *set {
+                                Some(value.clone())
+                            } else {
+                                None
+                            }
+                        },
+                        _ => unreachable!(),
+                    }
+                };
+
+                let expiration: Option<Option<i64>> = {
+                    match key_value_map.get("expiration").unwrap() {
+                        & Value::Unsigned { ref set, ref value } => {
+                            if *set {
+                                if *value != 0 {
+                                    Some(Some(value.clone() as i64))
+                                } else {
+                                    Some(None)
+                                }
+                            } else {
+                                None
+                            }
+                        },
+                        _ => unreachable!(),
+                    }
+                };
+
+                NodeProtocol::ModifyUser {
+                    user: user,
+                    name: name,
+                    password: password,
+                    expiration: expiration,
+                }
+            },
+            TYPE_GROUP => {
+                let mut key_value_map = KeyValueMap::new();
+                key_value_map.insert(String::from("expiration"), Value::Unsigned { set: false, value: 0 });
+                try_parse!(self.parse_key_value_list(& mut key_value_map), self, transaction_id);
+                try_parse!(self.expect(";"), self, transaction_id);
+                try_parse!(self.parse_end_of_message(), self, transaction_id);
+
+                trace!("Modify group, user={}, name={}", self, name);
+
+                let expiration: Option<Option<i64>> = {
+                    match key_value_map.get("expiration").unwrap() {
+                        & Value::Unsigned { ref set, ref value } => {
+                            if *set {
+                                if *value != 0 {
+                                    Some(Some(value.clone() as i64))
+                                } else {
+                                    Some(None)
+                                }
+                            } else {
+                                None
+                            }
+                        },
+                        _ => unreachable!(),
+                    }
+                };
+
+                NodeProtocol::ModifyGroup {
+                    user: user,
+                    name: name,
+                    expiration: expiration,
+                }
+            },
+            _ => {
+                try_send_rsp!(
+                    self,
+                    transaction_id,
+                    CommonErrorCodes::ErrorMalformedMessage as u32,
+                    EMPTY
+                );
+                return Err(());
+            },
+        };
+
+        self.send_to_node(transaction_id, msg) ? ;
+
+        node_receive::<()>(
+            self,
+            & | msg, client | {
+                match msg {
+                    ClientProtocol::AddUserGroupResponse {
+                        result: Ok(()),
+                    } => {
+                        try_send_rsp!(
+                            client,
+                            transaction_id,
+                            CommonErrorCodes::NoError as u32,
+                            EMPTY
+                        );
+
+                        (None, Some(Ok(())))
+                    },
+                    ClientProtocol::AddUserGroupResponse {
+                        result: Err(error),
+                    } => {
+                        try_send_rsp!(
+                            client,
+                            transaction_id,
+                            map_node_error_to_uint(error),
+                            EMPTY
+                        );
+                        (None, Some(Err(())))
+                    },
+                    other => {
+                        (Some(other), None)
+                    },
                 }
             })
             ? ;
@@ -1709,6 +1937,39 @@ impl Client {
                 Err(())
             }
         }
+    }
+
+    fn parse_key_value_list(& mut self, key_value_map: & mut KeyValueMap) -> Result<(), ()> {
+
+        self.expect("L:") ? ;
+        let size = self.parse_unsigned() ? ;
+
+        for _ in 0..size {
+            self.expect("LE:") ? ;
+            self.expect("KVP:") ? ;
+
+            let key = self.parse_string() ? ;
+            let mut value = key_value_map.get_mut(& key)
+                .ok_or(())
+                ? ;
+
+            match value {
+                & mut Value::Unsigned { ref mut set, ref mut value } => {
+                    *value = self.parse_unsigned() ? ;
+                    *set = true;
+                },
+                & mut Value::String { ref mut set, ref mut value } => {
+                    *value = self.parse_string() ? ;
+                    *set = true;
+                },
+            }
+
+            self.expect(";") ? ;
+            self.expect(";") ? ;
+        }
+
+        self.expect(";") ? ;
+        Ok(())
     }
 }
 

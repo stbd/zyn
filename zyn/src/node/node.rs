@@ -49,6 +49,8 @@ fn start_signal_listener() -> Result<Receiver<()>, ()> {
 pub enum NodeError {
     InvalidUsernamePassword,
     ParentIsNotFolder,
+    UnknownAuthority,
+    AuthorityError,
     UnauthorizedOperation,
     InternalCommunicationError,
     InternalError,
@@ -109,6 +111,8 @@ pub enum ClientProtocol {
     QueryListResponse { result: Result<Vec<(String, NodeId, FilesystemElement)>, ErrorResponse> },
     QueryFilesystemResponse { result: Result<FilesystemElementDescription, ErrorResponse> },
     DeleteResponse { result: Result<(), ErrorResponse> },
+    AddUserGroupResponse { result: Result<(), ErrorResponse> },
+    ModifyUserGroupResponse { result: Result<(), ErrorResponse> },
     Quit,
 }
 
@@ -121,6 +125,10 @@ pub enum NodeProtocol {
     QueryListRequest { user: Id, fd: FileDescriptor, },
     QueryFilesystemRequest { user: Id, fd: FileDescriptor, },
     DeleteRequest { user: Id, fd: FileDescriptor },
+    AddUserRequest { user: Id, name: String },
+    ModifyUser { user: Id, name: String, password: Option<String>, expiration: Option<Option<Timestamp>> },
+    AddGroupRequest { user: Id, name: String },
+    ModifyGroup { user: Id, name: String, expiration: Option<Option<Timestamp>> },
     Quit,
 }
 
@@ -422,7 +430,7 @@ impl Node {
                                 fd,
                             } => {
 
-                                trace!("delete, user={}, fd={}", user, fd);
+                                trace!("Delete, user={}, fd={}", user, fd);
 
                                 let result = Node::handle_delete_request(
                                     & mut node_id_buffer,
@@ -435,6 +443,90 @@ impl Node {
 
                                 send_failed = client.transmit.send(
                                     ClientProtocol::DeleteResponse {
+                                        result: result,
+                                    },
+                                ).is_err();
+                            },
+
+                            NodeProtocol::AddUserRequest {
+                                user,
+                                name,
+                            } => {
+                                trace!("Create user, user={}, name={}", user, name);
+
+                                let result = Node::handle_create_user(
+                                    & mut self.auth,
+                                    user,
+                                    name,
+                                );
+
+                                send_failed = client.transmit.send(
+                                    ClientProtocol::AddUserGroupResponse {
+                                        result: result,
+                                    },
+                                ).is_err();
+                            },
+
+                            NodeProtocol::ModifyUser {
+                                user,
+                                name,
+                                password,
+                                expiration,
+                            } => {
+
+                                trace!("Modify user, user={}, name={}", user, name);
+
+                                let result = Node::handle_modify_user(
+                                    & mut self.auth,
+                                    user,
+                                    name,
+                                    password,
+                                    expiration,
+                                );
+
+                                send_failed = client.transmit.send(
+                                    ClientProtocol::AddUserGroupResponse {
+                                        result: result,
+                                    },
+                                ).is_err();
+                            },
+
+                            NodeProtocol::AddGroupRequest {
+                                user,
+                                name
+                            } => {
+                                trace!("Create group, user={}, name={}", user, name);
+
+                                let result = Node::handle_create_group(
+                                    & mut self.auth,
+                                    user,
+                                    name,
+                                );
+
+                                send_failed = client.transmit.send(
+                                    ClientProtocol::AddUserGroupResponse {
+                                        result: result,
+                                    },
+                                ).is_err();
+                            },
+
+                            NodeProtocol::ModifyGroup {
+                                user,
+                                name,
+                                expiration,
+                            } => {
+
+                                trace!("Modify group, user={}, name={}", user, name);
+
+                                let result = Node::handle_modify_group(
+                                    & mut self.auth,
+                                    user,
+                                    name,
+                                    expiration,
+                                );
+
+                                send_failed = client.transmit.send(
+                                    ClientProtocol::AddUserGroupResponse {
                                         result: result,
                                     },
                                 ).is_err();
@@ -810,6 +902,111 @@ impl Node {
         fs.delete(& parent_node_id, index, node_id)
             .map_err(fs_error_to_rsp)
             ? ;
+
+        Ok(())
+    }
+
+    fn handle_create_user(
+        auth: & mut UserAuthority,
+        user: Id,
+        name: String,
+    ) -> Result<(), ErrorResponse> {
+
+        let current_time = utc_timestamp();
+        let default_password = "";
+
+        auth.is_authorized(& ADMIN_GROUP, & user, current_time)
+            .map_err(| () | node_error_to_rsp(NodeError::UnauthorizedOperation))
+            ? ;
+
+        auth.add_user(
+            & name,
+            default_password,
+            Some(current_time - 1)
+        )
+            .map_err(| () | node_error_to_rsp(NodeError::AuthorityError))
+            ? ;
+
+        Ok(())
+    }
+
+    fn handle_modify_user(
+        auth: & mut UserAuthority,
+        user: Id,
+        name: String,
+        password: Option<String>,
+        expiration: Option<Option<Timestamp>>,
+    ) -> Result<(), ErrorResponse> {
+
+        let current_time = utc_timestamp();
+
+        let target_user = auth.resolve_user_id(& name)
+            .map_err(| () | node_error_to_rsp(NodeError::UnknownAuthority))
+            ? ;
+
+        if user != target_user && auth.is_authorized(& ADMIN_GROUP, & user, current_time).is_err() {
+            return Err(node_error_to_rsp(NodeError::UnauthorizedOperation));
+        }
+
+        if let Some(pw) = password {
+            auth.modify_user_password(& target_user, & pw)
+                .map_err(| () | node_error_to_rsp(NodeError::AuthorityError))
+                ? ;
+        }
+
+        if let Some(ex) = expiration {
+            auth.modify_user_expiration(& target_user, ex)
+                .map_err(| () | node_error_to_rsp(NodeError::AuthorityError))
+                ? ;
+        }
+
+        Ok(())
+    }
+
+    fn handle_create_group(
+        auth: & mut UserAuthority,
+        user: Id,
+        name: String,
+    ) -> Result<(), ErrorResponse> {
+
+        let current_time = utc_timestamp();
+
+        auth.is_authorized(& ADMIN_GROUP, & user, current_time)
+            .map_err(| () | node_error_to_rsp(NodeError::UnauthorizedOperation))
+            ? ;
+
+        auth.add_group(
+            & name,
+            Some(current_time - 1)
+        )
+            .map_err(| () | node_error_to_rsp(NodeError::AuthorityError))
+            ? ;
+
+        Ok(())
+    }
+
+    fn handle_modify_group(
+        auth: & mut UserAuthority,
+        user: Id,
+        name: String,
+        expiration: Option<Option<Timestamp>>,
+    ) -> Result<(), ErrorResponse> {
+
+        let current_time = utc_timestamp();
+
+        let target_group = auth.resolve_group_id(& name)
+            .map_err(| () | node_error_to_rsp(NodeError::UnknownAuthority))
+            ? ;
+
+        auth.is_authorized(& ADMIN_GROUP, & user, current_time)
+            .map_err(| () | node_error_to_rsp(NodeError::UnauthorizedOperation))
+            ? ;
+
+        if let Some(ex) = expiration {
+            auth.modify_group_expiration(& target_group, ex)
+                .map_err(| () | node_error_to_rsp(NodeError::AuthorityError))
+                ? ;
+        }
 
         Ok(())
     }

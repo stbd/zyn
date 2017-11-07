@@ -7,6 +7,8 @@ import time
 FILE_TYPE_FILE = 0  # todo: Rename FILESYSTEM_ELEMENT_FILE
 FILE_TYPE_FOLDER = 1
 FILE_TYPE_RANDOM_ACCESS = 0
+TYPE_USER = 0
+TYPE_GROUP = 1
 
 
 class ZynConnection:
@@ -250,6 +252,75 @@ class ZynConnection:
         rsp = self.read_response()
         return rsp
 
+    def create_user_group(self, name, type_user_or_group, transaction_id=None):
+        req = \
+            self.field_version() \
+            + 'ADD-USER-GROUP:' \
+            + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
+            + self.field_unsigned(type_user_or_group) \
+            + self.field_string(name) \
+            + ';' \
+            + self.field_end_of_message() \
+
+        self.write(req)
+        rsp = self.read_response()
+        return rsp
+
+    def create_user(self, username, transaction_id=None):
+        return self.create_user_group(username, TYPE_USER, transaction_id)
+
+    def create_group(self, group_name, transaction_id=None):
+        return self.create_user_group(group_name, TYPE_GROUP, transaction_id)
+
+    def modify_user_group(self, name, type_user_or_group, key_values, transaction_id=None):
+        if not key_values:
+            raise ValueError('No values modified')
+
+        req = \
+            self.field_version() \
+            + 'MOD-USER-GROUP:' \
+            + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
+            + self.field_unsigned(type_user_or_group) \
+            + self.field_string(name) \
+            + self.field_list(key_values) \
+            + ';' \
+            + self.field_end_of_message() \
+
+        self.write(req)
+        rsp = self.read_response()
+        return rsp
+
+    def modify_user(self, username, password=None, expiration=None, transaction_id=None):
+
+        key_values = []
+        if password is not None:
+            key_values.append(
+                self.field_key_value_pair('password', self.field_string(password))
+            )
+
+        if expiration is not None:
+            key_values.append(
+                self.field_key_value_pair('expiration', self.field_unsigned(expiration))
+            )
+
+        if not key_values:
+            raise ValueError('No values modified')
+
+        return self.modify_user_group(username, TYPE_USER, key_values, transaction_id)
+
+    def modify_group(self, group_name, expiration=None, transaction_id=None):
+
+        key_values = []
+        if expiration is not None:
+            key_values.append(
+                self.field_key_value_pair('expiration', self.field_unsigned(expiration))
+            )
+
+        if not key_values:
+            raise ValueError('No values modified')
+
+        return self.modify_user_group(group_name, TYPE_GROUP, key_values, transaction_id)
+
     def write(self, data):
         if self._debug_messages:
             self._log.debug('Write: {}'.format(data))
@@ -347,6 +418,24 @@ class ZynConnection:
         return 'S:{}B:{};;'.format(
             ZynConnection.field_unsigned(len(content)),
             content,
+        )
+
+    @staticmethod
+    def field_key_value_pair(key, value_str):
+        return 'KVP:{}{};'.format(
+            ZynConnection.field_string(key),
+            value_str
+        )
+
+    @staticmethod
+    def field_list(content):
+        elements = ''
+        for c in content:
+            elements += 'LE:{};'.format(c)
+
+        return 'L:{}{};'.format(
+            ZynConnection.field_unsigned(len(content)),
+            elements
         )
 
     @staticmethod
