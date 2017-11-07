@@ -243,20 +243,27 @@ Delete:
 
 /*
 Configure: Add user/group:
-<- [Version]C:ADD-USER-GROUP:[Transaction Id][Uint: type][String: name];[End]
+<- [Version]ADD-USER-GROUP:[Transaction Id][Uint: type][String: name];[End]
  * type: 0: user, 1: group
 -> [Version]RSP:[Transaction Id][Uint: error code];[End]
 */
 
 /*
 Configure: Modify user/group:
-<- [Version]C:MOD-USER-GROUP:[Transaction Id][uint: type][String: name][Key-value-list];[End]
+<- [Version]MOD-USER-GROUP:[Transaction Id][uint: type][String: name][Key-value-list];[End]
  * type: 0: user, 1: group
 -> [Version]RSP:[Transaction Id][Uint: error code];[End]
 */
 
-
 // todo
+
+/*
+Configure: Remove user/group:
+<- [Version]REMOVE-USER-GROUP:[Transaction Id][Uint: type][String: name];[End]
+ * type: 0: user, 1: group
+-> [Version]RSP:[Transaction Id][Uint: error code];[End]
+*/
+
 /*
 Query: User/group:
 <- [Version]Q:UG:[Transaction Id][Uint: type][String: name];[End]
@@ -265,21 +272,8 @@ Query: User/group:
 */
 
 /*
-Configure: Remove user/group:
-<- [Version]C:DUG:[Transaction Id][Uint: type][String: name];[End]
- * type: 0: user, 1:group
--> [Version]RSP:[Transaction Id][Uint: error code];[End]
-*/
-
-/*
-Query: file/folder properties:
-<- [Version]Q:F:[Transaction Id][FileDescriptor];[End]
--> [Version]RSP:[Transaction Id][Uint: error code](Key-value-list: properties);[End]
-*/
-
-/*
-Configure: Set file/folder properties:
-<- [Version]C:F:[Transaction Id][FileDescriptor][Key-value-list];[End]
+Configure: Set file/folder rights:
+<- [Version]F:[Transaction Id][FileDescriptor][Key-value-list];[End]
 -> [Version]RSP:[Transaction Id][Uint: error code];[End]
 */
 
