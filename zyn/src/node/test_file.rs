@@ -4,7 +4,7 @@ use std::vec::{ Vec };
 extern crate tempdir;
 use self::tempdir::{ TempDir };
 
-use node::file::{ FileHandle, FileAccess, Metadata };
+use node::file::{ FileHandle, FileAccess, Metadata, LockDescription };
 use node::common::{ Buffer, FileRevision, NodeId, FileType };
 use node::user_authority::{ Id };
 use node::test_util;
@@ -12,6 +12,7 @@ use node::test_util;
 struct State {
     _dir: TempDir,
     user: Id,
+    user_2: Id,
     parent: NodeId,
     path_file: PathBuf,
     file_handle: FileHandle,
@@ -40,6 +41,7 @@ impl State {
         let path_file = dir.path().to_path_buf().join("file");
 
         let user = Id::User(1);
+        let user_2 = Id::User(2);
         let parent: NodeId = 123;
         FileHandle::create(
             path_file.clone(),
@@ -53,6 +55,7 @@ impl State {
         State {
             _dir: dir,
             user: user,
+            user_2: user_2,
             parent: parent,
             path_file: path_file,
             file_handle: file_handle,
@@ -64,7 +67,17 @@ impl State {
     }
 
     fn open(& mut self) -> FileAccess {
-        let result = self.file_handle.open(& test_util::create_crypto(), self.user.clone());
+        let user = self.user.clone();
+        self.open_with_user(user)
+    }
+
+    fn open_user_2(& mut self) -> FileAccess {
+        let user = self.user_2.clone();
+        self.open_with_user(user)
+    }
+
+    fn open_with_user(& mut self, user: Id) -> FileAccess {
+        let result = self.file_handle.open(& test_util::create_crypto(), user);
         assert!(result.is_ok());
         result.unwrap()
     }
@@ -165,6 +178,26 @@ fn test_write_to_file_multiple_times() {
     assert!(revision_1 < revision_2);
     // Read revision matches latest write revision
     assert!(revision_2 == read_revision);
+}
+
+#[test]
+fn test_lock_for_blob_write_prevents_other_edits_but_allows_reads() {
+    let mut state = State::init();
+    let mut access_1 = state.open();
+    let mut access_2 = state.open_user_2();
+
+    let lock = LockDescription::LockedBySystemForBlobWrite{ user: state.user.clone() };
+    let buffer = vec![1, 2, 3];
+    let revision_1 = access_1.write(0, 0, buffer.clone()).unwrap();
+
+    access_1.lock(revision_1, & lock).unwrap();
+    let _ = read_and_validate(& mut access_2, 0, 10, & buffer, & revision_1);
+    assert!(access_2.write(revision_1, 0, vec![3, 4, 5]).is_err());
+    assert!(access_2.insert(revision_1, 0, vec![3, 4, 5]).is_err());
+    assert!(access_2.delete(revision_1, 0, 3).is_err());
+    let revision_2 = access_1.write(revision_1, 3, vec![3, 4, 5]).unwrap();
+    access_1.unlock(& lock).unwrap();
+    let _ = access_2.write(revision_2, 0, vec![6, 7, 8]).unwrap();
 }
 
 #[test]

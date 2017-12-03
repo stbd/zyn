@@ -321,6 +321,45 @@ impl FileAccess {
         })
     }
 
+    pub fn lock(& mut self, revision: FileRevision, lock: & LockDescription) -> Result<(), FileError> {
+
+        self.channel_send.send(Request::LockFile {
+            revision: revision,
+            description: lock.clone()
+        }).map_err(| _ | FileError::InternalCommunicationError) ? ;
+
+        file_receive::<()>(self, & | msg | {
+            match msg {
+                Response::LockFile {
+                    result: Ok(()),
+                } => (None, Some(Ok(()))),
+                Response::LockFile {
+                    result: Err(status),
+                } => (None, Some(Err(status))),
+                other => (Some(other), None),
+            }
+        })
+    }
+
+    pub fn unlock(& mut self, lock: & LockDescription) -> Result<(), FileError> {
+
+        self.channel_send.send(Request::UnlockFile {
+            description: lock.clone(),
+        }).map_err(| _ | FileError::InternalCommunicationError) ? ;
+
+        file_receive::<()>(self, & | msg | {
+            match msg {
+                Response::UnlockFile {
+                    result: Ok(()),
+                } => (None, Some(Ok(()))),
+                Response::UnlockFile {
+                    result: Err(status),
+                } => (None, Some(Err(status))),
+                other => (Some(other), None),
+            }
+        })
+    }
+
     pub fn metadata(& mut self) -> Result<Metadata, FileError> {
         self.channel_send.send(Request::RequestMetadata { })
             .map_err(| _ | FileError::InternalCommunicationError) ? ;
@@ -400,6 +439,17 @@ struct PartOfFile {
 pub struct FileEvent {
     pub user: Id,
     pub timestamp: Timestamp,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum LockDescription {
+    LockedBySystemForBlobWrite { user: Id },
+}
+
+impl LockDescription {
+    fn is_locked_by(& self, lock: & LockDescription) -> bool {
+        *self == *lock
+    }
 }
 
 #[derive(Clone)]
@@ -579,6 +629,8 @@ enum Request {
     Insert { revision: FileRevision, offset: u64, buffer: Buffer },
     Delete { revision: FileRevision, offset: u64, size: u64 },
     Read { offset: u64, size: u64 },
+    LockFile { revision: FileRevision, description: LockDescription },
+    UnlockFile { description: LockDescription },
 }
 
 enum Response {
@@ -588,6 +640,8 @@ enum Response {
     Insert { result: Result<FileRevision, FileError> },
     Delete { result: Result<FileRevision, FileError> },
     Read { result: Result<(Buffer, FileRevision), FileError> },
+    LockFile { result: Result<(), FileError> },
+    UnlockFile { result: Result<(), FileError> },
     Notification { notification: Notification },
 }
 
@@ -697,7 +751,7 @@ impl FileThread {
 
                         Request::Write { revision, offset, buffer } => {
                             let size = buffer.len() as u64;
-                            match self.file.write(revision, offset, buffer) {
+                            match self.file.write(& user.user, revision, offset, buffer) {
                                 Ok(revision) => {
                                     notifications.push(
                                         (true,
@@ -722,7 +776,7 @@ impl FileThread {
 
                         Request::Insert { revision, offset, buffer } => {
                             let size = buffer.len() as u64;
-                            match self.file.insert(revision, offset, buffer) {
+                            match self.file.insert(& user.user, revision, offset, buffer) {
                                 Ok(revision) => {
                                     notifications.push(
                                         (true,
@@ -746,7 +800,7 @@ impl FileThread {
                         },
 
                         Request::Delete { revision, offset, size } => {
-                            match self.file.delete(revision, offset, size) {
+                            match self.file.delete(& user.user, revision, offset, size) {
                                 Ok(revision) => {
                                     notifications.push(
                                         (true,
@@ -782,9 +836,39 @@ impl FileThread {
                                     }).is_ok();
                                 }
                             };
+                        },
 
+                        Request::LockFile { revision, description } => {
+                            match self.file.lock(revision, description) {
+                                Ok(()) => {
+                                    send_ok = send_response(& user, Response::LockFile {
+                                        result: Ok(()),
+                                    }).is_ok();
+                                },
+                                Err(status) => {
+                                    send_ok = send_response(& user, Response::LockFile {
+                                        result: Err(status),
+                                    }).is_ok();
+                                }
+                            };
+                        },
+
+                        Request::UnlockFile { description } => {
+                            match self.file.unlock(description) {
+                                Ok(()) => {
+                                    send_ok = send_response(& user, Response::UnlockFile {
+                                        result: Ok(()),
+                                    }).is_ok();
+                                },
+                                Err(status) => {
+                                    send_ok = send_response(& user, Response::UnlockFile {
+                                        result: Err(status),
+                                    }).is_ok();
+                                }
+                            };
                         },
                     }
+
                     if ! send_ok {
                         debug!("Removing client due send error, index={}", i);
                         remove_access = Some(i);
@@ -853,6 +937,7 @@ struct FileImpl {
     buffer: Buffer,
     current_part_of_file_index: u32,
     crypto_context: Context,
+    lock: Option<LockDescription>,
 }
 
 static DEFAULT_BUFFER_SIZE_BYTES: u64 = 1024 * 1;
@@ -878,7 +963,7 @@ impl FileImpl {
         user: Id,
         parent: NodeId,
         file_type: FileType,
-        max_part_of_file_size: usize
+        max_part_of_file_size: usize,
     ) -> Result<(), ()> {
 
         let mut file = FileImpl {
@@ -887,6 +972,7 @@ impl FileImpl {
             crypto_context: crypto_context,
             metadata: Metadata::new_file(user, parent, file_type, max_part_of_file_size),
             path_basename: path_basename.clone(),
+            lock: None,
         };
         file.store();
         Ok(())
@@ -901,6 +987,7 @@ impl FileImpl {
             crypto_context: crypto_context,
             metadata: metadata,
             path_basename: path_basename.clone(),
+            lock: None,
         };
 
         if file.metadata.part_of_file_descriptions.len() == 0 {
@@ -978,7 +1065,63 @@ impl FileImpl {
         desc.size = self.buffer.len() as u64;
     }
 
-    fn write(& mut self, revision: FileRevision, offset: u64, buffer: Buffer)
+    fn lock(& mut self, revision: FileRevision, desc: LockDescription) -> Result<(), FileError> {
+
+        if revision != self.metadata.revision {
+            return Err(FileError::RevisionTooOld);
+        }
+
+        if let Some(_) = self.lock {
+            return Err(FileError::RevisionTooOld); // todo: fix error
+        }
+
+        self.lock = Some(desc);
+
+        Ok(())
+    }
+
+    fn unlock(& mut self, desc: LockDescription) -> Result<(), FileError> {
+
+        if self.lock.is_none() {
+            return Err(FileError::RevisionTooOld); // todo: fix error
+        }
+
+        let mut release_lock = false;
+        if let Some(ref lock) = self.lock {
+            if lock.is_locked_by(& desc) {
+                release_lock = true;
+            } else {
+                return Err(FileError::RevisionTooOld); // todo: fix error
+            }
+        }
+
+        if release_lock {
+            self.lock = None;
+        }
+
+        Ok(())
+    }
+
+    fn is_edit_allowed(& self, user: & Option<Id>) -> Result<(), FileError> {
+
+        if user.is_none() {
+            return Err(FileError::RevisionTooOld); // todo: replace error
+        }
+
+        let user_id = user.as_ref().unwrap();
+
+        match self.lock {
+            None => Ok(()),
+            Some(LockDescription::LockedBySystemForBlobWrite { ref user }) => {
+                if user_id != user {
+                    return Err(FileError::RevisionTooOld); // todo: replace error
+                }
+                Ok(())
+            },
+        }
+    }
+
+    fn write(& mut self, user: & Option<Id>, revision: FileRevision, offset: u64, buffer: Buffer)
              -> Result<FileRevision, FileError> {
 
         if ! self.metadata.is_in_part(self.current_part_of_file_index, offset, buffer.len() as u64) {
@@ -995,6 +1138,8 @@ impl FileImpl {
             return Err(FileError::RevisionTooOld);
         }
 
+        self.is_edit_allowed(user) ? ;
+
         let min_buffer_size = offset as usize + buffer.len();
         if self.buffer.len() < min_buffer_size {
             self.buffer.resize(min_buffer_size, 0);
@@ -1010,7 +1155,7 @@ impl FileImpl {
         Ok(self.metadata.revision)
     }
 
-    fn insert(& mut self, revision: FileRevision, offset: u64, buffer: Buffer)
+    fn insert(& mut self, user: & Option<Id>, revision: FileRevision, offset: u64, buffer: Buffer)
               -> Result<FileRevision, FileError> {
 
         if ! self.metadata.is_in_part(self.current_part_of_file_index, offset, buffer.len() as u64) {
@@ -1026,6 +1171,8 @@ impl FileImpl {
         if revision != self.metadata.revision {
             return Err(FileError::RevisionTooOld);
         }
+
+        self.is_edit_allowed(user) ? ;
 
         let min_buffer_size = self.buffer.len() + buffer.len();
         if self.buffer.len() < min_buffer_size {
@@ -1072,7 +1219,7 @@ impl FileImpl {
         Ok((buffer, self.metadata.revision))
     }
 
-    fn delete(& mut self, revision: FileRevision, offset: u64, size: u64)
+    fn delete(& mut self, user: & Option<Id>, revision: FileRevision, offset: u64, size: u64)
               -> Result<FileRevision, FileError> {
 
         if ! self.metadata.is_in_part(self.current_part_of_file_index, offset, size) {
@@ -1097,6 +1244,8 @@ impl FileImpl {
         if revision != self.metadata.revision {
             return Err(FileError::RevisionTooOld);
         }
+
+        self.is_edit_allowed(user) ? ;
 
         let end_offset = offset + size;
         let end_offset = min(end_offset, self.buffer.len() as u64);
