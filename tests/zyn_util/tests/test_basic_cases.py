@@ -160,12 +160,14 @@ class TestBasic(zyn_util.tests.common.TestZyn):
         self.assertEqual(block[1], len(expected_data))
         self.assertEqual(data, expected_data)
 
-    def test_edit_file(self):
+    def test_edit_random_access_file(self):
         self._start_and_connect_to_node_and_handle_auth()
         node_id = self._connection.create_file_random_access('file-1', parent_path='/') \
                                   .as_create_rsp()
 
-        _, revision, _, _ = self._connection.open_file_write(node_id=node_id).as_open_rsp()
+        _, revision, _, file_type = self._connection.open_file_write(node_id=node_id).as_open_rsp()
+        self.assertEqual(file_type, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
+
         revision = self._connection.ra_write(node_id, revision, 0, 'data'.encode('utf-8')) \
                                    .as_write_rsp()
 
@@ -178,6 +180,24 @@ class TestBasic(zyn_util.tests.common.TestZyn):
         revision = self._connection.ra_write(node_id, revision, 4, 'qwerty'.encode('utf-8')) \
                                    .as_write_rsp()
         self._validate_read(node_id, 0, 100, revision, 'da--qwerty')
+
+    def test_edit_blob_file(self):
+        self._start_and_connect_to_node_and_handle_auth()
+        node_id = self._connection.create_file_blob('file-1', parent_path='/') \
+                                  .as_create_rsp()
+        _, revision, _, file_type = self._connection.open_file_write(node_id=node_id).as_open_rsp()
+        self.assertEqual(file_type, zyn_util.connection.FILE_TYPE_BLOB)
+
+        data_1 = 'qwerty'
+        data_2 = 'zxcvbnm'
+
+        revision = self._connection.blob_write(node_id, revision, data_1.encode('utf-8'), 2) \
+                                   .as_write_rsp()
+        self._validate_read(node_id, 0, 100, revision, data_1)
+
+        revision = self._connection.blob_write(node_id, revision, data_2.encode('utf-8')) \
+                                   .as_write_rsp()
+        self._validate_read(node_id, 0, 100, revision, data_2)
 
     def test_query_list(self):
         self._start_and_connect_to_node_and_handle_auth()

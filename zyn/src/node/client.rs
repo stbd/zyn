@@ -9,7 +9,7 @@ use std::vec::{ Vec };
 use std::{ str };
 
 use node::connection::{ Connection };
-use node::file::{ FileAccess, FileError, Notification };
+use node::file::{ FileAccess, FileError, Notification, FileLock };
 use node::filesystem::{ FilesystemError };
 use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement,
                   ErrorResponse, NodeError };
@@ -99,6 +99,8 @@ enum CommonErrorCodes {
     InternalCommunicationError = 2,
     ErrorFileIsNotOpen = 3,
     ErrorFileOpenedInReadMode = 4,
+    OperationNotPermitedFotFileType = 5,
+    BlockSizeIsTooLarge = 6,
 }
 
 fn map_node_error_to_uint(error: ErrorResponse) -> u32 {
@@ -139,6 +141,8 @@ fn map_file_error_to_uint(result: FileError) -> u32 {
         FileError::RevisionTooOld => 302,
         FileError::OffsetAndSizeDoNotMapToPartOfFile => 303,
         FileError::DeleteIsonlyAllowedForLastPart => 304,
+        FileError::FileLockedByOtherUser => 305,
+        FileError::FileNotLocked => 306,
     }
 }
 
@@ -146,7 +150,8 @@ const READ: u64 = 0;
 const READ_WRITE: u64 = 1;
 const FILE: u64 = 0;
 const FOLDER: u64 = 1;
-const RANDOM_ACCESS_FILE: u64 = 0;
+const FILE_TYPE_RANDOM_ACCESS: u64 = 0;
+const FILE_TYPE_BLOB: u64 = 1;
 const TYPE_USER: u64 = 0;
 const TYPE_GROUP: u64 = 1;
 
@@ -616,11 +621,13 @@ impl Client {
                 } else if self.expect("CLOSE:").is_ok() {
                     let _ = self.handle_close_req();
                 } else if self.expect("RA-W:").is_ok() {
-                    let _ = self.handle_write_req();
+                    let _ = self.handle_write_random_access_req();
                 } else if self.expect("RA-I:").is_ok() {
-                    let _ = self.handle_insert_req();
+                    let _ = self.handle_random_access_insert_req();
                 } else if self.expect("RA-D:").is_ok() {
-                    let _ = self.handle_delete_req();
+                    let _ = self.handle_random_access_delete_req();
+                } else if self.expect("BLOB-W:").is_ok() {
+                    let _ = self.handle_blob_write_req();
                 } else if self.expect("R:").is_ok() {
                     let _ = self.handle_read_req();
                 } else if self.expect("DELETE:").is_ok() {
@@ -770,7 +777,8 @@ impl Client {
         try_parse!(self.parse_end_of_message(), self, transaction_id);
 
         let type_enum = match type_uint {
-            RANDOM_ACCESS_FILE => FileType::RandomAccess,
+            FILE_TYPE_RANDOM_ACCESS => FileType::RandomAccess,
+            FILE_TYPE_BLOB => FileType::Blob,
             _ => {
                 try_send_rsp!(
                     self,
@@ -926,7 +934,9 @@ impl Client {
 
                         match file_type {
                             FileType::RandomAccess =>
-                                fields.push_str(& Client::unsigned_to_string(RANDOM_ACCESS_FILE)),
+                                fields.push_str(& Client::unsigned_to_string(FILE_TYPE_RANDOM_ACCESS)),
+                            FileType::Blob =>
+                                fields.push_str(& Client::unsigned_to_string(FILE_TYPE_BLOB)),
                         };
 
                         try_send_rsp!(
@@ -1008,7 +1018,7 @@ impl Client {
         }
     }
 
-    fn handle_write_req(& mut self) -> Result<(), ()> {
+    fn handle_write_random_access_req(& mut self) -> Result<(), ()> {
 
         let transaction_id = try_parse!(self.parse_transaction_id(), self, 0);
         let node_id = try_parse!(self.parse_node_id(), self, transaction_id);
@@ -1075,7 +1085,7 @@ impl Client {
         }
     }
 
-    fn handle_insert_req(& mut self) -> Result<(), ()> {
+    fn handle_random_access_insert_req(& mut self) -> Result<(), ()> {
 
         let transaction_id = try_parse!(self.parse_transaction_id(), self, 0);
         let node_id = try_parse!(self.parse_node_id(), self, transaction_id);
@@ -1142,7 +1152,7 @@ impl Client {
         }
     }
 
-    fn handle_delete_req(& mut self) -> Result<(), ()> {
+    fn handle_random_access_delete_req(& mut self) -> Result<(), ()> {
 
         let transaction_id = try_parse!(self.parse_transaction_id(), self, 0);
         let node_id = try_parse!(self.parse_node_id(), self, transaction_id);
@@ -1201,6 +1211,134 @@ impl Client {
                 Err(())
             }
         }
+    }
+
+    fn handle_blob_write_req(& mut self) -> Result<(), ()> {
+
+        let transaction_id = try_parse!(self.parse_transaction_id(), self, 0);
+        let node_id = try_parse!(self.parse_node_id(), self, transaction_id);
+        let mut revision = try_parse!(self.parse_unsigned(), self, transaction_id);
+        let size = try_parse!(self.parse_unsigned(), self, transaction_id);
+        let block_size = try_parse!(self.parse_unsigned(), self, transaction_id);
+
+        try_parse!(self.expect(";"), self, transaction_id);
+        try_parse!(self.parse_end_of_message(), self, transaction_id);
+
+        trace!("Write blob: user={}, node_id={}, revision={}, size={}, block_size={}",
+               self, node_id, revision, size, block_size);
+
+        let (mode, file_type, ref mut access) = match find_open_file(& mut self.open_files, & node_id) {
+            Err(()) => {
+                try_send_rsp!(
+                    self,
+                    transaction_id,
+                    CommonErrorCodes::ErrorFileIsNotOpen as u32,
+                    EMPTY
+                );
+                return Err(());
+            },
+            Ok(v) => v,
+        };
+
+        match file_type {
+            & FileType::Blob => (),
+            _ => {
+                try_send_rsp!(
+                    self,
+                    transaction_id,
+                    CommonErrorCodes::OperationNotPermitedFotFileType as u32,
+                    EMPTY
+                );
+                return Err(());
+            },
+        };
+
+        match *mode {
+            OpenMode::Read => {
+                try_send_rsp!(
+                    self,
+                    transaction_id,
+                    CommonErrorCodes::ErrorFileOpenedInReadMode as u32,
+                    EMPTY
+                );
+                return Err(());
+            },
+            OpenMode::ReadWrite => (),
+        }
+
+        let user = self.user.as_ref().unwrap();
+        let lock = FileLock::LockedBySystemForBlobWrite {
+            user: user.clone(),
+        };
+
+        if let Err(error) = access.lock(revision, & lock) {
+            try_send_rsp!(
+                self,
+                transaction_id,
+                map_file_error_to_uint(error),
+                EMPTY
+            );
+            return Err(());
+        }
+
+        let max_block_size: u64 = 1024 * 1024 * 10;
+        let mut bytes_read: u64 = 0;
+
+        if block_size > max_block_size {
+            try_send_rsp!(
+                self,
+                transaction_id,
+                CommonErrorCodes::BlockSizeIsTooLarge as u32,
+                EMPTY
+            );
+        }
+
+        while bytes_read < size {
+
+            let bytes_left = size - bytes_read;
+            let buffer_size = {
+                if bytes_left < max_block_size {
+                    bytes_left
+                } else {
+                    max_block_size
+                }
+            };
+
+            let mut buffer = Buffer::with_capacity(buffer_size as usize);
+            self.buffer.take(& mut buffer);
+            if buffer.len() < buffer.capacity() {
+                Client::fill_buffer(& mut self.connection, & mut buffer);
+            }
+
+            revision = match access.write(revision, bytes_read, buffer) {
+                Ok(r) => r,
+                Err(error) => {
+                    try_send_rsp!(
+                        self,
+                        transaction_id,
+                        map_file_error_to_uint(error),
+                        EMPTY
+                    );
+                    return Err(());
+                }
+            };
+
+            bytes_read += buffer_size;
+        }
+
+        if let Err(error) = access.unlock(& lock) {
+            error!("Failed to unlock file, user={}, error={}", user, map_file_error_to_uint(error));
+            return Err(());
+        }
+
+        try_send_rsp!(
+            self,
+            transaction_id,
+            CommonErrorCodes::NoError as u32,
+            & Client::revision_to_string(revision)
+        );
+
+        Ok(())
     }
 
     fn handle_read_req(& mut self) -> Result<(), ()> {

@@ -203,6 +203,8 @@ pub enum FileError {
     RevisionTooOld,
     OffsetAndSizeDoNotMapToPartOfFile,
     DeleteIsonlyAllowedForLastPart,
+    FileLockedByOtherUser,
+    FileNotLocked,
 }
 
 #[derive(Clone, Debug)]
@@ -321,7 +323,7 @@ impl FileAccess {
         })
     }
 
-    pub fn lock(& mut self, revision: FileRevision, lock: & LockDescription) -> Result<(), FileError> {
+    pub fn lock(& mut self, revision: FileRevision, lock: & FileLock) -> Result<(), FileError> {
 
         self.channel_send.send(Request::LockFile {
             revision: revision,
@@ -341,7 +343,7 @@ impl FileAccess {
         })
     }
 
-    pub fn unlock(& mut self, lock: & LockDescription) -> Result<(), FileError> {
+    pub fn unlock(& mut self, lock: & FileLock) -> Result<(), FileError> {
 
         self.channel_send.send(Request::UnlockFile {
             description: lock.clone(),
@@ -442,12 +444,12 @@ pub struct FileEvent {
 }
 
 #[derive(Clone, PartialEq)]
-pub enum LockDescription {
+pub enum FileLock {
     LockedBySystemForBlobWrite { user: Id },
 }
 
-impl LockDescription {
-    fn is_locked_by(& self, lock: & LockDescription) -> bool {
+impl FileLock {
+    fn is_locked_by(& self, lock: & FileLock) -> bool {
         *self == *lock
     }
 }
@@ -629,8 +631,8 @@ enum Request {
     Insert { revision: FileRevision, offset: u64, buffer: Buffer },
     Delete { revision: FileRevision, offset: u64, size: u64 },
     Read { offset: u64, size: u64 },
-    LockFile { revision: FileRevision, description: LockDescription },
-    UnlockFile { description: LockDescription },
+    LockFile { revision: FileRevision, description: FileLock },
+    UnlockFile { description: FileLock },
 }
 
 enum Response {
@@ -937,7 +939,7 @@ struct FileImpl {
     buffer: Buffer,
     current_part_of_file_index: u32,
     crypto_context: Context,
-    lock: Option<LockDescription>,
+    lock: Option<FileLock>,
 }
 
 static DEFAULT_BUFFER_SIZE_BYTES: u64 = 1024 * 1;
@@ -1065,14 +1067,15 @@ impl FileImpl {
         desc.size = self.buffer.len() as u64;
     }
 
-    fn lock(& mut self, revision: FileRevision, desc: LockDescription) -> Result<(), FileError> {
+    fn lock(& mut self, revision: FileRevision, desc: FileLock) -> Result<(), FileError> {
 
         if revision != self.metadata.revision {
             return Err(FileError::RevisionTooOld);
         }
 
+        // todo: check if current lock is the same and by same user
         if let Some(_) = self.lock {
-            return Err(FileError::RevisionTooOld); // todo: fix error
+            return Err(FileError::FileLockedByOtherUser);
         }
 
         self.lock = Some(desc);
@@ -1080,10 +1083,10 @@ impl FileImpl {
         Ok(())
     }
 
-    fn unlock(& mut self, desc: LockDescription) -> Result<(), FileError> {
+    fn unlock(& mut self, desc: FileLock) -> Result<(), FileError> {
 
         if self.lock.is_none() {
-            return Err(FileError::RevisionTooOld); // todo: fix error
+            return Err(FileError::FileNotLocked);
         }
 
         let mut release_lock = false;
@@ -1091,7 +1094,7 @@ impl FileImpl {
             if lock.is_locked_by(& desc) {
                 release_lock = true;
             } else {
-                return Err(FileError::RevisionTooOld); // todo: fix error
+                return Err(FileError::FileLockedByOtherUser);
             }
         }
 
@@ -1105,16 +1108,17 @@ impl FileImpl {
     fn is_edit_allowed(& self, user: & Option<Id>) -> Result<(), FileError> {
 
         if user.is_none() {
-            return Err(FileError::RevisionTooOld); // todo: replace error
+            error!("File edit when user is none");
+            return Err(FileError::InternalError);
         }
 
         let user_id = user.as_ref().unwrap();
 
         match self.lock {
             None => Ok(()),
-            Some(LockDescription::LockedBySystemForBlobWrite { ref user }) => {
+            Some(FileLock::LockedBySystemForBlobWrite { ref user }) => {
                 if user_id != user {
-                    return Err(FileError::RevisionTooOld); // todo: replace error
+                    return Err(FileError::FileLockedByOtherUser);
                 }
                 Ok(())
             },

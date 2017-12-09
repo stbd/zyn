@@ -7,6 +7,7 @@ import time
 FILE_TYPE_FILE = 0  # todo: Rename FILESYSTEM_ELEMENT_FILE
 FILE_TYPE_FOLDER = 1
 FILE_TYPE_RANDOM_ACCESS = 0
+FILE_TYPE_BLOB = 1
 TYPE_USER = 0
 TYPE_GROUP = 1
 
@@ -62,9 +63,10 @@ class ZynConnection:
 
         return self._send_receive(req)
 
-    def create_file_random_access(
+    def create_file(
             self,
             name,
+            file_type=None,
             parent_node_id=None,
             parent_path=None,
             transaction_id=None
@@ -76,11 +78,35 @@ class ZynConnection:
             + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
             + parent \
             + self.field_string(name) \
-            + self.field_unsigned(0) \
+            + self.field_unsigned(file_type) \
             + ';' \
             + self.field_end_of_message() \
 
         return self._send_receive(req)
+
+    def create_file_random_access(
+            self,
+            name,
+            parent_node_id=None,
+            parent_path=None,
+            transaction_id=None
+    ):
+        return self.create_file(
+            name,
+            FILE_TYPE_RANDOM_ACCESS,
+            parent_node_id,
+            parent_path,
+            transaction_id
+        )
+
+    def create_file_blob(
+            self,
+            name,
+            parent_node_id=None,
+            parent_path=None,
+            transaction_id=None
+    ):
+        return self.create_file(name, FILE_TYPE_BLOB, parent_node_id, parent_path, transaction_id)
 
     def create_folder(self, name, parent_node_id=None, parent_path=None, transaction_id=None):
         parent = self.file_descriptor(parent_node_id, parent_path)
@@ -144,6 +170,31 @@ class ZynConnection:
             + self.field_end_of_message() \
 
         return self._send_receive(req)
+
+    def blob_write(self, node_id, revision, data, block_size=None, transaction_id=None):
+        if block_size is None:
+            block_size = 1024  # todo: max block size should be queried from the server
+
+        req = \
+            self.field_version() \
+            + 'BLOB-W:' \
+            + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
+            + self.field_node_id(node_id) \
+            + self.field_unsigned(revision) \
+            + self.field_unsigned(len(data)) \
+            + self.field_unsigned(block_size) \
+            + ';' \
+            + self.field_end_of_message() \
+
+        self.write(req)
+
+        index_start = 0
+        while index_start < (len(data) - 1):
+            index_end = index_start + block_size
+            self._socket.send(data[index_start:index_end])
+            index_start += block_size
+
+        return self.read_response()
 
     def ra_write(self, node_id, revision, offset, data, transaction_id=None):
         req = \

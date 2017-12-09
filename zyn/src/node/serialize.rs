@@ -73,6 +73,7 @@ impl Serialize for FileType {
     {
         match *self {
             FileType::RandomAccess => SerializedFileType { file_type: 0 },
+            FileType::Blob => SerializedFileType { file_type: 1 },
         }.serialize(serializer)
     }
 }
@@ -85,6 +86,7 @@ impl<'de> Deserialize<'de> for FileType {
 
         let type_of = match serialized {
             SerializedFileType { file_type: 0 } => FileType::RandomAccess,
+            SerializedFileType { file_type: 1 } => FileType::Blob,
             _ => return Err(SerdeError::custom("Failed to parse FileType")),
         };
         Ok(type_of)

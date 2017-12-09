@@ -116,7 +116,10 @@ class TestMultipleConnections(zyn_util.tests.common.TestZyn):
             expected_size
         )
 
-    def test_edit_file(self):
+    def test_edit_random_access_file(self):
+
+        # todo: Cleanup to use updated connection interface
+
         def _open(connection, node_id):
             rsp = connection.file_open_write(node_id)
             self.assertFalse(rsp.is_error())
@@ -193,3 +196,23 @@ class TestMultipleConnections(zyn_util.tests.common.TestZyn):
         _read(c_1, node_id, 0, data)
         _read(c_2, node_id, 0, data)
         _read(c_3, node_id, 0, data)
+
+    def _test_edit_blob_file(self):
+        c_1 = self._connect_and_authenticate()
+        c_2 = self._connect_and_authenticate()
+
+        node_id = c_1.create_file_blob('file', parent_path='/').as_create_rsp()
+
+        c_1.open_file_write(node_id).as_open_rsp()
+        _, revision, _, _ = c_2.open_file_write(node_id=node_id).as_open_rsp()
+
+        data = 'qwerty'.encode('utf-8')
+        c_1.blob_write(node_id, revision, data, 2).as_write_rsp()
+
+        notification = c_2.pop_notification()
+        notification = c_2.read_message()
+        self.assertNotEqual(notification, None)
+        notification = c_2.read_message()
+        self.assertNotEqual(notification, None)
+
+        # self._expect_part_of_file_modified(c_2, node_id, revision + 1, 0, 2)

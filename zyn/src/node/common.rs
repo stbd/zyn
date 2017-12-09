@@ -76,6 +76,7 @@ pub enum OpenMode {
 #[derive(Clone, PartialEq)]
 pub enum FileType {
     RandomAccess,
+    Blob,
 }
 
 impl Display for FileType {
@@ -83,6 +84,9 @@ impl Display for FileType {
         match *self {
             FileType::RandomAccess => {
                 write!(f, "RandomAccess")
+            },
+            FileType::Blob => {
+                write!(f, "Blob")
             },
         }
     }

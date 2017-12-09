@@ -4,7 +4,7 @@ use std::vec::{ Vec };
 extern crate tempdir;
 use self::tempdir::{ TempDir };
 
-use node::file::{ FileHandle, FileAccess, Metadata, LockDescription };
+use node::file::{ FileHandle, FileAccess, Metadata, FileLock };
 use node::common::{ Buffer, FileRevision, NodeId, FileType };
 use node::user_authority::{ Id };
 use node::test_util;
@@ -181,12 +181,12 @@ fn test_write_to_file_multiple_times() {
 }
 
 #[test]
-fn test_lock_for_blob_write_prevents_other_edits_but_allows_reads() {
+fn test_lock_for_blob_write_prevents_edit_but_allows_read() {
     let mut state = State::init();
     let mut access_1 = state.open();
     let mut access_2 = state.open_user_2();
 
-    let lock = LockDescription::LockedBySystemForBlobWrite{ user: state.user.clone() };
+    let lock = FileLock::LockedBySystemForBlobWrite{ user: state.user.clone() };
     let buffer = vec![1, 2, 3];
     let revision_1 = access_1.write(0, 0, buffer.clone()).unwrap();
 
