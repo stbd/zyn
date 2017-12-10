@@ -1,0 +1,9 @@
+# todo
+
+ * Refactor
+  * Split large files
+   * Client: parsing and buffer to separate files
+   * File: Move classes
+  * File: Metadata
+  * Does file need access limitation, is foulder enough
+ * Docker configuration for production
