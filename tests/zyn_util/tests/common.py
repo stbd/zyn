@@ -1,5 +1,4 @@
 import datetime
-import glob
 import logging
 import os
 import os.path
@@ -34,7 +33,7 @@ class TestZyn(unittest.TestCase):
         self._password = 'admin'
         self._work_dir = self._temp_dir()
 
-    def _start_node(self, args=[]):
+    def _start_server_process(self, args=[]):
         enviroment_variables = os.environ.copy()
         enviroment_variables['RUST_LOG'] = 'trace'
         enviroment_variables['RUST_BACKTRACE'] = '1'
@@ -48,8 +47,25 @@ class TestZyn(unittest.TestCase):
     def _temp_dir(self):
         return tempfile.TemporaryDirectory()
 
-    def _start_node_default_params(self, path_data_dir, init=False):
+    def utc_timestamp(self):
+        return int(datetime.datetime.utcnow().timestamp())
+
+    def _start_server(
+            self,
+            path_data_dir,
+            path_cert=None,
+            path_key=None,
+            local_port=None,
+            local_address=None,
+            remote_port=None,
+            remote_address=None,
+            gpg_fingerprint=None,
+            default_username=None,
+            default_password=None,
+            init=False
+    ):
         params = []
+
         if init:
             params.append('--init')
 
@@ -57,42 +73,46 @@ class TestZyn(unittest.TestCase):
         params.append(path_data_dir)
 
         params.append('--local-port')
-        params.append(str(self._remote_port))
+        params.append(str(remote_port or self._remote_port))
         params.append('--local-address')
-        params.append(self._remote_ip)
-
-        params.append('--default-user-name')
-        params.append(self._username)
-
-        params.append('--default-user-password')
-        params.append(self._password)
+        params.append(remote_address or self._remote_ip)
 
         params.append('--path-cert')
-        params.append(PATH_CERT)
+        params.append(path_cert or PATH_CERT)
 
         params.append('--path-key')
-        params.append(PATH_KEY)
+        params.append(path_key or PATH_KEY)
 
         params.append('--gpg-fingerprint')
-        with open(PATH_GPG_FINGERPRINT, 'r') as fp:
-            params.append(fp.read().strip())
+        if gpg_fingerprint is not None:
+            params.append(gpg_fingerprint)
+        else:
+            with open(PATH_GPG_FINGERPRINT, 'r') as fp:
+                params.append(fp.read().strip())
 
-        process = self._start_node(params)
+        params.append('--default-user-name')
+        params.append(default_username or self._username)
 
-        # Give some time for the process to start up
-        time.sleep(.1)
+        params.append('--default-user-password')
+        params.append(default_password or self._password)
 
+        process = self._start_server_process(params)
+        time.sleep(.1)  # Give some time for the process to start up
         return process
 
-    def _create_connection(self):
-        return zyn_util.connection.ZynConnection(PATH_KEY, PATH_CERT)
-
-    def _validate_data_dir(self, path, expected_files):
-        files = glob.glob(path + '/*')
-        assert len(files) == len(expected_files)
-
-        for f in files:
-            assert os.path.basename(f) in expected_files
-
-    def utc_timestamp(self):
-        return int(datetime.datetime.utcnow().timestamp())
+    def _create_connection_and_connect(
+            self,
+            path_key=None,
+            path_cert=None,
+            remote_port=None,
+            remote_ip=None,
+    ):
+        connection = zyn_util.connection.ZynConnection(
+            path_key or PATH_KEY,
+            path_cert or PATH_CERT
+        )
+        connection.connect(
+            remote_ip or self._remote_ip,
+            remote_port or self._remote_port
+        )
+        return connection
