@@ -4,8 +4,18 @@ echo -e "
 Zyn project is mounted to $HOME/zyn
 
 To have sudo access to VM, switch to \"vagrant\" user
-su vagrant
-password vagrant
+su vagrant  # password: vagrant
+
+Available commands:
+zyn-build  # Builds server
+zyn-unittest  # Builds and runs unittest
+zyn-system-tests  # Runs system tests (requires server to be build)
+zyn-static-analysis  # Runs static analysis for all files in project
+
+Other commands:
+zyn-run-cli-client
+zyn-run-web-client
+zyn-run-server
 "
 
 function zyn-build() {
