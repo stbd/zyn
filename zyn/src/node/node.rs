@@ -1,4 +1,3 @@
-
 use std::fmt::{ Display, Formatter, Result as FmtResult };
 use std::fs::{ create_dir };
 use std::mem::{ uninitialized };
@@ -12,13 +11,17 @@ use std::vec::{ Vec };
 use libc::{ sigwait, sigemptyset, sigaddset, SIGTERM, SIGINT, c_int, size_t, sigprocmask, SIG_SETMASK };
 
 use node::client::{ Client };
-use node::common::{ NodeId, FileDescriptor, OpenMode, FileRevision, ADMIN_GROUP, Timestamp, FileType,
-                    log_crypto_context_error, utc_timestamp };
+use node::common::{ NodeId, FileDescriptor, OpenMode, FileRevision, ADMIN_GROUP, Timestamp, FileType, log_crypto_context_error, utc_timestamp };
 use node::connection::{ Server };
 use node::crypto::{ Crypto };
-use node::file::{ FileAccess };
+use node::file_handle::{ FileAccess, FileProperties };
 use node::filesystem::{ Filesystem, FilesystemError, Node as FsNode };
 use node::user_authority::{ UserAuthority, Id };
+
+struct FilesystemElementAuthority {
+    read: Id,
+    write: Id,
+}
 
 fn start_signal_listener() -> Result<Receiver<()>, ()> {
 
@@ -666,9 +669,10 @@ impl Node {
         ).map_err(fs_error_to_rsp)
     }
 
+
     fn handle_open_file_request(
         node_id_buffer: & mut [NodeId],
-        filesystem: & mut Filesystem,
+        fs: & mut Filesystem,
         auth: & mut UserAuthority,
         crypto: & mut Crypto,
         mode: OpenMode,
@@ -678,22 +682,20 @@ impl Node {
 
         let node_id = Node::resolve_file_descriptor(
             node_id_buffer,
-            filesystem,
+            fs,
             file_descriptor
         ) ? ;
 
-        let mut file = filesystem.mut_file(& node_id)
+        let (properties, file_auth) = Node::resolve_file_properties(& node_id, fs, crypto) ? ;
+
+        let mut file = fs.mut_file(& node_id)
             .map_err(fs_error_to_rsp)
             ? ;
 
-        let metadata = file.metadata(& crypto)
-            .map_err(| () | node_error_to_rsp(NodeError::InternalCommunicationError))
-            ? ;
-
-        let file_size = metadata.size();
+        let file_size = 0; // todo: use properties.size();
         let access = match mode {
-            OpenMode::Read => metadata.read,
-            OpenMode::ReadWrite => metadata.write,
+            OpenMode::Read => file_auth.read,
+            OpenMode::ReadWrite => file_auth.write,
         };
 
         auth.is_authorized(& access, & user, utc_timestamp())
@@ -704,7 +706,7 @@ impl Node {
             .map_err(| () | node_error_to_rsp(NodeError::InternalError))
             ? ;
 
-        Ok((access, node_id, metadata.revision, metadata.file_type, file_size))
+        Ok((access, node_id, properties.revision, properties.file_type, file_size))
     }
 
     fn handle_counters_request(
@@ -815,31 +817,25 @@ impl Node {
             };
         }
 
-        let mut file = fs.mut_file(& node_id)
-            .map_err(fs_error_to_rsp)
-            ? ;
+        let (properties, file_auth) = Node::resolve_file_properties(& node_id, fs, crypto) ? ;
 
-        let metadata = file.metadata(& crypto)
-            .map_err(| () | node_error_to_rsp(NodeError::InternalCommunicationError))
-            ? ;
-
-        let read = auth.resolve_name(& metadata.read)
+        let read = auth.resolve_name(& file_auth.read)
             .map_err(| () | node_error_to_rsp(NodeError::InternalError))
             ? ;
 
-        let write = auth.resolve_name(& metadata.write)
+        let write = auth.resolve_name(& file_auth.write)
             .map_err(| () | node_error_to_rsp(NodeError::InternalError))
             ? ;
 
         let desc = FilesystemElementDescription {
             element_type: FilesystemElement::File,
-            created_at: metadata.created.timestamp,
-            modified_at: metadata.modified.timestamp,
+            created_at: properties.created_at,
+            modified_at: properties.modified_at,
             read_access: read,
             write_access: write,
         };
 
-        auth.is_authorized(& metadata.read, & user, utc_timestamp())
+        auth.is_authorized(& file_auth.read, & user, utc_timestamp())
             .map_err(| () | node_error_to_rsp(NodeError::UnauthorizedOperation))
             ? ;
 
@@ -872,10 +868,10 @@ impl Node {
                     .parent()
             } else {
                 let mut file = fs.mut_file(& node_id).unwrap();
-                let metadata = file.metadata(& crypto)
+                let properties = file.properties(& crypto)
                     .map_err(| () | node_error_to_rsp(NodeError::InternalCommunicationError))
                     ? ;
-                metadata.parent
+                properties.parent
             }
         };
 
@@ -1009,6 +1005,37 @@ impl Node {
         }
 
         Ok(())
+    }
+
+    fn resolve_file_properties(
+        file_node_id: & NodeId,
+        fs: & mut Filesystem,
+        crypto: & mut Crypto,
+    ) -> Result<(FileProperties, FilesystemElementAuthority), ErrorResponse> {
+
+        let properties = fs.mut_file(& file_node_id)
+            .map_err(fs_error_to_rsp)
+            .map(| file |
+                 file.properties(& crypto)
+                 .map_err(| () | node_error_to_rsp(NodeError::InternalCommunicationError))
+            )
+            ? ? ;
+
+        let parent = fs.node(& properties.parent)
+            .map_err(fs_error_to_rsp)
+            ? ;
+
+        let folder = parent.to_folder()
+            .map_err(| _ | node_error_to_rsp(NodeError::ParentIsNotFolder))
+            ? ;
+
+        Ok((
+            properties,
+            FilesystemElementAuthority {
+            read: folder.read().clone(),
+            write: folder.write().clone(),
+            }
+        ))
     }
 
     fn resolve_file_descriptor(

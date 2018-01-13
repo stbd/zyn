@@ -4,6 +4,14 @@
   * Split large files
    * Client: parsing and buffer to separate files
    * File: Move classes
-  * File: Metadata
-  * Does file need access limitation, is foulder enough
+  * File:
+   * Metadata access
+  * Client
+   * Open files to struct from tuple
+  * Filesystem
+   * Only N files should be stored for each folder
  * Docker configuration for production
+ * Possibility to store protocol to file
+
+## Issues
+ * It is possible to create file/folder with name that already exists under parent

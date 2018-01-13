@@ -1,3 +1,4 @@
+
 use std::cmp::{ min };
 use std::fmt::{ Display, Formatter, Result as FmtResult } ;
 use std::fs::{ OpenOptions, File };
@@ -5,436 +6,60 @@ use std::io::{ Read, Write };
 use std::option::{ Option };
 use std::path::{ PathBuf, Path, Display as PathDisplay };
 use std::ptr::{ copy };
-use std::str;
-use std::sync::mpsc::{ channel, Sender, Receiver, TryRecvError };
-use std::thread::{ sleep };
-use std::thread::{ spawn, JoinHandle };
-use std::time::{ Duration };
+use std::sync::mpsc::{ channel, Sender, Receiver };
 use std::vec::{ Vec };
 
-use node::crypto::{ Crypto, Context };
+use node::common::{ utc_timestamp, FileRevision, Buffer, NodeId, FileType, Timestamp };
+use node::crypto::{ Context };
+use node::file_handle::{ FileError, FileLock, FileAccess, Notification };
 use node::serialize::{ SerializedMetadata };
 use node::user_authority::{ Id };
-use node::common::{ utc_timestamp, log_crypto_context_error,
-                    FileRevision, Timestamp, Buffer, NodeId, FileType };
 
-static MAX_WAIT_DURATION_PER_MESSAGE_MS: u64 = 500;
-static MAX_NUMBER_OF_ITERATIONS_PER_MESSAGE: u64 = 5;
-
-struct FileThreadHandle {
-    thread: JoinHandle<()>,
-    access: FileAccess,
+pub enum FileRequestProtocol {
+    Close,
+    RequestMetadata,
+    RequestAccess { user: Id },
+    Write { revision: FileRevision, offset: u64, buffer: Buffer },
+    Insert { revision: FileRevision, offset: u64, buffer: Buffer },
+    Delete { revision: FileRevision, offset: u64, size: u64 },
+    Read { offset: u64, size: u64 },
+    LockFile { revision: FileRevision, description: FileLock },
+    UnlockFile { description: FileLock },
 }
 
-pub struct FileHandle {
-    path: PathBuf,
-    file_thread: Option<FileThreadHandle>,
-    metadata: Option<Metadata>,
+pub enum FileResponseProtocol {
+    Access { access: FileAccess },
+    Metadata { metadata: Metadata },
+    Write { result: Result<FileRevision, FileError> },
+    Insert { result: Result<FileRevision, FileError> },
+    Delete { result: Result<FileRevision, FileError> },
+    Read { result: Result<(Buffer, FileRevision), FileError> },
+    LockFile { result: Result<(), FileError> },
+    UnlockFile { result: Result<(), FileError> },
+    Notification { notification: Notification },
 }
 
-impl FileHandle {
-    pub fn state(& self) -> (PathBuf) {
-        (self.path.clone())
-    }
+struct ConnectedAccess {
+    send_user: Sender<FileResponseProtocol>,
+    receive_file: Receiver<FileRequestProtocol>,
+    user: Option<Id>,
+}
 
-    pub fn path(& self) -> & Path {
-        & self.path
-    }
-
-    pub fn create(
-        path: PathBuf,
-        crypto: & Crypto,
-        user: Id,
-        parent: NodeId,
-        file_type: FileType,
-        max_part_of_file_size: usize
-    ) -> Result<FileHandle, ()> {
-        let context = crypto.create_context()
-            .map_err(| () | log_crypto_context_error())
-            ? ;
-
-        FileImpl::create(& path, context, user, parent, file_type, max_part_of_file_size) ? ;
-
-        Ok(FileHandle{
-            path: path,
-            file_thread: None,
-            metadata: None,
-        })
-    }
-
-    pub fn init(path: PathBuf) -> Result<FileHandle, ()> {
-        if ! FileImpl::exists(& path) {
-            error!("Physical file does not exist, path=\"{}\"", path.display());
-            return Err(());
-        }
-
-        Ok(FileHandle{
-            path: path,
-            file_thread: None,
-            metadata: None,
-        })
-    }
-
-    pub fn metadata(& mut self, crypto: & Crypto) -> Result<Metadata, ()> {
-
-        self.update();
-
-        if let Some(ref mut file_service) = self.file_thread {
-            let metadata = file_service.access.metadata()
-                .map_err(| _ | error!("Failed to get metadata from file service"))
-                ? ;
-            return Ok(metadata);
-        }
-
-        if let Some(ref metadata) = self.metadata {
-            return Ok(metadata.clone())
-        }
-
-        let context = crypto.create_context()
-            .map_err(| () | log_crypto_context_error())
-            ? ;
-
-        let metadata = Metadata::load(& self.path, & context) ? ;
-        self.metadata = Some(metadata.clone());
-        Ok(metadata)
-    }
-
-    pub fn open(& mut self, crypto: & Crypto, user: Id) -> Result<FileAccess, ()> {
-
-        if let Some(ref mut file_thread) = self.file_thread {
-            debug!("Opening file, service already running: path={}", self.path.display());
-            file_thread.access.channel_send.send(Request::RequestAccess {
-                user: user
-            }).unwrap();
-
-            match file_thread.access.channel_receive.recv() {
-                Ok(Response::Access { access }) => return Ok(access),
-                Ok(_) => return Err(()),
-                Err(_) => return Err(()),
-            }
-
+impl Display for ConnectedAccess {
+    fn fmt(& self, f: & mut Formatter) -> FmtResult {
+        if let Some(ref user) = self.user {
+            write!(f, "{}", user)
         } else {
-            let context = crypto.create_context()
-                .map_err(| () | log_crypto_context_error())
-                ? ;
-
-            debug!("Opening file, starting service: path={}", self.path.display());
-            let access = self.start_file_thread(context, user) ? ;
-            Ok(access)
+            write!(f, "root-handle")
         }
-    }
-
-    pub fn is_open(& mut self) -> bool {
-        self.update();
-        self.file_thread.is_some()
-    }
-
-    pub fn close(& mut self) {
-        if !self.is_open() {
-            return ;
-        }
-
-        let file_thread = self.file_thread.take().unwrap();
-        let _ = file_thread.access.channel_send.send(Request::Close);
-        let _ = file_thread.thread.join()  // todo: Somekind of timeout should be used here
-            .map_err(| error | warn!("Failed to join file thread, error={:?}", error))
-            ;
-    }
-
-    fn start_file_thread(& mut self, crypto_context: Context, user: Id)
-                         -> Result<FileAccess, ()>
-    {
-        let metadata = {
-            if self.metadata.is_some() {
-                self.metadata.take().unwrap()
-            } else {
-                Metadata::load(& self.path, & crypto_context) ?
-            }
-        };
-
-        let mut file = FileThread::open(& self.path, crypto_context, metadata) ? ;
-        let access_1 = file.create_access(None);
-        let access_2 = file.create_access(Some(user));
-
-        let handle = spawn( move || {
-            file.process();
-        });
-
-        self.file_thread = Some(FileThreadHandle {
-            thread: handle,
-            access: access_1,
-        });
-
-        Ok(access_2)
-    }
-
-    fn update(& mut self) {
-
-        let mut close = false;
-        if let Some(ref mut handle) = self.file_thread {
-            loop {
-                let notification = handle.access.pop_notification();
-                match notification {
-                    Some(Notification::FileClosing {  }) => close = true,
-                    Some(Notification::PartOfFileModified { .. }) => (),
-                    Some(Notification::PartOfFileInserted { .. }) => (),
-                    Some(Notification::PartOfFileDeleted { .. }) => (),
-                    None => break,
-                };
-            }
-        }
-
-        if close {
-            self.close();
-        }
-    }
-}
-
-impl Drop for FileHandle {
-    fn drop(& mut self) {
-        self.close();
-    }
-}
-
-#[derive(Debug)]
-pub enum FileError {
-    InternalCommunicationError,
-    InternalError,
-    RevisionTooOld,
-    OffsetAndSizeDoNotMapToPartOfFile,
-    DeleteIsonlyAllowedForLastPart,
-    FileLockedByOtherUser,
-    FileNotLocked,
-}
-
-#[derive(Clone, Debug)]
-pub enum Notification {
-    FileClosing {  }, // todo: Add reason
-    PartOfFileModified { revision: FileRevision, offset: u64, size: u64 },
-    PartOfFileInserted { revision: FileRevision, offset: u64, size: u64 },
-    PartOfFileDeleted { revision: FileRevision, offset: u64, size: u64 },
-}
-
-#[derive(Debug)]
-pub struct FileAccess {
-    channel_send: Sender<Request>,
-    channel_receive: Receiver<Response>,
-    unhandled_notitifications: Vec<Notification>,
-}
-
-impl FileAccess {
-    pub fn has_notifications(& mut self) -> bool {
-        ! self.unhandled_notitifications.is_empty()
-    }
-
-    pub fn pop_notification(& mut self) -> Option<Notification> {
-        if self.unhandled_notitifications.is_empty() {
-            if let Ok(msg) = self.channel_receive.try_recv() {
-                self.handle_unexpected_message(msg);
-            }
-        }
-        self.unhandled_notitifications.pop()
-    }
-
-    pub fn write(& mut self, revision: u64, offset: u64, buffer: Buffer)
-                 -> Result<FileRevision, FileError> {
-
-        self.channel_send.send(Request::Write {
-            revision: revision,
-            offset: offset,
-            buffer: buffer,
-        }).map_err(| _ | FileError::InternalCommunicationError) ? ;
-
-        file_receive::<FileRevision>(self, & | msg | {
-            match msg {
-                Response::Write {
-                    result: Ok(revision),
-                } => (None, Some(Ok(revision))),
-                Response::Write {
-                    result: Err(status),
-                } => return (None, Some(Err(status))),
-                other => (Some(other), None),
-            }
-        })
-    }
-
-    pub fn insert(& mut self, revision: u64, offset: u64, buffer: Buffer)
-                  -> Result<FileRevision, FileError> {
-
-        self.channel_send.send(Request::Insert {
-            revision: revision,
-            offset: offset,
-            buffer: buffer,
-        }).map_err(| _ | FileError::InternalCommunicationError) ? ;
-
-        file_receive::<FileRevision>(self, & | msg | {
-            match msg {
-                Response::Insert {
-                    result: Ok(revision),
-                } => (None, Some(Ok(revision))),
-                Response::Insert {
-                    result: Err(status),
-                } => return (None, Some(Err(status))),
-                other => (Some(other), None),
-            }
-        })
-    }
-
-    pub fn delete(& mut self, revision: u64, offset: u64, size: u64)
-                 -> Result<FileRevision, FileError> {
-
-        self.channel_send.send(Request::Delete {
-            revision: revision,
-            offset: offset,
-            size: size,
-        }).map_err(| _ | FileError::InternalCommunicationError) ? ;
-
-        file_receive::<FileRevision>(self, & | msg | {
-            match msg {
-                Response::Delete {
-                    result: Ok(revision),
-                } => (None, Some(Ok(revision))),
-                Response::Delete {
-                    result: Err(status),
-                } => return (None, Some(Err(status))),
-                other => (Some(other), None),
-            }
-        })
-    }
-
-    pub fn read(& mut self, offset: u64, size: u64)
-                -> Result<(Buffer, FileRevision), FileError> {
-
-        self.channel_send.send(Request::Read {
-            offset: offset,
-            size: size,
-        }).map_err(| _ | FileError::InternalCommunicationError) ? ;
-
-        file_receive::<(Buffer, FileRevision)>(self, & | msg | {
-            match msg {
-                Response::Read {
-                    result: Ok((buffer, revision)),
-                } => (None, Some(Ok((buffer, revision)))),
-                Response::Read {
-                    result: Err(status),
-                } => (None, Some(Err(status))),
-                other => (Some(other), None),
-            }
-        })
-    }
-
-    pub fn lock(& mut self, revision: FileRevision, lock: & FileLock) -> Result<(), FileError> {
-
-        self.channel_send.send(Request::LockFile {
-            revision: revision,
-            description: lock.clone()
-        }).map_err(| _ | FileError::InternalCommunicationError) ? ;
-
-        file_receive::<()>(self, & | msg | {
-            match msg {
-                Response::LockFile {
-                    result: Ok(()),
-                } => (None, Some(Ok(()))),
-                Response::LockFile {
-                    result: Err(status),
-                } => (None, Some(Err(status))),
-                other => (Some(other), None),
-            }
-        })
-    }
-
-    pub fn unlock(& mut self, lock: & FileLock) -> Result<(), FileError> {
-
-        self.channel_send.send(Request::UnlockFile {
-            description: lock.clone(),
-        }).map_err(| _ | FileError::InternalCommunicationError) ? ;
-
-        file_receive::<()>(self, & | msg | {
-            match msg {
-                Response::UnlockFile {
-                    result: Ok(()),
-                } => (None, Some(Ok(()))),
-                Response::UnlockFile {
-                    result: Err(status),
-                } => (None, Some(Err(status))),
-                other => (Some(other), None),
-            }
-        })
-    }
-
-    pub fn metadata(& mut self) -> Result<Metadata, FileError> {
-        self.channel_send.send(Request::RequestMetadata { })
-            .map_err(| _ | FileError::InternalCommunicationError) ? ;
-
-        file_receive::<Metadata>(self, & | msg | {
-            match msg {
-                Response::Metadata{ metadata } => (None, Some(Ok(metadata))),
-                other => (Some(other), None),
-            }
-        })
-    }
-
-    pub fn close(& mut self) -> Result<(), FileError> {
-        self.channel_send.send(Request::Close { })
-            .map_err(| _ | FileError::InternalCommunicationError) ? ;
-        Ok(())
-    }
-
-    fn handle_unexpected_message(& mut self, msg: Response) {
-        match msg {
-            Response::Notification { notification } => {
-                self.unhandled_notitifications.push(notification);
-            },
-            _other => {
-                warn!("Received unexpedted message");
-            },
-        }
-    }
-}
-
-fn file_receive<OkType>(
-    access: & mut FileAccess,
-    handler: & Fn(Response) -> (Option<Response>, Option<Result<OkType, FileError>>)
-)
-    -> Result<OkType, FileError> {
-
-    let sleep_duration = MAX_WAIT_DURATION_PER_MESSAGE_MS / MAX_NUMBER_OF_ITERATIONS_PER_MESSAGE;
-    for _ in 0..MAX_NUMBER_OF_ITERATIONS_PER_MESSAGE {
-        let msg = match access.channel_receive.try_recv() {
-            Ok(msg) => msg,
-            Err(TryRecvError::Disconnected) => {
-                return Err(FileError::InternalCommunicationError);
-            },
-            Err(TryRecvError::Empty) => {
-                sleep(Duration::from_millis(sleep_duration));
-                continue;
-            },
-        };
-
-        let msg = match handler(msg) {
-            (None, Some(result)) => return result,
-            (Some(msg), None) => msg,
-            _ => panic!(),
-        };
-
-        access.handle_unexpected_message(msg);
-    }
-
-    warn!("Received too many unxpected messages");
-    Err(FileError::InternalCommunicationError)
-}
-
-impl Drop for FileAccess {
-    fn drop(& mut self) {
-        let _ = self.close();
     }
 }
 
 #[derive(Clone)]
-struct PartOfFile {
-    offset: u64,
-    size: u64,
-    file_number: u32,
+pub struct FileBlock {
+    pub offset: u64,
+    pub size: u64,
+    pub block_number: u32,
 }
 
 #[derive(Clone, PartialEq)]
@@ -443,126 +68,122 @@ pub struct FileEvent {
     pub timestamp: Timestamp,
 }
 
-#[derive(Clone, PartialEq)]
-pub enum FileLock {
-    LockedBySystemForBlobWrite { user: Id },
-}
-
-impl FileLock {
-    fn is_locked_by(& self, lock: & FileLock) -> bool {
-        *self == *lock
-    }
-}
-
 #[derive(Clone)]
 pub struct Metadata {
     pub created: FileEvent,
     pub modified: FileEvent,
     pub revision: FileRevision,
-    pub read: Id,
-    pub write: Id,
+    pub read: Id, // todo: remove
+    pub write: Id, // todo: remove
     pub parent: NodeId,
-    pub max_part_of_file_size: usize,
+    pub max_block_size: usize,
     pub file_type: FileType,
-    part_of_file_descriptions: Vec<PartOfFile>,
+    pub block_descriptions: Vec<FileBlock>,
 }
 
 impl Metadata {
-    pub fn new_file(user: Id, parent: NodeId, file_type: FileType, max_part_of_file_size: usize) -> Metadata {
+    pub fn new_file(
+        user: Id,
+        parent: NodeId,
+        file_type: FileType,
+        max_block_size: usize
+    ) -> Metadata {
+
+        let timestamp = utc_timestamp();
         let mut metadata = Metadata {
             created: FileEvent {
                 user: user.clone(),
-                timestamp: utc_timestamp(),
+                timestamp: timestamp.clone(),
             },
             modified: FileEvent {
                 user: user.clone(),
-                timestamp: utc_timestamp(),
+                timestamp: timestamp,
             },
             revision: 0,
             read: user.clone(),
             write: user,
             parent: parent,
             file_type: file_type,
-            max_part_of_file_size: max_part_of_file_size,
-            part_of_file_descriptions: Vec::new(),
+            max_block_size: max_block_size,
+            block_descriptions: Vec::new(),
         };
-        metadata.add_part_of_file();
+        metadata.add_block();
         metadata
     }
 
     pub fn size(& self) -> u64 {
-        self.part_of_file_descriptions.iter().fold(0, | acc, ref element | acc + element.size)
+        self.block_descriptions.iter().fold(0, | acc, ref element | acc + element.size)
     }
 
-    pub fn add_part_of_file(& mut self) -> u32 {
+    pub fn add_block(& mut self) -> u32 {
 
-        let file_number = self.part_of_file_descriptions.len() as u32;
-        self.part_of_file_descriptions.push(PartOfFile {
-            offset: file_number as u64 * self.max_part_of_file_size as u64,
+        let block_number = self.block_descriptions.len() as u32;
+        self.block_descriptions.push(FileBlock {
+            offset: block_number as u64 * self.max_block_size as u64,
             size: 0,
-            file_number: file_number,
+            block_number: block_number,
         });
-        file_number
+        block_number
     }
 
-    fn is_in_part(& self, file_number: u32, offset: u64, size: u64) -> bool {
-        Metadata::is_in_part_description(
-            & self.part_of_file_descriptions[file_number as usize],
+    pub fn is_in_block(& self, block_number: u32, offset: u64, size: u64) -> bool {
+        Metadata::_is_in_block(
+            & self.block_descriptions[block_number as usize],
             offset,
             size,
-            self.max_part_of_file_size as u64
+            self.max_block_size as u64
         )
     }
 
-    fn is_in_part_description(file: & PartOfFile, offset: u64, size: u64, max_part_of_file_size: u64)
-                              -> bool {
+    pub fn _is_in_block(block: & FileBlock, offset: u64, size: u64, max_block_size: u64)
+                       -> bool {
 
-        if offset >= file.offset && offset < (file.offset + max_part_of_file_size) {
+        if offset >= block.offset && offset < (block.offset + max_block_size) {
             let end_of_modification = offset + size;
-            if end_of_modification <= (file.offset + max_part_of_file_size) {
+            if end_of_modification <= (block.offset + max_block_size) {
                 true
             } else {
                 false
             }
-
         } else {
             false
         }
     }
 
-    fn find_part_of_file(& self, offset: u64, size: u64) -> Result<u32, ()> {
+    pub fn find_block(& self, offset: u64, size: u64) -> Result<u32, ()> {
 
-        for ref desc in self.part_of_file_descriptions.iter() {
-            if Metadata::is_in_part_description(desc, offset, size, self.max_part_of_file_size as u64) {
-                return Ok(desc.file_number);
+        for ref desc in self.block_descriptions.iter() {
+            if Metadata::_is_in_block(desc, offset, size, self.max_block_size as u64) {
+                return Ok(desc.block_number);
             }
         }
         Err(())
     }
 
-    fn find_or_allocate_part_of_file(& mut self, offset: u64, size: u64) -> Result<u32, ()> {
+    pub fn find_or_allocate_block(& mut self, offset: u64, size: u64) -> Result<u32, ()> {
 
-        let result = self.find_part_of_file(offset, size);
+        let result = self.find_block(offset, size);
         if result.is_ok() {
             return result;
         }
 
-        let last_offset = self.part_of_file_descriptions.last().unwrap().offset;
-        if offset > (last_offset + self.max_part_of_file_size as u64 - 1)
-            && offset < (last_offset + self.max_part_of_file_size as u64 * 2)
+        let last_offset = self.block_descriptions.last().unwrap().offset;
+        if offset > (last_offset + self.max_block_size as u64 - 1)
+            && offset < (last_offset + self.max_block_size as u64 * 2)
         {
 
-            let file_number = self.add_part_of_file();
-            return Ok(file_number);
+            let block_number = self.add_block();
+            return Ok(block_number);
         }
         Err(())
     }
 
-    fn path(path_basename: & Path) -> PathBuf {
+    pub fn path(path_basename: & Path) -> PathBuf {
         path_basename.with_extension("metadata")
     }
 
-    fn store(& self, path_basename: & Path, crypto_context: & Context) -> Result<(), ()> {
+    pub fn store(& self, path_basename: & Path, crypto_context: & Context) -> Result<(), ()> {
+
         let mut serialized = SerializedMetadata::new(
             self.created.timestamp,
             self.created.user.clone(),
@@ -573,18 +194,18 @@ impl Metadata {
             self.write.clone(),
             self.parent.clone(),
             self.file_type.clone(),
-            self.max_part_of_file_size,
+            self.max_block_size,
         );
 
-        for ref desc in self.part_of_file_descriptions.iter() {
-            serialized.segments.push((desc.offset, desc.size, desc.file_number));
+        for ref desc in self.block_descriptions.iter() {
+            serialized.segments.push((desc.offset, desc.size, desc.block_number));
         }
 
         serialized.write(& crypto_context, & Metadata::path(& path_basename))
             .map_err(| () | error!("Failed to write file metadata"))
     }
 
-    fn load(path_basename: & PathBuf, crypto_context: & Context) -> Result<Metadata, ()> {
+    pub fn load(path_basename: & PathBuf, crypto_context: & Context) -> Result<Metadata, ()> {
 
         let path_metadata = Metadata::path(& path_basename);
         let serialized = SerializedMetadata::read(& crypto_context, & path_metadata)
@@ -601,19 +222,19 @@ impl Metadata {
                 timestamp: serialized.modified,
             },
             revision: serialized.revision,
-            part_of_file_descriptions: Vec::new(),
+            block_descriptions: Vec::new(),
             read: serialized.read,
             write: serialized.write,
             parent: serialized.parent,
             file_type: serialized.file_type,
-            max_part_of_file_size: serialized.max_part_of_file_size,
+            max_block_size: serialized.max_block_size,
         };
 
-        for (ref offset, ref size, ref file_number) in serialized.segments {
-            metadata.part_of_file_descriptions.push(PartOfFile {
+        for (ref offset, ref size, ref block_number) in serialized.segments {
+            metadata.block_descriptions.push(FileBlock {
                 offset: offset.clone(),
                 size: size.clone(),
-                file_number: file_number.clone(),
+                block_number: block_number.clone(),
             });
         }
 
@@ -621,77 +242,46 @@ impl Metadata {
     }
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-enum Request {
-    Close,
-    RequestMetadata,
-    RequestAccess { user: Id },
-    Write { revision: FileRevision, offset: u64, buffer: Buffer },
-    Insert { revision: FileRevision, offset: u64, buffer: Buffer },
-    Delete { revision: FileRevision, offset: u64, size: u64 },
-    Read { offset: u64, size: u64 },
-    LockFile { revision: FileRevision, description: FileLock },
-    UnlockFile { description: FileLock },
-}
-
-enum Response {
-    Access { access: FileAccess },
-    Metadata { metadata: Metadata },
-    Write { result: Result<FileRevision, FileError> },
-    Insert { result: Result<FileRevision, FileError> },
-    Delete { result: Result<FileRevision, FileError> },
-    Read { result: Result<(Buffer, FileRevision), FileError> },
-    LockFile { result: Result<(), FileError> },
-    UnlockFile { result: Result<(), FileError> },
-    Notification { notification: Notification },
-}
-
-struct ConnectedAccess {
-    send_user: Sender<Response>,
-    receive_file: Receiver<Request>,
-    user: Option<Id>,
-}
-
-impl Display for ConnectedAccess {
-    fn fmt(& self, f: & mut Formatter) -> FmtResult {
-        if let Some(ref user) = self.user {
-            write!(f, "{}", user)
-        } else {
-            write!(f, "FileHandle")
-        }
-    }
-}
-
 impl ConnectedAccess {
-    fn is_handle(& self) -> bool {
+    fn is_root_handle(& self) -> bool {
         self.user.is_none()
     }
 }
 
-struct FileThread {
+pub struct FileService {
     file: FileImpl,
     users: Vec<ConnectedAccess>,
 }
 
-fn send_response(user: & ConnectedAccess, response: Response) -> Result<(), ()> {
+fn send_response(user: & ConnectedAccess, response: FileResponseProtocol) -> Result<(), ()> {
     user.send_user.send(response)
-        .map_err(| desc | warn!("Failed to send response to user, desc=\"{}\"", desc))
+        .map_err(| desc | error!("Failed to send response to user, desc=\"{}\", user=\"{}\"", desc, user))
 }
 
-impl FileThread {
+impl FileService {
+    pub fn create(
+        path_basename: & PathBuf,
+        crypto_context: Context,
+        user: Id,
+        parent: NodeId,
+        file_type: FileType,
+        max_block_size: usize,
+    ) -> Result<(), ()> {
+        FileImpl::create(& path_basename, crypto_context, user, parent, file_type, max_block_size)
+    }
+
     pub fn open(path_basename: & PathBuf, crypto_context: Context, metadata: Metadata)
-                -> Result<FileThread, ()> {
+                -> Result<FileService, ()> {
         let file = FileImpl::open(path_basename, crypto_context, metadata) ? ;
-        Ok(FileThread {
+        Ok(FileService {
             file: file,
             users: Vec::new(),
         })
     }
 
     pub fn create_access(& mut self, user: Option<Id>) -> FileAccess {
-        let (tx_user, rx_user) = channel::<Response>();
-        let (tx_file, rx_file) = channel::<Request>();
+        let (tx_user, rx_user) = channel::<FileResponseProtocol>();
+        let (tx_file, rx_file) = channel::<FileRequestProtocol>();
 
         self.users.push(ConnectedAccess {
             send_user: tx_user,
@@ -729,18 +319,18 @@ impl FileThread {
                     let mut send_ok = true;
                     match message {
 
-                        Request::RequestAccess { user } => {
+                        FileRequestProtocol::RequestAccess { user } => {
                             add_access = Some((i, user));
                         },
 
-                        Request::RequestMetadata => {
-                            send_ok = send_response(& user, Response::Metadata {
+                        FileRequestProtocol::RequestMetadata => {
+                            send_ok = send_response(& user, FileResponseProtocol::Metadata {
                                 metadata: self.file.metadata.clone()
                             }).is_ok();
                         },
 
-                        Request::Close => {
-                            if user.is_handle() {
+                        FileRequestProtocol::Close => {
+                            if user.is_root_handle() {
                                 notifications.push(
                                     (true, None, Notification::FileClosing { })
                                 );
@@ -751,7 +341,7 @@ impl FileThread {
                             }
                         },
 
-                        Request::Write { revision, offset, buffer } => {
+                        FileRequestProtocol::Write { revision, offset, buffer } => {
                             let size = buffer.len() as u64;
                             match self.file.write(& user.user, revision, offset, buffer) {
                                 Ok(revision) => {
@@ -764,19 +354,19 @@ impl FileThread {
                                              size: size
                                          })
                                     );
-                                    send_ok = send_response(& user, Response::Write {
+                                    send_ok = send_response(& user, FileResponseProtocol::Write {
                                         result: Ok(revision),
                                     }).is_ok();
                                 },
                                 Err(status) => {
-                                    send_ok = send_response(& user, Response::Write {
+                                    send_ok = send_response(& user, FileResponseProtocol::Write {
                                         result: Err(status),
                                     }).is_ok();
                                 }
                             };
                         },
 
-                        Request::Insert { revision, offset, buffer } => {
+                        FileRequestProtocol::Insert { revision, offset, buffer } => {
                             let size = buffer.len() as u64;
                             match self.file.insert(& user.user, revision, offset, buffer) {
                                 Ok(revision) => {
@@ -789,19 +379,19 @@ impl FileThread {
                                              size: size
                                          })
                                     );
-                                    send_ok = send_response(& user, Response::Insert {
+                                    send_ok = send_response(& user, FileResponseProtocol::Insert {
                                         result: Ok(revision),
                                     }).is_ok();
                                 },
                                 Err(status) => {
-                                    send_ok = send_response(& user, Response::Insert {
+                                    send_ok = send_response(& user, FileResponseProtocol::Insert {
                                         result: Err(status),
                                     }).is_ok();
                                 }
                             };
                         },
 
-                        Request::Delete { revision, offset, size } => {
+                        FileRequestProtocol::Delete { revision, offset, size } => {
                             match self.file.delete(& user.user, revision, offset, size) {
                                 Ok(revision) => {
                                     notifications.push(
@@ -813,57 +403,57 @@ impl FileThread {
                                              size: size
                                          })
                                     );
-                                    send_ok = send_response(& user, Response::Delete {
+                                    send_ok = send_response(& user, FileResponseProtocol::Delete {
                                         result: Ok(revision),
                                     }).is_ok();
                                 },
                                 Err(status) => {
-                                    send_ok = send_response(& user, Response::Delete {
+                                    send_ok = send_response(& user, FileResponseProtocol::Delete {
                                         result: Err(status),
                                     }).is_ok();
                                 }
                             };
                         },
 
-                        Request::Read { offset, size } => {
+                        FileRequestProtocol::Read { offset, size } => {
                             match self.file.read(offset, size) {
                                 Ok((buffer, revision)) => {
-                                    send_ok = send_response(& user, Response::Read {
+                                    send_ok = send_response(& user, FileResponseProtocol::Read {
                                         result: Ok((buffer, revision)),
                                     }).is_ok();
                                 },
                                 Err(status) => {
-                                    send_ok = send_response(& user, Response::Read {
+                                    send_ok = send_response(& user, FileResponseProtocol::Read {
                                         result: Err(status),
                                     }).is_ok();
                                 }
                             };
                         },
 
-                        Request::LockFile { revision, description } => {
+                        FileRequestProtocol::LockFile { revision, description } => {
                             match self.file.lock(revision, description) {
                                 Ok(()) => {
-                                    send_ok = send_response(& user, Response::LockFile {
+                                    send_ok = send_response(& user, FileResponseProtocol::LockFile {
                                         result: Ok(()),
                                     }).is_ok();
                                 },
                                 Err(status) => {
-                                    send_ok = send_response(& user, Response::LockFile {
+                                    send_ok = send_response(& user, FileResponseProtocol::LockFile {
                                         result: Err(status),
                                     }).is_ok();
                                 }
                             };
                         },
 
-                        Request::UnlockFile { description } => {
+                        FileRequestProtocol::UnlockFile { description } => {
                             match self.file.unlock(description) {
                                 Ok(()) => {
-                                    send_ok = send_response(& user, Response::UnlockFile {
+                                    send_ok = send_response(& user, FileResponseProtocol::UnlockFile {
                                         result: Ok(()),
                                     }).is_ok();
                                 },
                                 Err(status) => {
-                                    send_ok = send_response(& user, Response::UnlockFile {
+                                    send_ok = send_response(& user, FileResponseProtocol::UnlockFile {
                                         result: Err(status),
                                     }).is_ok();
                                 }
@@ -889,7 +479,7 @@ impl FileThread {
                 let access = self.create_access(Some(user));
                 if send_response(
                     & self.users[index],
-                    Response::Access { access: access }
+                    FileResponseProtocol::Access { access: access }
                 ).is_err() {
                     self.users.remove(index);
                 }
@@ -897,7 +487,7 @@ impl FileThread {
 
             if self.users.len() <= 1 {
                 debug!("Closing file as it has no users, file={}", self.file.display());
-                let _ = send_response(& self.users[0], Response::Notification {
+                let _ = send_response(& self.users[0], FileResponseProtocol::Notification {
                     notification: Notification::FileClosing { }
                 });
                 exit = true;
@@ -906,7 +496,7 @@ impl FileThread {
             if ! notifications.is_empty() {
                 for (i, user) in self.users.iter().enumerate() {
                     for & (ref skip_handle, ref source_index, ref notification) in notifications.iter() {
-                        if *skip_handle && user.is_handle() {
+                        if *skip_handle && user.is_root_handle() {
                             continue;
                         }
 
@@ -917,7 +507,7 @@ impl FileThread {
                             }
                         }
                         if send {
-                            let _ = send_response(& user, Response::Notification {
+                            let _ = send_response(& user, FileResponseProtocol::Notification {
                                 notification: notification.clone()
                             });
                         }
@@ -933,11 +523,11 @@ impl FileThread {
     }
 }
 
-struct FileImpl {
+pub struct FileImpl {
     metadata: Metadata,
     path_basename: PathBuf,
     buffer: Buffer,
-    current_part_of_file_index: u32,
+    current_block_index: u32,
     crypto_context: Context,
     lock: Option<FileLock>,
 }
@@ -946,17 +536,17 @@ static DEFAULT_BUFFER_SIZE_BYTES: u64 = 1024 * 1;
 
 impl FileImpl {
 
-    fn display(& self) -> PathDisplay {
+    pub fn display(& self) -> PathDisplay {
         self.path_basename.display()
     }
 
-    fn exists(path_basename: & Path) -> bool {
+    pub fn exists(path_basename: & Path) -> bool {
         let path = FileImpl::path_data(path_basename, 0);
         path.exists()
     }
 
-    fn path_data(path_basename: & Path, file_number: u32) -> PathBuf {
-        path_basename.with_extension(format!("{}", file_number))
+    pub fn path_data(path_basename: & Path, block_number: u32) -> PathBuf {
+        path_basename.with_extension(format!("{}", block_number))
     }
 
     pub fn create(
@@ -965,14 +555,14 @@ impl FileImpl {
         user: Id,
         parent: NodeId,
         file_type: FileType,
-        max_part_of_file_size: usize,
+        max_block_size: usize,
     ) -> Result<(), ()> {
 
         let mut file = FileImpl {
             buffer: Buffer::with_capacity(DEFAULT_BUFFER_SIZE_BYTES as usize),
-            current_part_of_file_index: 0,
+            current_block_index: 0,
             crypto_context: crypto_context,
-            metadata: Metadata::new_file(user, parent, file_type, max_part_of_file_size),
+            metadata: Metadata::new_file(user, parent, file_type, max_block_size),
             path_basename: path_basename.clone(),
             lock: None,
         };
@@ -985,26 +575,26 @@ impl FileImpl {
 
         let mut file = FileImpl {
             buffer: Buffer::with_capacity(DEFAULT_BUFFER_SIZE_BYTES as usize),
-            current_part_of_file_index: 0,
+            current_block_index: 0,
             crypto_context: crypto_context,
             metadata: metadata,
             path_basename: path_basename.clone(),
             lock: None,
         };
 
-        if file.metadata.part_of_file_descriptions.len() == 0 {
+        if file.metadata.block_descriptions.len() == 0 {
             error!("File has not data file descriptions, path_basename={}",
                    path_basename.display());
             return Err(());
         }
 
-        file.load_part_of_file(0) ? ;
+        file.load_block(0) ? ;
         Ok(file)
     }
 
-    fn load_part_of_file(& mut self, index_of_part: u32) -> Result<(), ()> {
-        let ref part_of_file = self.metadata.part_of_file_descriptions[index_of_part as usize];
-        let path = FileImpl::path_data(& self.path_basename, part_of_file.file_number);
+    fn load_block(& mut self, block_index: u32) -> Result<(), ()> {
+        let ref block = self.metadata.block_descriptions[block_index as usize];
+        let path = FileImpl::path_data(& self.path_basename, block.block_number);
         let mut file = match OpenOptions::new().read(true).create(false).open(path.as_path()) {
             Ok(file) => file,
             Err(_error_code) => {
@@ -1019,16 +609,16 @@ impl FileImpl {
             },
             _ => (),
         };
-        self.current_part_of_file_index = index_of_part;
+        self.current_block_index = block_index;
         if data.len() > 0 {
             self.buffer = self.crypto_context.decrypt(& data) ? ;
         }
         Ok(())
     }
 
-    fn write_part_of_file(& mut self) -> Result<(), ()> {
+    fn write_block(& mut self) -> Result<(), ()> {
 
-        let path = FileImpl::path_data(& self.path_basename, self.current_part_of_file_index);
+        let path = FileImpl::path_data(& self.path_basename, self.current_block_index);
         let mut file = File::create(path.as_path())
             .map_err(| error | error!("Failed to open file for writing: path={}, error={}",
                                       path.display(), error))
@@ -1042,28 +632,28 @@ impl FileImpl {
                 Err(())
             },
             _ => {
-                let ref mut desc = self.metadata.part_of_file_descriptions[self.current_part_of_file_index as usize];
+                let ref mut desc = self.metadata.block_descriptions[self.current_block_index as usize];
                 desc.size = self.buffer.len() as u64;
                 Ok(())
             },
         }
     }
 
-    fn swap_part_of_file(& mut self, file_index_of_new_file: u32) -> Result<(), ()> {
-        debug!("Swapping current buffer, current_part_of_file_index={}, new_index={}, file={}",
-               self.current_part_of_file_index, file_index_of_new_file, self.display());
+    fn swap_block(& mut self, block_index: u32) -> Result<(), ()> {
+        debug!("Swapping current buffer, current_block_index={}, block_index={}, file={}",
+               self.current_block_index, block_index, self.display());
 
-        self.write_part_of_file() ? ;
-        self.load_part_of_file(file_index_of_new_file)
+        self.write_block() ? ;
+        self.load_block(block_index)
     }
 
     fn store(& mut self) {
-        let _ = self.write_part_of_file();
+        let _ = self.write_block();
         let _ = self.metadata.store(& self.path_basename, & self.crypto_context);
     }
 
-    fn update_current_part_of_file_size(& mut self) {
-        let ref mut desc = self.metadata.part_of_file_descriptions[self.current_part_of_file_index as usize];
+    fn update_current_block_size(& mut self) {
+        let ref mut desc = self.metadata.block_descriptions[self.current_block_index as usize];
         desc.size = self.buffer.len() as u64;
     }
 
@@ -1128,12 +718,12 @@ impl FileImpl {
     fn write(& mut self, user: & Option<Id>, revision: FileRevision, offset: u64, buffer: Buffer)
              -> Result<FileRevision, FileError> {
 
-        if ! self.metadata.is_in_part(self.current_part_of_file_index, offset, buffer.len() as u64) {
-            let file_number = self.metadata.find_or_allocate_part_of_file(offset, buffer.len() as u64)
+        if ! self.metadata.is_in_block(self.current_block_index, offset, buffer.len() as u64) {
+            let block_number = self.metadata.find_or_allocate_block(offset, buffer.len() as u64)
                 .map_err(| () | FileError::OffsetAndSizeDoNotMapToPartOfFile)
                 ? ;
 
-            self.swap_part_of_file(file_number)
+            self.swap_block(block_number)
                 .map_err(| () | FileError::InternalError)
                 ? ;
         }
@@ -1155,19 +745,19 @@ impl FileImpl {
         }
 
         self.metadata.revision += 1;
-        self.update_current_part_of_file_size();
+        self.update_current_block_size();
         Ok(self.metadata.revision)
     }
 
     fn insert(& mut self, user: & Option<Id>, revision: FileRevision, offset: u64, buffer: Buffer)
               -> Result<FileRevision, FileError> {
 
-        if ! self.metadata.is_in_part(self.current_part_of_file_index, offset, buffer.len() as u64) {
-            let file_number = self.metadata.find_or_allocate_part_of_file(offset, buffer.len() as u64)
+        if ! self.metadata.is_in_block(self.current_block_index, offset, buffer.len() as u64) {
+            let block_number = self.metadata.find_or_allocate_block(offset, buffer.len() as u64)
                 .map_err(| () | FileError::OffsetAndSizeDoNotMapToPartOfFile)
                 ? ;
 
-            self.swap_part_of_file(file_number)
+            self.swap_block(block_number)
                 .map_err(| () | FileError::InternalError)
                 ? ;
         }
@@ -1194,18 +784,18 @@ impl FileImpl {
         }
 
         self.metadata.revision += 1;
-        self.update_current_part_of_file_size();
+        self.update_current_block_size();
         Ok(self.metadata.revision)
     }
 
     pub fn read(& mut self, offset: u64, size: u64)
                 -> Result<(Buffer, FileRevision), FileError> {
-        if ! self.metadata.is_in_part(self.current_part_of_file_index, offset, size) {
-            let file_number = self.metadata.find_part_of_file(offset, size)
+        if ! self.metadata.is_in_block(self.current_block_index, offset, size) {
+            let file_number = self.metadata.find_block(offset, size)
                 .map_err(| () | FileError::OffsetAndSizeDoNotMapToPartOfFile)
                 ? ;
 
-            self.swap_part_of_file(file_number)
+            self.swap_block(file_number)
                 .map_err(| () | FileError::InternalError)
                 ? ;
         }
@@ -1226,21 +816,21 @@ impl FileImpl {
     fn delete(& mut self, user: & Option<Id>, revision: FileRevision, offset: u64, size: u64)
               -> Result<FileRevision, FileError> {
 
-        if ! self.metadata.is_in_part(self.current_part_of_file_index, offset, size) {
+        if ! self.metadata.is_in_block(self.current_block_index, offset, size) {
 
-            let file_number = self.metadata.find_part_of_file(offset, size)
+            let block_number = self.metadata.find_block(offset, size)
                 .map_err(| () | FileError::OffsetAndSizeDoNotMapToPartOfFile)
                 ? ;
 
-            if self.current_part_of_file_index != (self.metadata.part_of_file_descriptions.len() as u32 - 1) {
+            if self.current_block_index != (self.metadata.block_descriptions.len() as u32 - 1) {
                 return Err(FileError::DeleteIsonlyAllowedForLastPart);
             }
 
-            self.swap_part_of_file(file_number)
+            self.swap_block(block_number)
                 .map_err(| () | FileError::InternalError)
                 ? ;
         } else {
-            if self.current_part_of_file_index != (self.metadata.part_of_file_descriptions.len() as u32 - 1) {
+            if self.current_block_index != (self.metadata.block_descriptions.len() as u32 - 1) {
                 return Err(FileError::DeleteIsonlyAllowedForLastPart);
             }
         }
@@ -1256,7 +846,7 @@ impl FileImpl {
         let _: Buffer = self.buffer.drain(offset as usize .. end_offset as usize).collect();
 
         self.metadata.revision += 1;
-        self.update_current_part_of_file_size();
+        self.update_current_block_size();
         Ok(self.metadata.revision)
     }
 }

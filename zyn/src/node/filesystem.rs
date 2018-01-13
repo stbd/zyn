@@ -8,7 +8,7 @@ use std::vec::{ Vec };
 use chrono::datetime::{ DateTime };
 use chrono::{ UTC, NaiveDateTime };
 
-use node::file::{ FileHandle };
+use node::file_handle::{ FileHandle };
 use node::folder::{ Folder };
 use node::crypto::{ Crypto };
 use node::user_authority::{ Id };

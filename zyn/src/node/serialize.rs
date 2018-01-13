@@ -324,7 +324,7 @@ pub struct SerializedMetadata {
     pub write: Id,
     pub parent: NodeId,
     pub file_type: FileType,
-    pub max_part_of_file_size: usize,
+    pub max_block_size: usize,
 }
 
 impl SerializedMetadata {
@@ -342,7 +342,7 @@ impl SerializedMetadata {
         write: Id,
         parent: NodeId,
         file_type: FileType,
-        max_part_of_file_size: usize
+        max_block_size: usize
     ) -> SerializedMetadata {
 
         SerializedMetadata {
@@ -356,7 +356,7 @@ impl SerializedMetadata {
             write: write,
             parent: parent,
             file_type: file_type,
-            max_part_of_file_size: max_part_of_file_size,
+            max_block_size: max_block_size,
         }
     }
 

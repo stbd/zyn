@@ -9,7 +9,7 @@ use std::vec::{ Vec };
 use std::{ str };
 
 use node::connection::{ Connection };
-use node::file::{ FileAccess, FileError, Notification, FileLock };
+use node::file_handle::{ FileAccess, FileError, Notification, FileLock };
 use node::filesystem::{ FilesystemError };
 use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement,
                   ErrorResponse, NodeError };

@@ -5,7 +5,7 @@ use node::test_util::tempdir::{ TempDir };
 use node::filesystem::{ Filesystem };
 use node::user_authority::{ Id };
 use node::common::{ NODE_ID_ROOT, NodeId, FileType };
-use node::file::{ FileAccess };
+use node::file_handle::{ FileAccess };
 use node::test_util::{ create_crypto, create_temp_folder, init_logging };
 
 struct State {
