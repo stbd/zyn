@@ -64,7 +64,6 @@ struct FileServiceHandle {
 pub struct FileHandle {
     path: PathBuf,
     file_impl: Option<FileServiceHandle>,
-    metadata: Option<Metadata>,
 }
 
 impl FileHandle {
@@ -94,7 +93,6 @@ impl FileHandle {
         Ok(FileHandle{
             path: path,
             file_impl: None,
-            metadata: None,
         })
     }
 
@@ -107,7 +105,6 @@ impl FileHandle {
         Ok(FileHandle{
             path: path,
             file_impl: None,
-            metadata: None,
         })
     }
 
@@ -143,16 +140,11 @@ impl FileHandle {
             return Ok(metadata);
         }
 
-        if let Some(ref metadata) = self.metadata {
-            return Ok(metadata.clone())
-        }
-
         let context = crypto.create_context()
             .map_err(| () | log_crypto_context_error())
             ? ;
 
         let metadata = Metadata::load(& self.path, & context) ? ;
-        self.metadata = Some(metadata.clone());
         Ok(metadata)
     }
 
@@ -201,15 +193,9 @@ impl FileHandle {
     fn start_file_impl(& mut self, crypto_context: Context, user: Id)
                          -> Result<FileAccess, ()>
     {
-        let metadata = {
-            if self.metadata.is_some() {
-                self.metadata.take().unwrap()
-            } else {
-                Metadata::load(& self.path, & crypto_context) ?
-            }
-        };
-
+        let metadata = Metadata::load(& self.path, & crypto_context) ? ;
         let mut file = FileService::open(& self.path, crypto_context, metadata) ? ;
+
         let access_1 = file.create_access(None);
         let access_2 = file.create_access(Some(user));
 

@@ -3,15 +3,15 @@
  * Refactor
   * Split large files
    * Client: parsing and buffer to separate files
-   * File: Move classes
   * File:
-   * Metadata access
+   * Properties for open files
+   * Fix fle properties size
   * Client
    * Open files to struct from tuple
   * Filesystem
    * Only N files should be stored for each folder
  * Docker configuration for production
- * Possibility to store protocol to file
+ * Possibility to store protocol messages to file, to make debugging easier
 
 ## Issues
  * It is possible to create file/folder with name that already exists under parent
