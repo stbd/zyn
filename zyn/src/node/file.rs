@@ -10,7 +10,7 @@ use std::vec::{ Vec };
 
 use node::common::{ utc_timestamp, FileRevision, Buffer, NodeId, FileType, Timestamp };
 use node::crypto::{ Context };
-use node::file_handle::{ FileError, FileLock, FileAccess, Notification };
+use node::file_handle::{ FileError, FileLock, FileAccess, Notification, OpenFileProperties };
 use node::serialize::{ SerializedMetadata };
 use node::user_authority::{ Id };
 
@@ -28,7 +28,7 @@ pub enum FileRequestProtocol {
 
 pub enum FileResponseProtocol {
     Access { access: FileAccess },
-    Metadata { metadata: Metadata },
+    Metadata { metadata: Metadata, open_file_properties: OpenFileProperties },
     Write { result: Result<FileRevision, FileError> },
     Insert { result: Result<FileRevision, FileError> },
     Delete { result: Result<FileRevision, FileError> },
@@ -44,9 +44,15 @@ struct ConnectedAccess {
     user: Option<Id>,
 }
 
-impl Display for ConnectedAccess { fn fmt(& self, f: & mut Formatter)
-    -> FmtResult { if let Some(ref user) = self.user { write!(f, "{}",
-    user) } else { write!(f, "root-handle") } } }
+impl Display for ConnectedAccess {
+    fn fmt(& self, f: & mut Formatter) -> FmtResult {
+        if let Some(ref user) = self.user {
+            write!(f, "{}", user)
+        } else {
+            write!(f, "root-handle")
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct FileBlock {
@@ -306,6 +312,13 @@ impl FileService {
 
             notifications.truncate(0);
 
+            let current_active_users_ids: Vec<Id> = self.users
+                .iter()
+                .filter(| user | ! user.is_root_handle() )
+                .map(| user | user.user.as_ref().unwrap().clone() )
+                .collect()
+                ;
+
             for (i, user) in self.users.iter_mut().enumerate() {
                 if let Ok(message) = user.receive_file.try_recv() {
 
@@ -317,8 +330,13 @@ impl FileService {
                         },
 
                         FileRequestProtocol::RequestMetadata => {
+                            let lock = self.file.get_lock();
                             send_ok = send_response(& user, FileResponseProtocol::Metadata {
-                                metadata: self.file.metadata.clone()
+                                metadata: self.file.metadata.clone(),
+                                open_file_properties: OpenFileProperties {
+                                    active_users: current_active_users_ids.clone(),
+                                    lock: lock,
+                                },
                             }).is_ok();
                         },
 
@@ -561,6 +579,10 @@ impl FileImpl {
         };
         file.store();
         Ok(())
+    }
+
+    fn get_lock(& self) -> Option<FileLock> {
+        self.lock.clone()
     }
 
     pub fn open(path_basename: & PathBuf, crypto_context: Context, metadata: Metadata)

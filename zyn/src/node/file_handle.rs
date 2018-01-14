@@ -47,6 +47,31 @@ pub struct FileProperties {
     pub open_file_properties: Option<OpenFileProperties>,
 }
 
+impl FileProperties {
+    fn create(metadata: Metadata, open_file_properties: Option<OpenFileProperties>) -> FileProperties {
+        let size = metadata.size();
+        FileProperties {
+            created_at: metadata.created.timestamp,
+            created_by: metadata.created.user,
+            modified_at: metadata.modified.timestamp,
+            modified_by: metadata.modified.user,
+            revision: metadata.revision,
+            size: size,
+            parent: metadata.parent,
+            file_type: metadata.file_type,
+            open_file_properties: open_file_properties,
+        }
+    }
+
+    fn from_open_file(metadata: Metadata, open_file_properties: OpenFileProperties) -> FileProperties {
+        FileProperties::create(metadata, Some(open_file_properties))
+    }
+
+    fn from_closed_file(metadata: Metadata) -> FileProperties {
+        FileProperties::create(metadata, None)
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub enum FileLock {
     LockedBySystemForBlobWrite { user: Id },
@@ -112,44 +137,22 @@ impl FileHandle {
 
     pub fn properties(& mut self, crypto: & Crypto) -> Result<FileProperties, ()> {
 
-        let properties = {
-            let metadata = self.metadata(crypto) ? ;
-
-            let size = metadata.size();
-            FileProperties {
-                created_at: metadata.created.timestamp,
-                created_by: metadata.created.user,
-                modified_at: metadata.modified.timestamp,
-                modified_by: metadata.modified.user,
-                revision: metadata.revision,
-                parent: metadata.parent,
-                size: size,
-                file_type: metadata.file_type,
-
-                open_file_properties: None,
-            }
-        };
-
-        Ok(properties)
-    }
-
-    fn metadata(& mut self, crypto: & Crypto) -> Result<Metadata, ()> {
-
         self.update();
 
         if let Some(ref mut file_service) = self.file_service {
-            let metadata = file_service.access.metadata()
+            let properties = file_service.access.properties()
                 .map_err(| _ | error!("Failed to get metadata from file service"))
                 ? ;
-            return Ok(metadata);
+
+            Ok(properties)
+        } else {
+            let context = crypto.create_context()
+                .map_err(| () | log_crypto_context_error())
+                ? ;
+
+            let metadata = Metadata::load(& self.path, & context) ? ;
+            Ok(FileProperties::from_closed_file(metadata))
         }
-
-        let context = crypto.create_context()
-            .map_err(| () | log_crypto_context_error())
-            ? ;
-
-        let metadata = Metadata::load(& self.path, & context) ? ;
-        Ok(metadata)
     }
 
     pub fn open(& mut self, crypto: & Crypto, user: Id) -> Result<FileAccess, ()> {
@@ -394,38 +397,15 @@ impl FileAccess {
         self.channel_send.send(FileRequestProtocol::RequestMetadata { })
             .map_err(| _ | FileError::InternalCommunicationError) ? ;
 
-        let metadata = file_receive::<Metadata>(self, & | msg | {
+        let (metadata, open_file_properties) = file_receive::<(Metadata, OpenFileProperties)>(self, & | msg | {
             match msg {
-                FileResponseProtocol::Metadata{ metadata } => (None, Some(Ok(metadata))),
+                FileResponseProtocol::Metadata{ metadata, open_file_properties } =>
+                    (None, Some(Ok((metadata, open_file_properties)))),
                 other => (Some(other), None),
             }
         }) ? ;
 
-        let size = metadata.size();
-        Ok(FileProperties { // todo: refactor creating properties and handle open file properties
-            created_at: metadata.created.timestamp,
-            created_by: metadata.created.user,
-            modified_at: metadata.modified.timestamp,
-            modified_by: metadata.modified.user,
-            revision: metadata.revision,
-            size: size,
-            parent: metadata.parent,
-            file_type: metadata.file_type,
-
-            open_file_properties: None,
-        })
-    }
-
-    pub fn metadata(& mut self) -> Result<Metadata, FileError> {
-        self.channel_send.send(FileRequestProtocol::RequestMetadata { })
-            .map_err(| _ | FileError::InternalCommunicationError) ? ;
-
-        file_receive::<Metadata>(self, & | msg | {
-            match msg {
-                FileResponseProtocol::Metadata{ metadata } => (None, Some(Ok(metadata))),
-                other => (Some(other), None),
-            }
-        })
+        Ok(FileProperties::from_open_file(metadata, open_file_properties))
     }
 
     pub fn close(& mut self) -> Result<(), FileError> {
