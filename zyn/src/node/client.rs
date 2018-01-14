@@ -8,12 +8,12 @@ use std::time::{ Duration };
 use std::vec::{ Vec };
 use std::{ str };
 
+use node::client_protocol_buffer::{ ClientBuffer };
+use node::common::{ FileDescriptor, NodeId, Buffer, OpenMode, FileType };
 use node::connection::{ Connection };
 use node::file_handle::{ FileAccess, FileError, Notification, FileLock };
 use node::filesystem::{ FilesystemError };
-use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement,
-                  ErrorResponse, NodeError };
-use node::common::{ FileDescriptor, NodeId, Buffer, OpenMode, FileType };
+use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, ErrorResponse, NodeError };
 use node::user_authority::{ Id };
 
 /*
@@ -384,60 +384,6 @@ impl Status {
             },
             _ => true,
         }
-    }
-}
-
-struct ClientBuffer {
-    buffer: Buffer,
-    buffer_index: usize,
-}
-
-impl ClientBuffer {
-    fn with_capacity(size: usize) -> ClientBuffer {
-        ClientBuffer {
-            buffer: Vec::with_capacity(size),
-            buffer_index: 0,
-        }
-    }
-
-    fn take(& mut self, output: & mut Buffer) {
-        let requested_max = self.buffer_index + output.len();
-        let used_max = {
-            if requested_max > self.buffer.len() {
-                self.buffer.len()
-            } else {
-                requested_max
-            }
-        };
-        output.extend(& self.buffer[self.buffer_index .. used_max]);
-        self.buffer_index = used_max;
-    }
-
-    fn drop_consumed_buffer(& mut self) {
-        self.buffer.drain(0..self.buffer_index);
-        self.buffer_index = 0;
-    }
-
-    fn debug_buffer(& self) {
-        let buffer = self.get_buffer();
-        let size = buffer.len();
-        debug!("Buffer ({}): {}", size, String::from_utf8_lossy(buffer));
-    }
-
-    fn get_mut_buffer(& mut self) -> & mut Vec<u8> {
-        & mut self.buffer
-    }
-
-    fn get_buffer(& self) -> & [u8] {
-        & self.buffer[self.buffer_index .. ]
-    }
-
-    fn get_buffer_length(& self) -> usize {
-        self.buffer.len() - self.buffer_index + 1
-    }
-
-    fn get_buffer_with_length(& self, size: usize) -> & [u8] {
-        & self.buffer[self.buffer_index .. self.buffer_index + size]
     }
 }
 

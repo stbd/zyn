@@ -9,6 +9,7 @@ pub mod connection;
 pub mod serialize;
 pub mod common;
 pub mod user_authority;
+pub mod client_protocol_buffer;
 
 #[cfg(test)]
 mod test_filesystem;
@@ -22,3 +23,5 @@ mod test_util;
 mod test_connection;
 #[cfg(test)]
 mod test_user_authority;
+#[cfg(test)]
+mod test_client_protocol_buffer;
