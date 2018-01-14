@@ -31,6 +31,7 @@ pub enum Notification {
 }
 
 pub struct OpenFileProperties {
+    pub active_users: Vec<Id>,
     pub lock: Option<FileLock>,
 }
 
@@ -40,6 +41,7 @@ pub struct FileProperties {
     pub modified_at: Timestamp,
     pub modified_by: Id,
     pub revision: FileRevision,
+    pub size: u64,
     pub parent: NodeId,
     pub file_type: FileType,
     pub open_file_properties: Option<OpenFileProperties>,
@@ -63,7 +65,7 @@ struct FileServiceHandle {
 
 pub struct FileHandle {
     path: PathBuf,
-    file_impl: Option<FileServiceHandle>,
+    file_service: Option<FileServiceHandle>,
 }
 
 impl FileHandle {
@@ -92,7 +94,7 @@ impl FileHandle {
 
         Ok(FileHandle{
             path: path,
-            file_impl: None,
+            file_service: None,
         })
     }
 
@@ -104,7 +106,7 @@ impl FileHandle {
 
         Ok(FileHandle{
             path: path,
-            file_impl: None,
+            file_service: None,
         })
     }
 
@@ -113,6 +115,7 @@ impl FileHandle {
         let properties = {
             let metadata = self.metadata(crypto) ? ;
 
+            let size = metadata.size();
             FileProperties {
                 created_at: metadata.created.timestamp,
                 created_by: metadata.created.user,
@@ -120,6 +123,7 @@ impl FileHandle {
                 modified_by: metadata.modified.user,
                 revision: metadata.revision,
                 parent: metadata.parent,
+                size: size,
                 file_type: metadata.file_type,
 
                 open_file_properties: None,
@@ -133,7 +137,7 @@ impl FileHandle {
 
         self.update();
 
-        if let Some(ref mut file_service) = self.file_impl {
+        if let Some(ref mut file_service) = self.file_service {
             let metadata = file_service.access.metadata()
                 .map_err(| _ | error!("Failed to get metadata from file service"))
                 ? ;
@@ -150,13 +154,13 @@ impl FileHandle {
 
     pub fn open(& mut self, crypto: & Crypto, user: Id) -> Result<FileAccess, ()> {
 
-        if let Some(ref mut file_impl) = self.file_impl {
+        if let Some(ref mut file_service) = self.file_service {
             debug!("Opening file, service already running: path={}", self.path.display());
-            file_impl.access.channel_send.send(FileRequestProtocol::RequestAccess {
+            file_service.access.channel_send.send(FileRequestProtocol::RequestAccess {
                 user: user
             }).unwrap();
 
-            match file_impl.access.channel_receive.recv() {
+            match file_service.access.channel_receive.recv() {
                 Ok(FileResponseProtocol::Access { access }) => return Ok(access),
                 Ok(_) => return Err(()),
                 Err(_) => return Err(()),
@@ -168,14 +172,14 @@ impl FileHandle {
                 ? ;
 
             debug!("Opening file, starting service: path={}", self.path.display());
-            let access = self.start_file_impl(context, user) ? ;
+            let access = self.start_file_service(context, user) ? ;
             Ok(access)
         }
     }
 
     pub fn is_open(& mut self) -> bool {
         self.update();
-        self.file_impl.is_some()
+        self.file_service.is_some()
     }
 
     pub fn close(& mut self) {
@@ -183,14 +187,14 @@ impl FileHandle {
             return ;
         }
 
-        let file_impl = self.file_impl.take().unwrap();
-        let _ = file_impl.access.channel_send.send(FileRequestProtocol::Close);
-        let _ = file_impl.thread.join()  // todo: Somekind of timeout should be used here
+        let file_service = self.file_service.take().unwrap();
+        let _ = file_service.access.channel_send.send(FileRequestProtocol::Close);
+        let _ = file_service.thread.join()  // todo: Somekind of timeout should be used here
             .map_err(| error | warn!("Failed to join file thread, error={:?}", error))
             ;
     }
 
-    fn start_file_impl(& mut self, crypto_context: Context, user: Id)
+    fn start_file_service(& mut self, crypto_context: Context, user: Id)
                          -> Result<FileAccess, ()>
     {
         let metadata = Metadata::load(& self.path, & crypto_context) ? ;
@@ -203,7 +207,7 @@ impl FileHandle {
             file.process();
         });
 
-        self.file_impl = Some(FileServiceHandle {
+        self.file_service = Some(FileServiceHandle {
             thread: handle,
             access: access_1,
         });
@@ -214,7 +218,7 @@ impl FileHandle {
     fn update(& mut self) {
 
         let mut close = false;
-        if let Some(ref mut handle) = self.file_impl {
+        if let Some(ref mut handle) = self.file_service {
             loop {
                 let notification = handle.access.pop_notification();
                 match notification {
@@ -397,12 +401,14 @@ impl FileAccess {
             }
         }) ? ;
 
+        let size = metadata.size();
         Ok(FileProperties { // todo: refactor creating properties and handle open file properties
             created_at: metadata.created.timestamp,
             created_by: metadata.created.user,
             modified_at: metadata.modified.timestamp,
             modified_by: metadata.modified.user,
             revision: metadata.revision,
+            size: size,
             parent: metadata.parent,
             file_type: metadata.file_type,
 

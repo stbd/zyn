@@ -1,4 +1,3 @@
-
 use std::cmp::{ min };
 use std::fmt::{ Display, Formatter, Result as FmtResult } ;
 use std::fs::{ OpenOptions, File };
@@ -45,15 +44,9 @@ struct ConnectedAccess {
     user: Option<Id>,
 }
 
-impl Display for ConnectedAccess {
-    fn fmt(& self, f: & mut Formatter) -> FmtResult {
-        if let Some(ref user) = self.user {
-            write!(f, "{}", user)
-        } else {
-            write!(f, "root-handle")
-        }
-    }
-}
+impl Display for ConnectedAccess { fn fmt(& self, f: & mut Formatter)
+    -> FmtResult { if let Some(ref user) = self.user { write!(f, "{}",
+    user) } else { write!(f, "root-handle") } } }
 
 #[derive(Clone)]
 pub struct FileBlock {

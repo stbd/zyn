@@ -247,7 +247,7 @@ fn test_serialization() {
     assert!(properties_1.created_at == properties_2.created_at);
     assert!(properties_1.modified_at == properties_2.modified_at);
     assert!(properties_1.file_type == properties_2.file_type);
-    // assert!(properties_1.size() == properties_2.size());
+    assert!(properties_1.size == properties_2.size);
 }
 
 #[test]
@@ -322,16 +322,15 @@ fn test_metadata_size_is_updated() {
     let mut access = state.open();
     let buffer_1: Buffer = vec![4, 5, 6, 7, 8];
     let revision = access.write(0, 0, buffer_1.clone()).unwrap();
-    //assert!(state.metadata().size() == buffer_1.len() as u64);
+    assert!(state.properties().size == buffer_1.len() as u64);
     let revision = access.delete(revision, 0, 2).unwrap();
-    //assert!(state.metadata().size() == (buffer_1.len() as u64 - 2));
+    assert!(state.properties().size == (buffer_1.len() as u64 - 2));
 
     let buffer_2: Buffer = vec![11, 12];
     let _ = access.insert(revision, 0, buffer_2.clone()).unwrap();
-    /*
     assert!(
-        state.metadata().size() == (buffer_1.len() as u64 + buffer_2.len() as u64 - 2)
-    );*/
+        state.properties().size == (buffer_1.len() as u64 + buffer_2.len() as u64 - 2)
+    );
 }
 
 #[test]

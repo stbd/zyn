@@ -5,7 +5,6 @@
    * Client: parsing and buffer to separate files
   * File:
    * Properties for open files
-   * Fix fle properties size
   * Client
    * Open files to struct from tuple
   * Filesystem
