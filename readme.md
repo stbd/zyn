@@ -12,7 +12,7 @@ vagrant ssh    # Connect to the machine
 # See usage printed by environment
 # example commands to try
 zyn-build
-zyn-unittest
+zyn-unittests
 zyn-system-tests
 
 ```

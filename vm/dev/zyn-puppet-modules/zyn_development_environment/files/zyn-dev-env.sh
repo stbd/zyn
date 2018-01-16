@@ -8,7 +8,7 @@ su vagrant  # password: vagrant
 
 Available commands:
 zyn-build  # Builds server
-zyn-unittest  # Builds and runs unittest
+zyn-unittests  # Builds and runs unittest
 zyn-system-tests  # Runs system tests (requires server to be build)
 zyn-static-analysis  # Runs static analysis for all files in project
 
