@@ -418,12 +418,19 @@ impl Status {
     }
 }
 
+struct OpenFile {
+    node_id: NodeId,
+    open_mode: OpenMode,
+    file_type: FileType,
+    access: FileAccess,
+}
+
 pub struct Client {
     connection: Connection,
     buffer: ReceiveBuffer,
     node_receive: Receiver<ClientProtocol>,
     node_send: Sender<NodeProtocol>,
-    open_files: Vec<(NodeId, OpenMode, FileType, FileAccess,)>,
+    open_files: Vec<OpenFile>,
     user: Option<Id>,
     status: Status,
     node_message_buffer: Vec<ClientProtocol>,
@@ -580,26 +587,26 @@ impl Client {
         let mut number_of_processed_notifications: usize = 0;
         let mut remove: Option<usize> = None;
 
-        for (index, & mut (ref node_id, _, _, ref mut access)) in self.open_files
+        for (index, ref mut open_file) in self.open_files
             .iter_mut()
             .enumerate() {
 
                 loop {
                     let mut buffer = try_write_buffer!(self, Client::create_notification_buffer());
 
-                    match access.pop_notification() {
+                    match open_file.access.pop_notification() {
                         Some(Notification::FileClosing {  }) => {
-                            try_write_buffer!(self, buffer.write_notification_closed(node_id));
+                            try_write_buffer!(self, buffer.write_notification_closed(& open_file.node_id));
                             remove = Some(index);
                         },
                         Some(Notification::PartOfFileModified { revision, offset, size }) => {
-                            try_write_buffer!(self, buffer.write_notification_modified(node_id, & revision, & offset, & size));
+                            try_write_buffer!(self, buffer.write_notification_modified(& open_file.node_id, & revision, & offset, & size));
                         },
                         Some(Notification::PartOfFileInserted { revision, offset, size }) => {
-                            try_write_buffer!(self, buffer.write_notification_inserted(node_id, & revision, & offset, & size));
+                            try_write_buffer!(self, buffer.write_notification_inserted(& open_file.node_id, & revision, & offset, & size));
                         },
                         Some(Notification::PartOfFileDeleted { revision, offset, size }) => {
-                            try_write_buffer!(self, buffer.write_notification_deleted(node_id, & revision, & offset, & size));
+                            try_write_buffer!(self, buffer.write_notification_deleted(& open_file.node_id, & revision, & offset, & size));
                         },
                         None => break,
                     }
@@ -645,8 +652,8 @@ impl Client {
 
                         debug!("Received shutdown order from node");
 
-                        for (_, _, _, mut access) in self.open_files.drain(..) {
-                            let _ = access.close();
+                        for mut open_file in self.open_files.drain(..) {
+                            let _ = open_file.access.close();
                         }
 
                         let mut buffer = try_write_buffer!(self, Client::create_notification_buffer());
@@ -961,7 +968,12 @@ impl Client {
             })
             ? ;
 
-        self.open_files.push((node_id, mode, file_type, access));
+        self.open_files.push(OpenFile {
+            node_id: node_id,
+            open_mode: mode,
+            file_type: file_type,
+            access: access
+        });
         Ok(())
     }
 
@@ -974,14 +986,14 @@ impl Client {
 
         trace!("Close: user={}, node_id={}", self, node_id);
 
-        let position = self.open_files.iter().position(| ref e | {
-            e.0 == node_id
+        let position = self.open_files.iter().position(| ref open_file | {
+            open_file.node_id == node_id
         }) ;
 
         if let Some(index) = position {
-            let (_, _, _, mut access) = self.open_files.remove(index);
+            let mut open_file = self.open_files.remove(index);
 
-            match access.close() {
+            match open_file.access.close() {
                 Ok(()) => {
                     try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::NoError as u64);
                     Ok(())
@@ -1010,7 +1022,7 @@ impl Client {
         trace!("Write: user={}, node_id={}, revision={}, offset={}, size={}",
                self, node_id, revision, offset, size);
 
-        let (mode, _file_type, ref mut access) = match find_open_file(& mut self.open_files, & node_id) {
+        let ref mut open_file = match find_open_file(& mut self.open_files, & node_id) {
             Err(()) => {
                 try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
                 return Err(());
@@ -1018,7 +1030,7 @@ impl Client {
             Ok(v) => v,
         };
 
-        match *mode {
+        match open_file.open_mode {
             OpenMode::Read => {
                 try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
                 return Err(());
@@ -1032,7 +1044,7 @@ impl Client {
             Client::fill_buffer(& mut self.connection, & mut data);
         }
 
-        match access.write(revision, offset, data) {
+        match open_file.access.write(revision, offset, data) {
             Ok(revision) => {
                 let mut buffer = try_write_buffer!(self, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
                 try_write_buffer!(self, buffer.write_unsigned(revision));
@@ -1060,7 +1072,7 @@ impl Client {
         trace!("Insert: user={}, node_id={}, revision={}, offset={}, size={}",
                self, node_id, revision, offset, size);
 
-        let (mode, _file_type, ref mut access) = match find_open_file(& mut self.open_files, & node_id) {
+        let ref mut open_file = match find_open_file(& mut self.open_files, & node_id) {
             Err(()) => {
                 try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
                 return Err(());
@@ -1068,7 +1080,7 @@ impl Client {
             Ok(v) => v,
         };
 
-        match *mode {
+        match open_file.open_mode {
             OpenMode::Read => {
                 try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
                 return Err(());
@@ -1082,7 +1094,7 @@ impl Client {
             Client::fill_buffer(& mut self.connection, & mut data);
         }
 
-        match access.insert(revision, offset, data) {
+        match open_file.access.insert(revision, offset, data) {
             Ok(revision) => {
                 let mut buffer = try_write_buffer!(self, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
                 try_write_buffer!(self, buffer.write_unsigned(revision));
@@ -1110,7 +1122,7 @@ impl Client {
         trace!("Delete: user={}, node_id={}, revision={}, offset={}, size={}",
                self, node_id, revision, offset, size);
 
-        let (mode, _file_type, ref mut access) = match find_open_file(& mut self.open_files, & node_id) {
+        let ref mut open_file = match find_open_file(& mut self.open_files, & node_id) {
             Err(()) => {
                 try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
                 return Err(());
@@ -1118,7 +1130,7 @@ impl Client {
             Ok(v) => v,
         };
 
-        match *mode {
+        match open_file.open_mode {
             OpenMode::Read => {
                 try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
                 return Err(());
@@ -1126,7 +1138,7 @@ impl Client {
             OpenMode::ReadWrite => (),
         }
 
-        match access.delete(revision, offset, size) {
+        match open_file.access.delete(revision, offset, size) {
             Ok(revision) => {
                 let mut buffer = try_write_buffer!(self, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
                 try_write_buffer!(self, buffer.write_unsigned(revision));
@@ -1155,7 +1167,7 @@ impl Client {
         trace!("Write blob: user={}, node_id={}, revision={}, size={}, block_size={}",
                self, node_id, revision, size, block_size);
 
-        let (mode, file_type, ref mut access) = match find_open_file(& mut self.open_files, & node_id) {
+        let ref mut open_file = match find_open_file(& mut self.open_files, & node_id) {
             Err(()) => {
                 try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
                 return Err(());
@@ -1163,15 +1175,15 @@ impl Client {
             Ok(v) => v,
         };
 
-        match file_type {
-            & FileType::Blob => (),
+        match open_file.file_type {
+            FileType::Blob => (),
             _ => {
                 try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::OperationNotPermitedFotFileType as u64);
                 return Err(());
             },
         };
 
-        match *mode {
+        match open_file.open_mode {
             OpenMode::Read => {
                 try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
                 return Err(());
@@ -1184,7 +1196,7 @@ impl Client {
             user: user.clone(),
         };
 
-        if let Err(error) = access.lock(revision, & lock) {
+        if let Err(error) = open_file.access.lock(revision, & lock) {
             try_send_response_without_fields!(self, transaction_id, map_file_error_to_uint(error));
             return Err(());
         }
@@ -1215,7 +1227,7 @@ impl Client {
                 Client::fill_buffer(& mut self.connection, & mut buffer);
             }
 
-            revision = match access.write(revision, bytes_read, buffer) {
+            revision = match open_file.access.write(revision, bytes_read, buffer) {
                 Ok(r) => r,
                 Err(error) => {
                     try_send_response_without_fields!(self, transaction_id, map_file_error_to_uint(error));
@@ -1226,7 +1238,7 @@ impl Client {
             bytes_read += buffer_size;
         }
 
-        if let Err(error) = access.unlock(& lock) {
+        if let Err(error) = open_file.access.unlock(& lock) {
             error!("Failed to unlock file, user={}, error={}", user, map_file_error_to_uint(error));
             return Err(());
         }
@@ -1249,7 +1261,7 @@ impl Client {
 
         trace!("Read: user={}, node_id={}, offset={}, size={}", self, node_id, offset, size);
 
-        let (_, _, ref mut access) = match find_open_file(& mut self.open_files, & node_id) {
+        let ref mut open_file = match find_open_file(& mut self.open_files, & node_id) {
             Err(()) => {
                 try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
                 return Err(());
@@ -1257,7 +1269,7 @@ impl Client {
             Ok(v) => v,
         };
 
-        match access.read(offset, size) {
+        match open_file.access.read(offset, size) {
             Ok((data, revision)) => {
                 let mut buffer = try_write_buffer!(self, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
                 try_write_buffer!(self, buffer.write_unsigned(revision));
@@ -1646,22 +1658,23 @@ impl Client {
     }
 }
 
-fn find_open_file<'vec>(open_files: &'vec mut Vec<(NodeId, OpenMode, FileType, FileAccess,)>, node_id: & NodeId)
-                  -> Result<(&'vec OpenMode, &'vec FileType, &'vec mut FileAccess), ()> {
+fn find_open_file<'vec>(open_files: &'vec mut Vec<OpenFile>, searched_node_id: & NodeId)
+                         -> Result<&'vec mut OpenFile, ()> {
 
-    let mut index: usize = 0;
-    open_files.iter().enumerate().find(| & (ref i, ref e) | {
-        index = i.clone();
-        e.0 == *node_id
-    })
+    let mut searched_item_index: usize = 0;
+    open_files
+        .iter()
+        .enumerate()
+        .find(| & (ref index, ref element) | {
+            searched_item_index = index.clone();
+            element.node_id == *searched_node_id
+        })
         .ok_or(())
         ? ;
 
-    open_files.get_mut(index)
+    open_files
+        .get_mut(searched_item_index)
         .ok_or(())
-        .and_then(| & mut (_, ref mode, ref file_type, ref mut access) | {
-            Ok((mode, file_type, access))
-        })
 }
 
 static MAX_WAIT_DURATION_FOR_NODE_RESPONSE_MS: u64 = 1000;
