@@ -376,7 +376,6 @@ enum Status {
     FailedToreceiveFromNode,
     FailedToSendToClient,
     ClientNotAuthenticated,
-    ClientAlreadyAuthenticated,
     FailedToWriteToSendBuffer,
     ShutdownOrderedByNode,
 }
@@ -396,8 +395,6 @@ impl Display for Status {
                 write!(f, "FailedToSendToClient"),
             Status::ClientNotAuthenticated =>
                 write!(f, "ClientNotAuthenticated"),
-            Status::ClientAlreadyAuthenticated =>
-                write!(f, "ClientAlreadyAuthenticated"),
             Status::FailedToWriteToSendBuffer =>
                 write!(f, "FailedToWriteToSendBuffer"),
             Status::ShutdownOrderedByNode =>
@@ -513,29 +510,28 @@ impl Client {
 
             self.buffer.debug_buffer();
 
-            if self.buffer.expect("V:1;").is_err() {
-                match Client::send_response_without_fields(& mut self.connection, 0, CommonErrorCodes::ErrorMalformedMessage as u64) {
-                    Ok(()) => (),
-                    Err(status) => {
-                        self.status = status;
-                        break;
+            let message_namespace = match self.buffer.parse_message_namespace() {
+                Ok(value) => value,
+                Err(()) => {
+                    error!("Failed to parse message namespace");
+                    match Client::send_response_without_fields(& mut self.connection, 0, CommonErrorCodes::ErrorMalformedMessage as u64) {
+                        Ok(()) => (),
+                        Err(status) => {
+                            self.status = status;
+                        },
                     }
-                }
-                // todo: set status
-                continue ;
-            }
+                    break;
+                },
+            };
 
-            if self.buffer.expect("A:").is_ok() {
-                if self.is_authenticated() {
-                    self.status = Status::ClientAlreadyAuthenticated;
-                    break ;
-                }
-                let _ = self.handle_authentication_req();
-            } else {
-                if ! self.is_authenticated() {
+            if ! self.is_authenticated() {
+                if self.buffer.expect("A:").is_ok() {
+                    let _ = self.handle_authentication_req(message_namespace);
+                } else {
                     self.status = Status::ClientNotAuthenticated;
                     break ;
                 }
+            } else {
 
                 if self.buffer.expect("CREATE-FILE:").is_ok() {
                     let _ = self.handle_create_file_req();
@@ -751,7 +747,11 @@ impl Client {
         }
     }
 
-    fn handle_authentication_req(& mut self) -> Result<(), ()> {
+    fn handle_authentication_req(& mut self, namespace_version: u64) -> Result<(), ()> {
+
+        if namespace_version != 1 {
+            return Err(());
+        }
 
         let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
         let username = try_parse!(self.buffer.parse_string(), self, transaction_id);

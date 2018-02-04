@@ -171,9 +171,17 @@ impl ReceiveBuffer {
         Ok(value)
     }
 
-    pub fn parse_unsigned(& mut self) -> Result<u64, ()> {
+    pub fn parse_message_namespace(& mut self) -> Result<u64, ()> {
+        self.expect("V:") ? ;
+        self.parse_numeric()
+    }
 
+    pub fn parse_unsigned(& mut self) -> Result<u64, ()> {
         self.expect("U:") ? ;
+        self.parse_numeric()
+    }
+
+    fn parse_numeric(& mut self) -> Result<u64, ()> {
         let mut value: Option<u64> = None;
         let mut size: usize = 0;
         {
