@@ -213,19 +213,12 @@ impl ReceiveBuffer {
 
         let mut map = KeyValueMap2::new();
 
-        debug!("list-");
-
         self.expect("L:") ? ;
         let number_of_elements = self.parse_unsigned() ? ;
-
-        debug!("size- {}", number_of_elements);
 
         for _ in 0..number_of_elements {
 
             self.expect("LE:KVP:") ? ;
-
-            debug!("element-");
-
             let key = self.parse_string() ? ;
             let value = {
 
@@ -243,16 +236,10 @@ impl ReceiveBuffer {
             };
 
             map.insert(key, value);
-
-            debug!("element done-");
-
             self.expect(";;") ? ;
         }
 
         self.expect(";") ? ;
-
-        debug!("done");
-
         Ok(map)
     }
 }
