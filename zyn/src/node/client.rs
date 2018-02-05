@@ -464,6 +464,24 @@ impl Client {
 
     pub fn process(& mut self) {
 
+        let message_handlers: Vec<(& str, fn(& mut Client) -> Result<(), ()>, u64)> = vec![
+            ("CREATE-FILE:", handle_create_file_req, 1),
+            ("CREATE-FOLDER:", handle_create_folder_req, 1),
+            ("O:", handle_open_req, 1),
+            ("CLOSE:", handle_close_req, 1),
+            ("RA-W:", handle_write_random_access_req, 1),
+            ("RA-I:", handle_random_access_insert_req, 1),
+            ("RA-D:", handle_random_access_delete_req, 1),
+            ("BLOB-W:", handle_blob_write_req, 1),
+            ("R:", handle_read_req, 1),
+            ("DELETE:", handle_delete_fs_element_req, 1),
+            ("Q-COUNTERS:", handle_query_counters_req, 1),
+            ("Q-LIST:", handle_query_list_req, 1),
+            ("Q-FILESYSTEM:", handle_query_fs_req, 1),
+            ("ADD-USER-GROUP:", handle_add_user_group, 1),
+            ("MOD-USER-GROUP:", handle_mod_user_group, 1),
+        ];
+
         loop {
 
             let mut is_processing: bool = false;
@@ -526,46 +544,26 @@ impl Client {
 
             if ! self.is_authenticated() {
                 if self.buffer.expect("A:").is_ok() {
-                    let _ = self.handle_authentication_req(message_namespace);
+                    let _ = handle_authentication_req(self);
                 } else {
                     self.status = Status::ClientNotAuthenticated;
                     break ;
                 }
             } else {
-
-                if self.buffer.expect("CREATE-FILE:").is_ok() {
-                    let _ = self.handle_create_file_req();
-                } else if self.buffer.expect("CREATE-FOLDER:").is_ok() {
-                    let _ = self.handle_create_folder_req();
-                } else if self.buffer.expect("O:").is_ok() {
-                    let _ = self.handle_open_req();
-                } else if self.buffer.expect("CLOSE:").is_ok() {
-                    let _ = self.handle_close_req();
-                } else if self.buffer.expect("RA-W:").is_ok() {
-                    let _ = self.handle_write_random_access_req();
-                } else if self.buffer.expect("RA-I:").is_ok() {
-                    let _ = self.handle_random_access_insert_req();
-                } else if self.buffer.expect("RA-D:").is_ok() {
-                    let _ = self.handle_random_access_delete_req();
-                } else if self.buffer.expect("BLOB-W:").is_ok() {
-                    let _ = self.handle_blob_write_req();
-                } else if self.buffer.expect("R:").is_ok() {
-                    let _ = self.handle_read_req();
-                } else if self.buffer.expect("DELETE:").is_ok() {
-                    let _ = self.handle_delete_fs_element_req();
-                } else if self.buffer.expect("Q-COUNTERS:").is_ok() {
-                    let _ = self.handle_query_counters_req();
-                } else if self.buffer.expect("Q-LIST:").is_ok() {
-                    let _ = self.handle_query_list_req();
-                } else if self.buffer.expect("Q-FILESYSTEM:").is_ok() {
-                    let _ = self.handle_query_fs_req();
-                } else if self.buffer.expect("ADD-USER-GROUP:").is_ok() {
-                    let _ = self.handle_add_user_group();
-                } else if self.buffer.expect("MOD-USER-GROUP:").is_ok() {
-                    let _ = self.handle_mod_user_group();
-                } else {
-                    warn!("Unhandled message, client={}", self);
-                }
+                if message_handlers
+                    .iter()
+                    .find( | && (ref handler_name, _, handler_namespace) | {
+                        self.buffer.expect(handler_name).is_ok()
+                            && message_namespace == handler_namespace
+                    })
+                    .and_then( | & (_, ref handler, _) | {
+                        let _ = handler(self);
+                        Some(())
+                    })
+                    .is_none() {
+                        error!("Failed to find handler for message");
+                        break ;
+                    }
             }
 
             self.buffer.drop_consumed_buffer();
@@ -746,916 +744,6 @@ impl Client {
             }
         }
     }
-
-    fn handle_authentication_req(& mut self, namespace_version: u64) -> Result<(), ()> {
-
-        if namespace_version != 1 {
-            return Err(());
-        }
-
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let username = try_parse!(self.buffer.parse_string(), self, transaction_id);
-        let password = try_parse!(self.buffer.parse_string(), self, transaction_id);
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        debug!("Authenticate, username=\"{}\"", username);
-
-        self.send_to_node(transaction_id, NodeProtocol::AuthenticateRequest {
-            username: username.clone(),
-            password: password
-        }) ? ;
-
-        let id = node_receive::<Id>(
-            self,
-            & | msg, client | {
-                match msg {
-                    ClientProtocol::AuthenticateResponse { result: Ok(id) } => {
-                        try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
-                        (None, Some(Ok(id)))
-                    },
-
-                    ClientProtocol::AuthenticateResponse { result: Err(error) } => {
-                        try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
-                        if let Status::AuthenticationError { ref mut trial } = client.status {
-                            *trial += 1;
-                        } else {
-                            client.status = Status::AuthenticationError { trial: 1 };
-                        }
-                        (None, Some(Err(())))
-                    },
-
-                    other => {
-                        (Some(other), None)
-                    }
-                }
-            })
-            ? ;
-
-        debug!("Authentication ok, username=\"{}\", id={}", username, id);
-
-        self.user = Some(id);
-        Ok(())
-    }
-
-    fn handle_create_file_req(& mut self) -> Result<(), ()> {
-
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let parent = try_parse!(self.buffer.parse_file_descriptor(), self, transaction_id);
-        let name = try_parse!(self.buffer.parse_string(), self, transaction_id);
-        let type_uint = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        let type_enum = match type_uint {
-            FILE_TYPE_RANDOM_ACCESS => FileType::RandomAccess,
-            FILE_TYPE_BLOB => FileType::Blob,
-            _ => {
-                try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
-                return Err(());
-            },
-        };
-
-        trace!("Create file: user={}, parent=\"{}\", name=\"{}\", type={}",
-               self, parent, name, type_enum);
-
-        let user = self.user.as_ref().unwrap().clone();
-        self.send_to_node(transaction_id, NodeProtocol::CreateFileRequest {
-            parent: parent,
-            type_of_file: type_enum,
-            name: name,
-            user: user,
-        }) ? ;
-
-        node_receive::<()>(
-            self,
-            & | msg, client | {
-                match msg {
-                    ClientProtocol::CreateFilesystemElementResponse {
-                        result: Ok(node_id),
-                    } => {
-                        let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
-                        try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
-                        (None, Some(Ok(())))
-                    },
-
-                    ClientProtocol::CreateFilesystemElementResponse {
-                        result: Err(error),
-                    } => {
-                        try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
-                        (None, Some(Err(())))
-                    },
-
-                    other => {
-                        (Some(other), None)
-                    }
-                }
-            })
-    }
-
-    fn handle_create_folder_req(& mut self) -> Result<(), ()> {
-
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let parent = try_parse!(self.buffer.parse_file_descriptor(), self, transaction_id);
-        let name = try_parse!(self.buffer.parse_string(), self, transaction_id);
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        trace!("Create folder: user={}, parent=\"{}\",  name=\"{}\"",
-               self, parent, name);
-
-        let user = self.user.as_ref().unwrap().clone();
-        self.send_to_node(transaction_id, NodeProtocol::CreateFolderRequest {
-            parent: parent,
-            name: name,
-            user: user,
-        }) ? ;
-
-        node_receive::<()>(
-            self,
-            & | msg, client | {
-                match msg {
-                    ClientProtocol::CreateFilesystemElementResponse {
-                        result: Ok(node_id),
-                    } => {
-                        let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
-                        try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
-                        (None, Some(Ok(())))
-                    },
-
-                    ClientProtocol::CreateFilesystemElementResponse {
-                        result: Err(error),
-                    } => {
-                        try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
-                        (None, Some(Err(())))
-                    },
-
-                    other => {
-                        (Some(other), None)
-                    }
-                }
-            })
-    }
-
-    fn handle_open_req(& mut self) -> Result<(), ()> {
-
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let fd = try_parse!(self.buffer.parse_file_descriptor(), self, transaction_id);
-        let mode_uint = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        let mode = match mode_uint {
-            READ => OpenMode::Read,
-            READ_WRITE => OpenMode::ReadWrite,
-            _ => {
-                try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
-                return Err(());
-            },
-        };
-
-        trace!("Open file, user={}, fd=\"{}\"", self, fd);
-
-        let user = self.user.as_ref().unwrap().clone();
-        self.send_to_node(transaction_id, NodeProtocol::OpenFileRequest {
-            mode: mode.clone(),
-            file_descriptor: fd,
-            user: user,
-        }) ? ;
-
-        let (access, node_id, file_type) = node_receive::<(FileAccess, NodeId, FileType)>(
-            self,
-            & | msg, client | {
-                match msg {
-                    ClientProtocol::OpenFileResponse {
-                        result: Ok((access, node_id, revision, file_type, size)),
-                    } => {
-                        let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
-                        try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, buffer.write_unsigned(revision), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, buffer.write_unsigned(size), Status::FailedToWriteToSendBuffer);
-
-                        try_in_receive_loop!(
-                            client,
-                            buffer.write_unsigned(
-                                match file_type {
-                                    FileType::RandomAccess => FILE_TYPE_RANDOM_ACCESS,
-                                    FileType::Blob => FILE_TYPE_BLOB,
-                                }),
-                            Status::FailedToWriteToSendBuffer
-                        );
-
-                        try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
-                        (None, Some(Ok((access, node_id, file_type))))
-                    },
-
-                    ClientProtocol::OpenFileResponse {
-                        result: Err(error),
-                    } => {
-                        try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
-                        (None, Some(Err(())))
-                    },
-
-                    other => {
-                        (Some(other), None)
-                    }
-                }
-            })
-            ? ;
-
-        self.open_files.push(OpenFile {
-            node_id: node_id,
-            open_mode: mode,
-            file_type: file_type,
-            access: access
-        });
-        Ok(())
-    }
-
-    fn handle_close_req(& mut self) -> Result<(), ()> {
-
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let node_id = try_parse!(self.buffer.parse_node_id(), self, transaction_id);
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        trace!("Close: user={}, node_id={}", self, node_id);
-
-        let position = self.open_files.iter().position(| ref open_file | {
-            open_file.node_id == node_id
-        }) ;
-
-        if let Some(index) = position {
-            let mut open_file = self.open_files.remove(index);
-
-            match open_file.access.close() {
-                Ok(()) => {
-                    try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::NoError as u64);
-                    Ok(())
-                },
-                Err(error) => {
-                    try_send_response_without_fields!(self, transaction_id, map_file_error_to_uint(error));
-                    Err(())
-                }
-            }
-        } else {
-            try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
-            Err(())
-        }
-    }
-
-    fn handle_write_random_access_req(& mut self) -> Result<(), ()> {
-
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let node_id = try_parse!(self.buffer.parse_node_id(), self, transaction_id);
-        let revision = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        let offset = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        let size = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        trace!("Write: user={}, node_id={}, revision={}, offset={}, size={}",
-               self, node_id, revision, offset, size);
-
-        let ref mut open_file = match find_open_file(& mut self.open_files, & node_id) {
-            Err(()) => {
-                try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
-                return Err(());
-            },
-            Ok(v) => v,
-        };
-
-        match open_file.open_mode {
-            OpenMode::Read => {
-                try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
-                return Err(());
-            },
-            OpenMode::ReadWrite => (),
-        }
-
-        let mut data = Buffer::with_capacity(size as usize);
-        self.buffer.take(& mut data);
-        if data.len() < data.capacity() {
-            Client::fill_buffer(& mut self.connection, & mut data);
-        }
-
-        match open_file.access.write(revision, offset, data) {
-            Ok(revision) => {
-                let mut buffer = try_write_buffer!(self, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
-                try_write_buffer!(self, buffer.write_unsigned(revision));
-                try_write_buffer!(self, buffer.write_end_of_message());
-                try_with_set_error_state!(self, self.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
-                Ok(())
-            },
-            Err(error) => {
-                try_send_response_without_fields!(self, transaction_id, map_file_error_to_uint(error));
-                Err(())
-            }
-        }
-    }
-
-    fn handle_random_access_insert_req(& mut self) -> Result<(), ()> {
-
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let node_id = try_parse!(self.buffer.parse_node_id(), self, transaction_id);
-        let revision = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        let offset = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        let size = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        trace!("Insert: user={}, node_id={}, revision={}, offset={}, size={}",
-               self, node_id, revision, offset, size);
-
-        let ref mut open_file = match find_open_file(& mut self.open_files, & node_id) {
-            Err(()) => {
-                try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
-                return Err(());
-            },
-            Ok(v) => v,
-        };
-
-        match open_file.open_mode {
-            OpenMode::Read => {
-                try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
-                return Err(());
-            },
-            OpenMode::ReadWrite => (),
-        }
-
-        let mut data = Buffer::with_capacity(size as usize);
-        self.buffer.take(& mut data);
-        if data.len() < data.capacity() {
-            Client::fill_buffer(& mut self.connection, & mut data);
-        }
-
-        match open_file.access.insert(revision, offset, data) {
-            Ok(revision) => {
-                let mut buffer = try_write_buffer!(self, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
-                try_write_buffer!(self, buffer.write_unsigned(revision));
-                try_write_buffer!(self, buffer.write_end_of_message());
-                try_with_set_error_state!(self, self.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
-                Ok(())
-            },
-            Err(error) => {
-                try_send_response_without_fields!(self, transaction_id, map_file_error_to_uint(error));
-                Err(())
-            }
-        }
-    }
-
-    fn handle_random_access_delete_req(& mut self) -> Result<(), ()> {
-
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let node_id = try_parse!(self.buffer.parse_node_id(), self, transaction_id);
-        let revision = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        let offset = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        let size = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        trace!("Delete: user={}, node_id={}, revision={}, offset={}, size={}",
-               self, node_id, revision, offset, size);
-
-        let ref mut open_file = match find_open_file(& mut self.open_files, & node_id) {
-            Err(()) => {
-                try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
-                return Err(());
-            },
-            Ok(v) => v,
-        };
-
-        match open_file.open_mode {
-            OpenMode::Read => {
-                try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
-                return Err(());
-            },
-            OpenMode::ReadWrite => (),
-        }
-
-        match open_file.access.delete(revision, offset, size) {
-            Ok(revision) => {
-                let mut buffer = try_write_buffer!(self, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
-                try_write_buffer!(self, buffer.write_unsigned(revision));
-                try_write_buffer!(self, buffer.write_end_of_message());
-                try_with_set_error_state!(self, self.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
-                Ok(())
-            },
-            Err(error) => {
-                try_send_response_without_fields!(self, transaction_id, map_file_error_to_uint(error));
-                Err(())
-            }
-        }
-    }
-
-    fn handle_blob_write_req(& mut self) -> Result<(), ()> {
-
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let node_id = try_parse!(self.buffer.parse_node_id(), self, transaction_id);
-        let mut revision = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        let size = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        let block_size = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        trace!("Write blob: user={}, node_id={}, revision={}, size={}, block_size={}",
-               self, node_id, revision, size, block_size);
-
-        let ref mut open_file = match find_open_file(& mut self.open_files, & node_id) {
-            Err(()) => {
-                try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
-                return Err(());
-            },
-            Ok(v) => v,
-        };
-
-        match open_file.file_type {
-            FileType::Blob => (),
-            _ => {
-                try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::OperationNotPermitedFotFileType as u64);
-                return Err(());
-            },
-        };
-
-        match open_file.open_mode {
-            OpenMode::Read => {
-                try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
-                return Err(());
-            },
-            OpenMode::ReadWrite => (),
-        }
-
-        let user = self.user.as_ref().unwrap();
-        let lock = FileLock::LockedBySystemForBlobWrite {
-            user: user.clone(),
-        };
-
-        if let Err(error) = open_file.access.lock(revision, & lock) {
-            try_send_response_without_fields!(self, transaction_id, map_file_error_to_uint(error));
-            return Err(());
-        }
-
-        let max_block_size: u64 = 1024 * 1024 * 10;
-        let mut bytes_read: u64 = 0;
-
-        if block_size > max_block_size {
-            try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::BlockSizeIsTooLarge as u64);
-
-            // todo: this is error case, but since file is locked, return is not possible
-        }
-
-        while bytes_read < size {
-
-            let bytes_left = size - bytes_read;
-            let buffer_size = {
-                if bytes_left < max_block_size {
-                    bytes_left
-                } else {
-                    max_block_size
-                }
-            };
-
-            let mut buffer = Buffer::with_capacity(buffer_size as usize);
-            self.buffer.take(& mut buffer);
-            if buffer.len() < buffer.capacity() {
-                Client::fill_buffer(& mut self.connection, & mut buffer);
-            }
-
-            revision = match open_file.access.write(revision, bytes_read, buffer) {
-                Ok(r) => r,
-                Err(error) => {
-                    try_send_response_without_fields!(self, transaction_id, map_file_error_to_uint(error));
-                    return Err(());
-                }
-            };
-
-            bytes_read += buffer_size;
-        }
-
-        if let Err(error) = open_file.access.unlock(& lock) {
-            error!("Failed to unlock file, user={}, error={}", user, map_file_error_to_uint(error));
-            return Err(());
-        }
-
-        let mut buffer = try_write_buffer!(self, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
-        try_write_buffer!(self, buffer.write_unsigned(revision));
-        try_write_buffer!(self, buffer.write_end_of_message());
-        try_with_set_error_state!(self, self.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
-        Ok(())
-    }
-
-    fn handle_read_req(& mut self) -> Result<(), ()> {
-
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let node_id = try_parse!(self.buffer.parse_node_id(), self, transaction_id);
-        let offset = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        let size = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        trace!("Read: user={}, node_id={}, offset={}, size={}", self, node_id, offset, size);
-
-        let ref mut open_file = match find_open_file(& mut self.open_files, & node_id) {
-            Err(()) => {
-                try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
-                return Err(());
-            },
-            Ok(v) => v,
-        };
-
-        match open_file.access.read(offset, size) {
-            Ok((data, revision)) => {
-                let mut buffer = try_write_buffer!(self, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
-                try_write_buffer!(self, buffer.write_unsigned(revision));
-                try_write_buffer!(self, buffer.write_block(offset, data.len()));
-                try_write_buffer!(self, buffer.write_end_of_message());
-                try_with_set_error_state!(self, self.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
-
-                if data.len() > 0 {
-                    try_with_set_error_state!(self, self.connection.write_with_sleep(& data), Status::FailedToSendToClient);
-                }
-
-                Ok(())
-            },
-            Err(error) => {
-                try_send_response_without_fields!(self, transaction_id, map_file_error_to_uint(error));
-                Err(())
-            }
-        }
-    }
-
-    fn handle_delete_fs_element_req(& mut self) -> Result<(), ()> {
-
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let fd = try_parse!(self.buffer.parse_file_descriptor(), self, transaction_id);
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        trace!("Delete: user={}, fd={}", self, fd);
-
-        let user = self.user.as_ref().unwrap().clone();
-        self.send_to_node(transaction_id, NodeProtocol::DeleteRequest {
-            user: user,
-            fd: fd,
-        }) ? ;
-
-        node_receive::<()>(
-            self,
-            & | msg, client | {
-                match msg {
-                    ClientProtocol::DeleteResponse {
-                        result: Ok(()),
-                    } => {
-                        try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
-                        (None, Some(Ok(())))
-                    },
-
-                    ClientProtocol::CountersResponse {
-                        result: Err(error),
-                    } => {
-                        try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
-                        (None, Some(Err(())))
-                    },
-
-                    other => {
-                        (Some(other), None)
-                    }
-                }
-            })
-            ? ;
-
-        Ok(())
-    }
-
-    fn handle_query_counters_req(& mut self) -> Result<(), ()> {
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        trace!("Query counters: user={}", self);
-
-        let user = self.user.as_ref().unwrap().clone();
-        self.send_to_node(transaction_id, NodeProtocol::CountersRequest {
-            user: user,
-        }) ? ;
-
-        node_receive::<()>(
-            self,
-            & | msg, client | {
-                match msg {
-                    ClientProtocol::CountersResponse {
-                        result: Ok(counters),
-                    } => {
-
-                        let mut map = KeyValueMap2::new();
-                        map.insert(String::from("active-connections"), Value2::Unsigned {
-                            value: counters.active_connections as u64
-                        });
-
-                        let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
-                        try_in_receive_loop!(client, buffer.write_key_value_list(map), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
-                        (None, Some(Ok(())))
-                    },
-
-                    ClientProtocol::CountersResponse {
-                        result: Err(error),
-                    } => {
-                        try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
-                        (None, Some(Err(())))
-                    },
-
-                    other => {
-                        (Some(other), None)
-                    }
-                }
-            })
-            ? ;
-
-        Ok(())
-    }
-
-    fn handle_query_list_req(& mut self) -> Result<(), ()> {
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let fd = try_parse!(self.buffer.parse_file_descriptor(), self, 0);
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        trace!("Query list: user={}, fd={}", self, fd);
-
-        let user = self.user.as_ref().unwrap().clone();
-        self.send_to_node(transaction_id, NodeProtocol::QueryListRequest {
-            user: user,
-            fd: fd,
-        }) ? ;
-
-        node_receive::<()>(
-            self,
-            & | msg, client | {
-                match msg {
-                    ClientProtocol::QueryListResponse {
-                        result: Ok(list_of_elements),
-                    } => {
-
-                        let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
-
-                        try_in_receive_loop!(client, buffer.write_list_start(list_of_elements.len()), Status::FailedToWriteToSendBuffer);
-                        for (name, node_id, type_of) in list_of_elements.into_iter() {
-
-                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
-
-                            try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_unsigned(
-                                match type_of {
-                                    FilesystemElement::Folder => FOLDER,
-                                    FilesystemElement::File => FILE,
-                                }
-                            ), Status::FailedToWriteToSendBuffer);
-
-                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
-                        }
-
-                        try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
-                        (None, Some(Ok(())))
-                    },
-
-                    ClientProtocol::QueryListResponse {
-                        result: Err(error),
-                    } => {
-                        try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
-                        (None, Some(Err(())))
-                    },
-
-                    other => {
-                        (Some(other), None)
-                    }
-                }
-            })
-            ? ;
-
-        Ok(())
-    }
-
-    fn handle_query_fs_req(& mut self) -> Result<(), ()> {
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let fd = try_parse!(self.buffer.parse_file_descriptor(), self, 0); //  todo: user transaction id, check other usages as well
-        try_parse!(self.buffer.expect(";"), self, 0);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        trace!("Query fs: user={}, fd={}", self, fd);
-
-        let user = self.user.as_ref().unwrap().clone();
-        self.send_to_node(transaction_id, NodeProtocol::QueryFilesystemRequest {
-            user: user,
-            fd: fd,
-        }) ? ;
-
-        node_receive::<()>(
-            self,
-            & | msg, client | {
-                match msg {
-                    ClientProtocol::QueryFilesystemResponse {
-                        result: Ok(desc),
-                    } => {
-
-                        let type_int = match desc.element_type {
-                            FilesystemElement::Folder => 1,
-                            FilesystemElement::File => 0,
-                        };
-
-                        let mut map = KeyValueMap2::new();
-                        map.insert(String::from("type"), Value2::Unsigned { value: type_int as u64 });
-                        map.insert(String::from("created"), Value2::Unsigned { value: desc.created_at as u64 });
-                        map.insert(String::from("modified"), Value2::Unsigned { value: desc.modified_at as u64 });
-                        map.insert(String::from("read-access"), Value2::String { value: desc.read_access });
-                        map.insert(String::from("write-access"), Value2::String { value: desc.write_access });
-
-                        let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
-                        try_in_receive_loop!(client, buffer.write_key_value_list(map), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
-                        (None, Some(Ok(())))
-                    },
-
-                    ClientProtocol::QueryFilesystemResponse {
-                        result: Err(error),
-                    } => {
-                        try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
-                        (None, Some(Err(())))
-                    },
-
-                    other => {
-                        (Some(other), None)
-                    }
-                }
-            })
-            ? ;
-
-        Ok(())
-    }
-
-    fn handle_add_user_group(& mut self) -> Result<(), ()> {
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let type_of = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        let name = try_parse!(self.buffer.parse_string(), self, transaction_id);
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        trace!("Create user/group, user={}, name={}, type_of={}", self, name, type_of);
-
-        let user = self.user.as_ref().unwrap().clone();
-        let msg = match type_of {
-            TYPE_USER => NodeProtocol::AddUserRequest {
-                user: user,
-                name: name,
-            },
-            TYPE_GROUP => NodeProtocol::AddGroupRequest {
-                user: user,
-                name: name,
-            },
-            _ => {
-                try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
-                return Err(());
-            },
-        };
-
-        self.send_to_node(transaction_id, msg) ? ;
-
-        node_receive::<()>(
-            self,
-            & | msg, client | {
-                match msg {
-                    ClientProtocol::AddUserGroupResponse {
-                        result: Ok(()),
-                    } => {
-                        try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
-                        (None, Some(Ok(())))
-                    },
-                    ClientProtocol::AddUserGroupResponse {
-                        result: Err(error),
-                    } => {
-                        try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
-                        (None, Some(Err(())))
-                    },
-                    other => {
-                        (Some(other), None)
-                    },
-                }
-            })
-            ? ;
-
-        Ok(())
-    }
-
-    fn handle_mod_user_group(& mut self) -> Result<(), ()> {
-
-        let transaction_id = try_parse!(self.buffer.parse_transaction_id(), self, 0);
-        let type_of = try_parse!(self.buffer.parse_unsigned(), self, transaction_id);
-        let name = try_parse!(self.buffer.parse_string(), self, transaction_id);
-        let mut key_value_map = self.buffer.parse_key_value_list_() ? ;
-        try_parse!(self.buffer.expect(";"), self, transaction_id);
-        try_parse!(self.buffer.parse_end_of_message(), self, transaction_id);
-
-        let user = self.user.as_ref().unwrap().clone();
-        let msg = match type_of {
-            TYPE_USER => {
-
-                let password = key_value_map.remove("password")
-                    .ok_or(())
-                    .map(| value |
-                         value.to_string()
-                         .ok()
-                    )
-                    ? ;
-
-                let expiration = key_value_map.remove("expiration")
-                    .ok_or(())
-                    .map(| value |
-                         value.to_unsigned()
-                         .ok()
-                         .map(| value | {
-                             if value != 0 {
-                                 Some(value as i64)
-                             } else {
-                                 None
-                             }
-                         })
-                    )
-                    ? ;
-
-                NodeProtocol::ModifyUser {
-                    user: user,
-                    name: name,
-                    password: password,
-                    expiration: expiration,
-                }
-            },
-            TYPE_GROUP => {
-
-                let expiration = key_value_map.remove("expiration")
-                    .ok_or(())
-                    .map(| value |
-                         value.to_unsigned()
-                         .ok()
-                         .map(| value | {
-                             if value != 0 {
-                                 Some(value as i64)
-                             } else {
-                                 None
-                             }
-                         })
-                    )
-                    ? ;
-
-                NodeProtocol::ModifyGroup {
-                    user: user,
-                    name: name,
-                    expiration: expiration,
-                }
-            },
-            _ => {
-                try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
-                return Err(());
-            },
-        };
-
-        self.send_to_node(transaction_id, msg) ? ;
-
-        node_receive::<()>(
-            self,
-            & | msg, client | {
-                match msg {
-                    ClientProtocol::AddUserGroupResponse {
-                        result: Ok(()),
-                    } => {
-                        try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
-                        (None, Some(Ok(())))
-                    },
-                    ClientProtocol::AddUserGroupResponse {
-                        result: Err(error),
-                    } => {
-                        try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
-                        (None, Some(Err(())))
-                    },
-                    other => {
-                        (Some(other), None)
-                    },
-                }
-            })
-            ? ;
-
-        Ok(())
-    }
 }
 
 fn find_open_file<'vec>(open_files: &'vec mut Vec<OpenFile>, searched_node_id: & NodeId)
@@ -1677,9 +765,915 @@ fn find_open_file<'vec>(open_files: &'vec mut Vec<OpenFile>, searched_node_id: &
         .ok_or(())
 }
 
+fn handle_authentication_req(client: & mut Client) -> Result<(), ()> {
+
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let username = try_parse!(client.buffer.parse_string(), client, transaction_id);
+    let password = try_parse!(client.buffer.parse_string(), client, transaction_id);
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    debug!("Authenticate, username=\"{}\"", username);
+
+    client.send_to_node(transaction_id, NodeProtocol::AuthenticateRequest {
+        username: username.clone(),
+        password: password
+    }) ? ;
+
+    let id = node_receive::<Id>(
+        client,
+        & | msg, client | {
+            match msg {
+                ClientProtocol::AuthenticateResponse { result: Ok(id) } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+                    (None, Some(Ok(id)))
+                },
+
+                ClientProtocol::AuthenticateResponse { result: Err(error) } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    if let Status::AuthenticationError { ref mut trial } = client.status {
+                        *trial += 1;
+                    } else {
+                        client.status = Status::AuthenticationError { trial: 1 };
+                    }
+                    (None, Some(Err(())))
+                },
+
+                other => {
+                    (Some(other), None)
+                }
+            }
+        })
+        ? ;
+
+    debug!("Authentication ok, username=\"{}\", id={}", username, id);
+
+    client.user = Some(id);
+    Ok(())
+}
+
+
+fn handle_create_file_req(client: & mut Client) -> Result<(), ()> {
+
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let parent = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
+    let name = try_parse!(client.buffer.parse_string(), client, transaction_id);
+    let type_uint = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    let type_enum = match type_uint {
+        FILE_TYPE_RANDOM_ACCESS => FileType::RandomAccess,
+        FILE_TYPE_BLOB => FileType::Blob,
+        _ => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
+            return Err(());
+        },
+    };
+
+    trace!("Create file: user={}, parent=\"{}\", name=\"{}\", type={}",
+           client, parent, name, type_enum);
+
+    let user = client.user.as_ref().unwrap().clone();
+    client.send_to_node(transaction_id, NodeProtocol::CreateFileRequest {
+        parent: parent,
+        type_of_file: type_enum,
+        name: name,
+        user: user,
+    }) ? ;
+
+    node_receive::<()>(
+        client,
+        & | msg, client | {
+            match msg {
+                ClientProtocol::CreateFilesystemElementResponse {
+                    result: Ok(node_id),
+                } => {
+                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
+                    try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    (None, Some(Ok(())))
+                },
+
+                ClientProtocol::CreateFilesystemElementResponse {
+                    result: Err(error),
+                } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    (None, Some(Err(())))
+                },
+
+                other => {
+                    (Some(other), None)
+                }
+            }
+        })
+}
+
+fn handle_create_folder_req(client: & mut Client) -> Result<(), ()> {
+
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let parent = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
+    let name = try_parse!(client.buffer.parse_string(), client, transaction_id);
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Create folder: user={}, parent=\"{}\",  name=\"{}\"",
+           client, parent, name);
+
+    let user = client.user.as_ref().unwrap().clone();
+    client.send_to_node(transaction_id, NodeProtocol::CreateFolderRequest {
+        parent: parent,
+        name: name,
+        user: user,
+    }) ? ;
+
+    node_receive::<()>(
+        client,
+        & | msg, client | {
+            match msg {
+                ClientProtocol::CreateFilesystemElementResponse {
+                    result: Ok(node_id),
+                } => {
+                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
+                    try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    (None, Some(Ok(())))
+                },
+
+                ClientProtocol::CreateFilesystemElementResponse {
+                    result: Err(error),
+                } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    (None, Some(Err(())))
+                },
+
+                other => {
+                    (Some(other), None)
+                }
+            }
+        })
+}
+
+fn handle_open_req(client: & mut Client) -> Result<(), ()> {
+
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let fd = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
+    let mode_uint = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    let mode = match mode_uint {
+        READ => OpenMode::Read,
+        READ_WRITE => OpenMode::ReadWrite,
+        _ => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
+            return Err(());
+        },
+    };
+
+    trace!("Open file, user={}, fd=\"{}\"", client, fd);
+
+    let user = client.user.as_ref().unwrap().clone();
+    client.send_to_node(transaction_id, NodeProtocol::OpenFileRequest {
+        mode: mode.clone(),
+        file_descriptor: fd,
+        user: user,
+    }) ? ;
+
+    let (access, node_id, file_type) = node_receive::<(FileAccess, NodeId, FileType)>(
+        client,
+        & | msg, client | {
+            match msg {
+                ClientProtocol::OpenFileResponse {
+                    result: Ok((access, node_id, revision, file_type, size)),
+                } => {
+                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
+                    try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_unsigned(revision), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_unsigned(size), Status::FailedToWriteToSendBuffer);
+
+                    try_in_receive_loop!(
+                        client,
+                        buffer.write_unsigned(
+                            match file_type {
+                                FileType::RandomAccess => FILE_TYPE_RANDOM_ACCESS,
+                                FileType::Blob => FILE_TYPE_BLOB,
+                            }),
+                        Status::FailedToWriteToSendBuffer
+                    );
+
+                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    (None, Some(Ok((access, node_id, file_type))))
+                },
+
+                ClientProtocol::OpenFileResponse {
+                    result: Err(error),
+                } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    (None, Some(Err(())))
+                },
+
+                other => {
+                    (Some(other), None)
+                }
+            }
+        })
+        ? ;
+
+    client.open_files.push(OpenFile {
+        node_id: node_id,
+        open_mode: mode,
+        file_type: file_type,
+        access: access
+    });
+    Ok(())
+}
+
+fn handle_close_req(client: & mut Client) -> Result<(), ()> {
+
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Close: user={}, node_id={}", client, node_id);
+
+    let position = client.open_files.iter().position(| ref open_file | {
+        open_file.node_id == node_id
+    }) ;
+
+    if let Some(index) = position {
+        let mut open_file = client.open_files.remove(index);
+
+        match open_file.access.close() {
+            Ok(()) => {
+                try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+                Ok(())
+            },
+            Err(error) => {
+                try_send_response_without_fields!(client, transaction_id, map_file_error_to_uint(error));
+                Err(())
+            }
+        }
+    } else {
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
+        Err(())
+    }
+}
+
+fn handle_write_random_access_req(client: & mut Client) -> Result<(), ()> {
+
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
+    let revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Write: user={}, node_id={}, revision={}, offset={}, size={}",
+           client, node_id, revision, offset, size);
+
+    let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
+        Err(()) => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
+            return Err(());
+        },
+        Ok(v) => v,
+    };
+
+    match open_file.open_mode {
+        OpenMode::Read => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
+            return Err(());
+        },
+        OpenMode::ReadWrite => (),
+    }
+
+    let mut data = Buffer::with_capacity(size as usize);
+    client.buffer.take(& mut data);
+    if data.len() < data.capacity() {
+        Client::fill_buffer(& mut client.connection, & mut data);
+    }
+
+    match open_file.access.write(revision, offset, data) {
+        Ok(revision) => {
+            let mut buffer = try_write_buffer!(client, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
+            try_write_buffer!(client, buffer.write_unsigned(revision));
+            try_write_buffer!(client, buffer.write_end_of_message());
+            try_with_set_error_state!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+            Ok(())
+        },
+        Err(error) => {
+            try_send_response_without_fields!(client, transaction_id, map_file_error_to_uint(error));
+            Err(())
+        }
+    }
+}
+
+fn handle_random_access_insert_req(client: & mut Client) -> Result<(), ()> {
+
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
+    let revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Insert: user={}, node_id={}, revision={}, offset={}, size={}",
+           client, node_id, revision, offset, size);
+
+    let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
+        Err(()) => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
+            return Err(());
+        },
+        Ok(v) => v,
+    };
+
+    match open_file.open_mode {
+        OpenMode::Read => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
+            return Err(());
+        },
+        OpenMode::ReadWrite => (),
+    }
+
+    let mut data = Buffer::with_capacity(size as usize);
+    client.buffer.take(& mut data);
+    if data.len() < data.capacity() {
+        Client::fill_buffer(& mut client.connection, & mut data);
+    }
+
+    match open_file.access.insert(revision, offset, data) {
+        Ok(revision) => {
+            let mut buffer = try_write_buffer!(client, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
+            try_write_buffer!(client, buffer.write_unsigned(revision));
+            try_write_buffer!(client, buffer.write_end_of_message());
+            try_with_set_error_state!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+            Ok(())
+        },
+        Err(error) => {
+            try_send_response_without_fields!(client, transaction_id, map_file_error_to_uint(error));
+            Err(())
+        }
+    }
+}
+
+fn handle_random_access_delete_req(client: & mut Client) -> Result<(), ()> {
+
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
+    let revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Delete: user={}, node_id={}, revision={}, offset={}, size={}",
+           client, node_id, revision, offset, size);
+
+    let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
+        Err(()) => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
+            return Err(());
+        },
+        Ok(v) => v,
+    };
+
+    match open_file.open_mode {
+        OpenMode::Read => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
+            return Err(());
+        },
+        OpenMode::ReadWrite => (),
+    }
+
+    match open_file.access.delete(revision, offset, size) {
+        Ok(revision) => {
+            let mut buffer = try_write_buffer!(client, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
+            try_write_buffer!(client, buffer.write_unsigned(revision));
+            try_write_buffer!(client, buffer.write_end_of_message());
+            try_with_set_error_state!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+            Ok(())
+        },
+        Err(error) => {
+            try_send_response_without_fields!(client, transaction_id, map_file_error_to_uint(error));
+            Err(())
+        }
+    }
+}
+
+fn handle_blob_write_req(client: & mut Client) -> Result<(), ()> {
+
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
+    let mut revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let block_size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Write blob: user={}, node_id={}, revision={}, size={}, block_size={}",
+           client, node_id, revision, size, block_size);
+
+    let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
+        Err(()) => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
+            return Err(());
+        },
+        Ok(v) => v,
+    };
+
+    match open_file.file_type {
+        FileType::Blob => (),
+        _ => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::OperationNotPermitedFotFileType as u64);
+            return Err(());
+        },
+    };
+
+    match open_file.open_mode {
+        OpenMode::Read => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
+            return Err(());
+        },
+        OpenMode::ReadWrite => (),
+    }
+
+    let user = client.user.as_ref().unwrap();
+    let lock = FileLock::LockedBySystemForBlobWrite {
+        user: user.clone(),
+    };
+
+    if let Err(error) = open_file.access.lock(revision, & lock) {
+        try_send_response_without_fields!(client, transaction_id, map_file_error_to_uint(error));
+        return Err(());
+    }
+
+    let max_block_size: u64 = 1024 * 1024 * 10;
+    let mut bytes_read: u64 = 0;
+
+    if block_size > max_block_size {
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::BlockSizeIsTooLarge as u64);
+
+        // todo: this is error case, but since file is locked, return is not possible
+    }
+
+    while bytes_read < size {
+
+        let bytes_left = size - bytes_read;
+        let buffer_size = {
+            if bytes_left < max_block_size {
+                bytes_left
+            } else {
+                max_block_size
+            }
+        };
+
+        let mut buffer = Buffer::with_capacity(buffer_size as usize);
+        client.buffer.take(& mut buffer);
+        if buffer.len() < buffer.capacity() {
+            Client::fill_buffer(& mut client.connection, & mut buffer);
+        }
+
+        revision = match open_file.access.write(revision, bytes_read, buffer) {
+            Ok(r) => r,
+            Err(error) => {
+                try_send_response_without_fields!(client, transaction_id, map_file_error_to_uint(error));
+                return Err(());
+            }
+        };
+
+        bytes_read += buffer_size;
+    }
+
+    if let Err(error) = open_file.access.unlock(& lock) {
+        error!("Failed to unlock file, user={}, error={}", user, map_file_error_to_uint(error));
+        return Err(());
+    }
+
+    let mut buffer = try_write_buffer!(client, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
+    try_write_buffer!(client, buffer.write_unsigned(revision));
+    try_write_buffer!(client, buffer.write_end_of_message());
+    try_with_set_error_state!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+    Ok(())
+}
+
+fn handle_read_req(client: & mut Client) -> Result<(), ()> {
+
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
+    let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Read: user={}, node_id={}, offset={}, size={}", client, node_id, offset, size);
+
+    let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
+        Err(()) => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
+            return Err(());
+        },
+        Ok(v) => v,
+    };
+
+    match open_file.access.read(offset, size) {
+        Ok((data, revision)) => {
+            let mut buffer = try_write_buffer!(client, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
+            try_write_buffer!(client, buffer.write_unsigned(revision));
+            try_write_buffer!(client, buffer.write_block(offset, data.len()));
+            try_write_buffer!(client, buffer.write_end_of_message());
+            try_with_set_error_state!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+
+            if data.len() > 0 {
+                try_with_set_error_state!(client, client.connection.write_with_sleep(& data), Status::FailedToSendToClient);
+            }
+
+            Ok(())
+        },
+        Err(error) => {
+            try_send_response_without_fields!(client, transaction_id, map_file_error_to_uint(error));
+            Err(())
+        }
+    }
+}
+
+fn handle_delete_fs_element_req(client: & mut Client) -> Result<(), ()> {
+
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let fd = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Delete: user={}, fd={}", client, fd);
+
+    let user = client.user.as_ref().unwrap().clone();
+    client.send_to_node(transaction_id, NodeProtocol::DeleteRequest {
+        user: user,
+        fd: fd,
+    }) ? ;
+
+    node_receive::<()>(
+        client,
+        & | msg, client | {
+            match msg {
+                ClientProtocol::DeleteResponse {
+                    result: Ok(()),
+                } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+                    (None, Some(Ok(())))
+                },
+
+                ClientProtocol::CountersResponse {
+                    result: Err(error),
+                } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    (None, Some(Err(())))
+                },
+
+                other => {
+                    (Some(other), None)
+                }
+            }
+        })
+        ? ;
+
+    Ok(())
+}
+
+fn handle_query_counters_req(client: & mut Client) -> Result<(), ()> {
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Query counters: user={}", client);
+
+    let user = client.user.as_ref().unwrap().clone();
+    client.send_to_node(transaction_id, NodeProtocol::CountersRequest {
+        user: user,
+    }) ? ;
+
+    node_receive::<()>(
+        client,
+        & | msg, client | {
+            match msg {
+                ClientProtocol::CountersResponse {
+                    result: Ok(counters),
+                } => {
+
+                    let mut map = KeyValueMap2::new();
+                    map.insert(String::from("active-connections"), Value2::Unsigned {
+                        value: counters.active_connections as u64
+                    });
+
+                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
+                    try_in_receive_loop!(client, buffer.write_key_value_list(map), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    (None, Some(Ok(())))
+                },
+
+                ClientProtocol::CountersResponse {
+                    result: Err(error),
+                } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    (None, Some(Err(())))
+                },
+
+                other => {
+                    (Some(other), None)
+                }
+            }
+        })
+        ? ;
+
+    Ok(())
+}
+
+fn handle_query_list_req(client: & mut Client) -> Result<(), ()> {
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let fd = try_parse!(client.buffer.parse_file_descriptor(), client, 0);
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Query list: user={}, fd={}", client, fd);
+
+    let user = client.user.as_ref().unwrap().clone();
+    client.send_to_node(transaction_id, NodeProtocol::QueryListRequest {
+        user: user,
+        fd: fd,
+    }) ? ;
+
+    node_receive::<()>(
+        client,
+        & | msg, client | {
+            match msg {
+                ClientProtocol::QueryListResponse {
+                    result: Ok(list_of_elements),
+                } => {
+
+                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
+
+                    try_in_receive_loop!(client, buffer.write_list_start(list_of_elements.len()), Status::FailedToWriteToSendBuffer);
+                    for (name, node_id, type_of) in list_of_elements.into_iter() {
+
+                        try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+
+                        try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
+                        try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                        try_in_receive_loop!(client, buffer.write_unsigned(
+                            match type_of {
+                                FilesystemElement::Folder => FOLDER,
+                                FilesystemElement::File => FILE,
+                            }
+                        ), Status::FailedToWriteToSendBuffer);
+
+                        try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                    }
+
+                    try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    (None, Some(Ok(())))
+                },
+
+                ClientProtocol::QueryListResponse {
+                    result: Err(error),
+                } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    (None, Some(Err(())))
+                },
+
+                other => {
+                    (Some(other), None)
+                }
+            }
+        })
+        ? ;
+
+    Ok(())
+}
+
+fn handle_query_fs_req(client: & mut Client) -> Result<(), ()> {
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let fd = try_parse!(client.buffer.parse_file_descriptor(), client, 0); //  todo: user transaction id, check other usages as well
+    try_parse!(client.buffer.expect(";"), client, 0);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Query fs: user={}, fd={}", client, fd);
+
+    let user = client.user.as_ref().unwrap().clone();
+    client.send_to_node(transaction_id, NodeProtocol::QueryFilesystemRequest {
+        user: user,
+        fd: fd,
+    }) ? ;
+
+    node_receive::<()>(
+        client,
+        & | msg, client | {
+            match msg {
+                ClientProtocol::QueryFilesystemResponse {
+                    result: Ok(desc),
+                } => {
+
+                    let type_int = match desc.element_type {
+                        FilesystemElement::Folder => 1,
+                        FilesystemElement::File => 0,
+                    };
+
+                    let mut map = KeyValueMap2::new();
+                    map.insert(String::from("type"), Value2::Unsigned { value: type_int as u64 });
+                    map.insert(String::from("created"), Value2::Unsigned { value: desc.created_at as u64 });
+                    map.insert(String::from("modified"), Value2::Unsigned { value: desc.modified_at as u64 });
+                    map.insert(String::from("read-access"), Value2::String { value: desc.read_access });
+                    map.insert(String::from("write-access"), Value2::String { value: desc.write_access });
+
+                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
+                    try_in_receive_loop!(client, buffer.write_key_value_list(map), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    (None, Some(Ok(())))
+                },
+
+                ClientProtocol::QueryFilesystemResponse {
+                    result: Err(error),
+                } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    (None, Some(Err(())))
+                },
+
+                other => {
+                    (Some(other), None)
+                }
+            }
+        })
+        ? ;
+
+    Ok(())
+}
+
+fn handle_add_user_group(client: & mut Client) -> Result<(), ()> {
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let type_of = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let name = try_parse!(client.buffer.parse_string(), client, transaction_id);
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Create user/group, user={}, name={}, type_of={}", client, name, type_of);
+
+    let user = client.user.as_ref().unwrap().clone();
+    let msg = match type_of {
+        TYPE_USER => NodeProtocol::AddUserRequest {
+            user: user,
+            name: name,
+        },
+        TYPE_GROUP => NodeProtocol::AddGroupRequest {
+            user: user,
+            name: name,
+        },
+        _ => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
+            return Err(());
+        },
+    };
+
+    client.send_to_node(transaction_id, msg) ? ;
+
+    node_receive::<()>(
+        client,
+        & | msg, client | {
+            match msg {
+                ClientProtocol::AddUserGroupResponse {
+                    result: Ok(()),
+                } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+                    (None, Some(Ok(())))
+                },
+                ClientProtocol::AddUserGroupResponse {
+                    result: Err(error),
+                } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    (None, Some(Err(())))
+                },
+                other => {
+                    (Some(other), None)
+                },
+            }
+        })
+        ? ;
+
+    Ok(())
+}
+
+fn handle_mod_user_group(client: & mut Client) -> Result<(), ()> {
+
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let type_of = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let name = try_parse!(client.buffer.parse_string(), client, transaction_id);
+    let mut key_value_map = client.buffer.parse_key_value_list_() ? ;
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    let user = client.user.as_ref().unwrap().clone();
+    let msg = match type_of {
+        TYPE_USER => {
+
+            let password = key_value_map.remove("password")
+                .ok_or(())
+                .map(| value |
+                     value.to_string()
+                     .ok()
+                )
+                ? ;
+
+            let expiration = key_value_map.remove("expiration")
+                .ok_or(())
+                .map(| value |
+                     value.to_unsigned()
+                     .ok()
+                     .map(| value | {
+                         if value != 0 {
+                             Some(value as i64)
+                         } else {
+                             None
+                         }
+                     })
+                )
+                ? ;
+
+            NodeProtocol::ModifyUser {
+                user: user,
+                name: name,
+                password: password,
+                expiration: expiration,
+            }
+        },
+        TYPE_GROUP => {
+
+            let expiration = key_value_map.remove("expiration")
+                .ok_or(())
+                .map(| value |
+                     value.to_unsigned()
+                     .ok()
+                     .map(| value | {
+                         if value != 0 {
+                             Some(value as i64)
+                         } else {
+                             None
+                         }
+                     })
+                )
+                ? ;
+
+            NodeProtocol::ModifyGroup {
+                user: user,
+                name: name,
+                expiration: expiration,
+            }
+        },
+        _ => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
+            return Err(());
+        },
+    };
+
+    client.send_to_node(transaction_id, msg) ? ;
+
+    node_receive::<()>(
+        client,
+        & | msg, client | {
+            match msg {
+                ClientProtocol::AddUserGroupResponse {
+                    result: Ok(()),
+                } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+                    (None, Some(Ok(())))
+                },
+                ClientProtocol::AddUserGroupResponse {
+                    result: Err(error),
+                } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    (None, Some(Err(())))
+                },
+                other => {
+                    (Some(other), None)
+                },
+            }
+        })
+        ? ;
+
+    Ok(())
+}
+
 static MAX_WAIT_DURATION_FOR_NODE_RESPONSE_MS: u64 = 1000;
 static MAX_NUMBER_OF_MESSAGES_FROM_NODE: u64 = 5;
-
 
 fn node_receive<OkType>(
     client: & mut Client,
