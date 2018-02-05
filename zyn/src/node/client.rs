@@ -153,111 +153,7 @@ const FILE_TYPE_BLOB: u64 = 1;
 const TYPE_USER: u64 = 0;
 const TYPE_GROUP: u64 = 1;
 
-/*
-## Messages:
-
-Authenticate:
-<- [Version]A:[Transaction Id][String: username][String: password];[End]
--> [Version]RSP:[Transaction Id][Uint: error code];[End]
-*/
-
-/*
-Create file
-<- [Version]CREATE-FILE:[Transaction Id][FileDescriptor: parent][String: name][Uint: type];[End]
- * Type: 0: random access,
--> [Version]RSP:[Transaction Id][Uint: error code];(Node-Id)[End]
-*/
-
-/*
-Create folder
-<- [Version]CREATE-FOLDER:[Transaction Id][FileDescriptor: parent][String: name];[End]
--> [Version]RSP:[Transaction Id][Uint: error code];(Node-Id)[End]
-*/
-
-/*
-Open file:
-<- [Version]C:[Transaction Id][FileDescriptor][Uint: type];[End]
- * Type: 0: read, 1: read-write
--> [Version]RSP:[Transaction Id][Uint: error code](Node-Id)(Uint: revision)(Uint: size)(Uint: type);[End]
- * Type: 0: random access
-*/
-
-/*
-Close file:
-<- [Version]C:[Transaction Id][NodeId];[End]
--> [Version]RSP:[Transaction Id][Uint: error code];[End]
-*/
-
-/*
-Write:
-<- [Version]RA-W:[Transaction Id][Node-Id: opened file][Block];[End]
--> ([Version]RSP:[Transaction Id][Uint: error code];[End]) Only if there is an error
-<- [data]
--> [Version]RSP:[Transaction Id][Uint: error code](Uint: revision);[End]
-*/
-
-/*
-Insert:
-<- [Version]RA-I:[Transaction Id][Node-Id: opened file][Block];[End]
--> ([Version]RSP:[Transaction Id][Uint: error code];[End]) Only if there is an error
-<- [data]
--> [Version]RSP:[Transaction Id][Uint: error code](Uint: revision);[End]
-*/
-
-/*
-Delete:
-<- [Version]RA-D:[Transaction Id][Node-Id: opened file][Block];[End]
--> [Version]RSP:[Transaction Id][Uint: error code](Uint: revision);[End]
-*/
-
-/*
-Read:
-<- [Version]R:[Transaction Id][Node-Id: opened file][Block];[End]
--> [Version]RSP:[Transaction Id][Uint: error code](Uint: revision)(Block: of what will be sent);[End]
--> [data]
- * Data is only sent if file is not empty
-*/
-
-/*
-Query: counters
-<- [Version]Q-COUNTERS:[Transaction Id];[End]
--> [Version]RSP:[Transaction Id][List-of-Key-value-pair-of-u32];;[End]
-*/
-
-/*
-Query: list
-<- [Version]Q-LIST:[Transaction Id][FileDescriptor];[End]
--> [Version]RSP:[Transaction Id][List-of-String-NodeId-Uint];[End]
- * Uint type: 0: file, 1: directory
-*/
-
-/*
-Query: fileystem element
-<- [Version]Q-FILESYSTEM:[Transaction Id][FileDescriptor];[End]
--> [Version]RSP:[Transaction Id][Uint: type][List-of-key-value-pairs];[End]
- * Uint type: 0: file, 1: directory
-*/
-
-/*
-Delete:
-<- [Version]DELETE:[Transaction Id][FileDescriptor];[End]
--> [Version]RSP:[Transaction Id][Uint: error code];[End]
- */
-
-/*
-Configure: Add user/group:
-<- [Version]ADD-USER-GROUP:[Transaction Id][Uint: type][String: name];[End]
- * type: 0: user, 1: group
--> [Version]RSP:[Transaction Id][Uint: error code];[End]
-*/
-
-/*
-Configure: Modify user/group:
-<- [Version]MOD-USER-GROUP:[Transaction Id][uint: type][String: name][Key-value-list];[End]
- * type: 0: user, 1: group
--> [Version]RSP:[Transaction Id][Uint: error code];[End]
-*/
-
+// ## Messages:
 // todo
 
 /*
@@ -281,6 +177,89 @@ Configure: Set file/folder rights:
 */
 
 const DEFAULT_BUFFER_SIZE: usize = 1024 * 4;
+
+enum Status {
+    Ok,
+    AuthenticationError { trial: u8 },
+    FailedToSendToNode,
+    FailedToreceiveFromNode,
+    FailedToSendToClient,
+    ClientNotAuthenticated,
+    FailedToWriteToSendBuffer,
+    ShutdownOrderedByNode,
+}
+
+impl Display for Status {
+    fn fmt(& self, f: & mut Formatter) -> FmtResult {
+        match *self {
+            Status::Ok =>
+                write!(f, "Ok"),
+            Status::FailedToSendToNode =>
+                write!(f, "FailedToSendToNode"),
+            Status::FailedToreceiveFromNode =>
+                write!(f, "FailedToreceiveFromNode"),
+            Status::AuthenticationError { ref trial } =>
+                write!(f, "AuthenticationError, trial={}", trial),
+            Status::FailedToSendToClient =>
+                write!(f, "FailedToSendToClient"),
+            Status::ClientNotAuthenticated =>
+                write!(f, "ClientNotAuthenticated"),
+            Status::FailedToWriteToSendBuffer =>
+                write!(f, "FailedToWriteToSendBuffer"),
+            Status::ShutdownOrderedByNode =>
+                write!(f, "ShutdownOrderedByNode"),
+        }
+    }
+}
+
+impl Status {
+    fn is_in_error_state(& self) -> bool {
+        match *self {
+            Status::Ok => false,
+            Status::AuthenticationError { ref trial } => {
+                *trial > 2
+            },
+            _ => true,
+        }
+    }
+
+    fn set(& mut self, new_status: Status) {
+        if self.is_in_error_state() {
+            debug!("Status already in error \"{}\" when trying to set status to \"{}\"", *self, new_status);
+        } else {
+            debug!("Setting status to \"{}\"", new_status);
+            *self = new_status;
+        }
+    }
+}
+
+struct OpenFile {
+    node_id: NodeId,
+    open_mode: OpenMode,
+    file_type: FileType,
+    access: FileAccess,
+}
+
+pub struct Client {
+    connection: Connection,
+    buffer: ReceiveBuffer,
+    node_receive: Receiver<ClientProtocol>,
+    node_send: Sender<NodeProtocol>,
+    open_files: Vec<OpenFile>,
+    user: Option<Id>,
+    status: Status,
+    node_message_buffer: Vec<ClientProtocol>,
+}
+
+impl Display for Client {
+    fn fmt(& self, f: & mut Formatter) -> FmtResult {
+        if let Some(ref user) = self.user {
+            write!(f, "{}", user)
+        } else {
+            write!(f, "None")
+        }
+    }
+}
 
 macro_rules! try_parse {
     ($result:expr, $class:expr, $transaction_id:expr) => {{
@@ -367,89 +346,6 @@ macro_rules! try_in_receive_loop_to_send_response_without_fields {
             }
         }
     }}
-}
-
-enum Status {
-    Ok,
-    AuthenticationError { trial: u8 },
-    FailedToSendToNode,
-    FailedToreceiveFromNode,
-    FailedToSendToClient,
-    ClientNotAuthenticated,
-    FailedToWriteToSendBuffer,
-    ShutdownOrderedByNode,
-}
-
-impl Display for Status {
-    fn fmt(& self, f: & mut Formatter) -> FmtResult {
-        match *self {
-            Status::Ok =>
-                write!(f, "Ok"),
-            Status::FailedToSendToNode =>
-                write!(f, "FailedToSendToNode"),
-            Status::FailedToreceiveFromNode =>
-                write!(f, "FailedToreceiveFromNode"),
-            Status::AuthenticationError { ref trial } =>
-                write!(f, "AuthenticationError, trial={}", trial),
-            Status::FailedToSendToClient =>
-                write!(f, "FailedToSendToClient"),
-            Status::ClientNotAuthenticated =>
-                write!(f, "ClientNotAuthenticated"),
-            Status::FailedToWriteToSendBuffer =>
-                write!(f, "FailedToWriteToSendBuffer"),
-            Status::ShutdownOrderedByNode =>
-                write!(f, "ShutdownOrderedByNode"),
-        }
-    }
-}
-
-impl Status {
-    fn is_in_error_state(& self) -> bool {
-        match *self {
-            Status::Ok => false,
-            Status::AuthenticationError { ref trial } => {
-                *trial > 2
-            },
-            _ => true,
-        }
-    }
-
-    fn set(& mut self, new_status: Status) {
-        if self.is_in_error_state() {
-            debug!("Status already in error \"{}\" when trying to set status to \"{}\"", *self, new_status);
-        } else {
-            debug!("Setting status to \"{}\"", new_status);
-            *self = new_status;
-        }
-    }
-}
-
-struct OpenFile {
-    node_id: NodeId,
-    open_mode: OpenMode,
-    file_type: FileType,
-    access: FileAccess,
-}
-
-pub struct Client {
-    connection: Connection,
-    buffer: ReceiveBuffer,
-    node_receive: Receiver<ClientProtocol>,
-    node_send: Sender<NodeProtocol>,
-    open_files: Vec<OpenFile>,
-    user: Option<Id>,
-    status: Status,
-    node_message_buffer: Vec<ClientProtocol>,
-}
-
-impl Display for Client {
-    fn fmt(& self, f: & mut Formatter) -> FmtResult {
-        if let Some(ref user) = self.user {
-            write!(f, "{}", user)
-        } else {
-            write!(f, "None")
-        }
-    }
 }
 
 impl Client {
@@ -756,7 +652,7 @@ impl Client {
 }
 
 fn find_open_file<'vec>(open_files: &'vec mut Vec<OpenFile>, searched_node_id: & NodeId)
-                         -> Result<&'vec mut OpenFile, ()> {
+                        -> Result<&'vec mut OpenFile, ()> {
 
     let mut searched_item_index: usize = 0;
     open_files
@@ -774,8 +670,13 @@ fn find_open_file<'vec>(open_files: &'vec mut Vec<OpenFile>, searched_node_id: &
         .ok_or(())
 }
 
-fn handle_authentication_req(client: & mut Client) -> Result<(), ()> {
-
+/*
+Authenticate request:
+<- [Version]A:[Transaction Id][String: username][String: password];[End]
+-> [Version]RSP:[Transaction Id][Uint: error code];[End]
+*/
+fn handle_authentication_req(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let username = try_parse!(client.buffer.parse_string(), client, transaction_id);
     let password = try_parse!(client.buffer.parse_string(), client, transaction_id);
@@ -821,9 +722,15 @@ fn handle_authentication_req(client: & mut Client) -> Result<(), ()> {
     Ok(())
 }
 
-
-fn handle_create_file_req(client: & mut Client) -> Result<(), ()> {
-
+/*
+Create file request
+<- [Version]CREATE-FILE:[Transaction Id][FileDescriptor: parent][String: name][Uint: type];[End]
+ * Type: 0: random access,
+ * Type: 1: blob,
+-> [Version]RSP:[Transaction Id][Uint: error code];(Node-Id)[End]
+*/
+fn handle_create_file_req(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let parent = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
     let name = try_parse!(client.buffer.parse_string(), client, transaction_id);
@@ -879,8 +786,13 @@ fn handle_create_file_req(client: & mut Client) -> Result<(), ()> {
         })
 }
 
-fn handle_create_folder_req(client: & mut Client) -> Result<(), ()> {
-
+/*
+Create folder request
+<- [Version]CREATE-FOLDER:[Transaction Id][FileDescriptor: parent][String: name];[End]
+-> [Version]RSP:[Transaction Id][Uint: error code];(Node-Id)[End]
+*/
+fn handle_create_folder_req(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let parent = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
     let name = try_parse!(client.buffer.parse_string(), client, transaction_id);
@@ -925,8 +837,17 @@ fn handle_create_folder_req(client: & mut Client) -> Result<(), ()> {
         })
 }
 
-fn handle_open_req(client: & mut Client) -> Result<(), ()> {
-
+/*
+Open file file:
+<- [Version]C:[Transaction Id][FileDescriptor][Uint: type];[End]
+ * Type: 0: read
+ * Type, 1: read-write
+-> [Version]RSP:[Transaction Id][Uint: error code](Node-Id)(Uint: revision)(Uint: size)(Uint: type);[End]
+ * Type: 0: random access
+ * Type: 1: blob
+*/
+fn handle_open_req(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let fd = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
     let mode_uint = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
@@ -1001,8 +922,13 @@ fn handle_open_req(client: & mut Client) -> Result<(), ()> {
     Ok(())
 }
 
-fn handle_close_req(client: & mut Client) -> Result<(), ()> {
-
+/*
+Close file request
+<- [Version]C:[Transaction Id][NodeId];[End]
+-> [Version]RSP:[Transaction Id][Uint: error code];[End]
+*/
+fn handle_close_req(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
     try_parse!(client.buffer.expect(";"), client, transaction_id);
@@ -1033,8 +959,17 @@ fn handle_close_req(client: & mut Client) -> Result<(), ()> {
     }
 }
 
-fn handle_write_random_access_req(client: & mut Client) -> Result<(), ()> {
-
+/*
+Write to random access file request
+<- [Version]RA-W:[Transaction Id][Node-Id: file][Block];[End]
+ * file needs to be open
+ * file needs to be of type random access
+-> ([Version]RSP:[Transaction Id][Uint: error code];[End]) Only if there is an error
+<- [data]
+-> [Version]RSP:[Transaction Id][Uint: error code](Uint: revision);[End]
+*/
+fn handle_write_random_access_req(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
     let revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
@@ -1083,8 +1018,17 @@ fn handle_write_random_access_req(client: & mut Client) -> Result<(), ()> {
     }
 }
 
-fn handle_random_access_insert_req(client: & mut Client) -> Result<(), ()> {
-
+/*
+Insert to random access file
+<- [Version]RA-I:[Transaction Id][Node-Id: opened file][Block];[End]
+ * file needs to be open
+ * file needs to be of type random access
+-> ([Version]RSP:[Transaction Id][Uint: error code];[End]) Only if there is an error
+<- [data]
+-> [Version]RSP:[Transaction Id][Uint: error code](Uint: revision);[End]
+*/
+fn handle_random_access_insert_req(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
     let revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
@@ -1133,8 +1077,15 @@ fn handle_random_access_insert_req(client: & mut Client) -> Result<(), ()> {
     }
 }
 
-fn handle_random_access_delete_req(client: & mut Client) -> Result<(), ()> {
-
+/*
+Delete from random access file
+<- [Version]RA-D:[Transaction Id][Node-Id: opened file][Block];[End]
+ * file needs to be open
+ * file needs to be of type random access
+-> [Version]RSP:[Transaction Id][Uint: error code](Uint: revision);[End]
+*/
+fn handle_random_access_delete_req(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
     let revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
@@ -1177,8 +1128,15 @@ fn handle_random_access_delete_req(client: & mut Client) -> Result<(), ()> {
     }
 }
 
-fn handle_blob_write_req(client: & mut Client) -> Result<(), ()> {
-
+/*
+Write to blob file
+FIXME: <- [Version]RA-D:[Transaction Id][Node-Id: opened file][Block];[End]
+ * file needs to be open
+ * file needs to be of type blob
+-> [Version]RSP:[Transaction Id][Uint: error code](Uint: revision);[End]
+*/
+fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
     let mut revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
@@ -1274,8 +1232,16 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()> {
     Ok(())
 }
 
-fn handle_read_req(client: & mut Client) -> Result<(), ()> {
-
+/*
+Read:
+<- [Version]R:[Transaction Id][Node-Id: file][Block];[End]
+ * file needs to be open
+-> [Version]RSP:[Transaction Id][Uint: error code](Uint: revision)(Block: of what will be sent);[End]
+-> [data]
+ * Data is only sent if file is not empty
+*/
+fn handle_read_req(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
     let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
@@ -1314,8 +1280,13 @@ fn handle_read_req(client: & mut Client) -> Result<(), ()> {
     }
 }
 
-fn handle_delete_fs_element_req(client: & mut Client) -> Result<(), ()> {
-
+/*
+Delete file system element
+<- [Version]DELETE:[Transaction Id][FileDescriptor];[End]
+-> [Version]RSP:[Transaction Id][Uint: error code];[End]
+ */
+fn handle_delete_fs_element_req(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let fd = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
     try_parse!(client.buffer.expect(";"), client, transaction_id);
@@ -1357,7 +1328,13 @@ fn handle_delete_fs_element_req(client: & mut Client) -> Result<(), ()> {
     Ok(())
 }
 
-fn handle_query_counters_req(client: & mut Client) -> Result<(), ()> {
+/*
+Query system counters
+<- [Version]Q-COUNTERS:[Transaction Id];[End]
+-> [Version]RSP:[Transaction Id][List-of-Key-value-pair-of-u32];;[End]
+*/
+fn handle_query_counters_req(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     try_parse!(client.buffer.expect(";"), client, transaction_id);
     try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
@@ -1406,7 +1383,14 @@ fn handle_query_counters_req(client: & mut Client) -> Result<(), ()> {
     Ok(())
 }
 
-fn handle_query_list_req(client: & mut Client) -> Result<(), ()> {
+/*
+Query list file system contents
+<- [Version]Q-LIST:[Transaction Id][FileDescriptor];[End]
+-> [Version]RSP:[Transaction Id][List-of-String-NodeId-Uint];[End]
+ * Uint type: 0: file, 1: directory
+*/
+fn handle_query_list_req(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let fd = try_parse!(client.buffer.parse_file_descriptor(), client, 0);
     try_parse!(client.buffer.expect(";"), client, transaction_id);
@@ -1470,7 +1454,14 @@ fn handle_query_list_req(client: & mut Client) -> Result<(), ()> {
     Ok(())
 }
 
-fn handle_query_fs_req(client: & mut Client) -> Result<(), ()> {
+/*
+Query fileystem element
+<- [Version]Q-FILESYSTEM:[Transaction Id][FileDescriptor];[End]
+-> [Version]RSP:[Transaction Id][Uint: type][List-of-key-value-pairs];[End]
+ * Uint type: 0: file, 1: directory
+*/
+fn handle_query_fs_req(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let fd = try_parse!(client.buffer.parse_file_descriptor(), client, 0); //  todo: user transaction id, check other usages as well
     try_parse!(client.buffer.expect(";"), client, 0);
@@ -1528,7 +1519,15 @@ fn handle_query_fs_req(client: & mut Client) -> Result<(), ()> {
     Ok(())
 }
 
-fn handle_add_user_group(client: & mut Client) -> Result<(), ()> {
+/*
+Add user/group
+<- [Version]ADD-USER-GROUP:[Transaction Id][Uint: type][String: name];[End]
+ * type 0: user
+ * type 1: group
+-> [Version]RSP:[Transaction Id][Uint: error code];[End]
+*/
+fn handle_add_user_group(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let type_of = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
     let name = try_parse!(client.buffer.parse_string(), client, transaction_id);
@@ -1581,8 +1580,14 @@ fn handle_add_user_group(client: & mut Client) -> Result<(), ()> {
     Ok(())
 }
 
-fn handle_mod_user_group(client: & mut Client) -> Result<(), ()> {
-
+/*
+Modify user/group
+<- [Version]MOD-USER-GROUP:[Transaction Id][uint: type][String: name][Key-value-list];[End]
+ * type: 0: user, 1: group
+-> [Version]RSP:[Transaction Id][Uint: error code];[End]
+*/
+fn handle_mod_user_group(client: & mut Client) -> Result<(), ()>
+{
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let type_of = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
     let name = try_parse!(client.buffer.parse_string(), client, transaction_id);
