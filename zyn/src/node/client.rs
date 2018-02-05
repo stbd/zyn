@@ -294,7 +294,7 @@ macro_rules! try_parse {
                 {
                     Ok(()) => (),
                     Err(status) => {
-                        $class.status = status;
+                        $class.status.set(status);
                     },
                 }
                 return Err(());
@@ -307,7 +307,7 @@ macro_rules! try_with_set_error_state {
     ($class:expr, $operation:expr, $error_code:expr) => {{
         let result = $operation;
         if result.is_err() {
-            $class.status = $error_code;
+            $class.status.set($error_code);
             return Err(());
         }
         result.unwrap()
@@ -326,7 +326,7 @@ macro_rules! try_send_response_without_fields {
         match Client::send_response_without_fields(& mut $class.connection, $transaction_id, $rsp_error_code) {
             Ok(()) => (),
             Err(status) => {
-                $class.status = status;
+                $class.status.set(status);
                 return Err(())
             }
         }
@@ -337,7 +337,7 @@ macro_rules! try_in_receive_loop {
     ($class:expr, $operation:expr, $error_code:expr) => {{
         let result = $operation;
         if result.is_err() {
-            $class.status = $error_code;
+            $class.status.set($error_code);
             return (None, Some(Err(())));
         }
         result.unwrap()
@@ -362,7 +362,7 @@ macro_rules! try_in_receive_loop_to_send_response_without_fields {
         match Client::send_response_without_fields(& mut $class.connection, $transaction_id, $rsp_error_code) {
             Ok(()) => (),
             Err(status) => {
-                $class.status = status;
+                $class.status.set(status);
                 return (None, Some(Err(())));
             }
         }
@@ -411,6 +411,15 @@ impl Status {
                 *trial > 2
             },
             _ => true,
+        }
+    }
+
+    fn set(& mut self, new_status: Status) {
+        if self.is_in_error_state() {
+            debug!("Status already in error \"{}\" when trying to set status to \"{}\"", *self, new_status);
+        } else {
+            debug!("Setting status to \"{}\"", new_status);
+            *self = new_status;
         }
     }
 }
@@ -535,7 +544,7 @@ impl Client {
                     match Client::send_response_without_fields(& mut self.connection, 0, CommonErrorCodes::ErrorMalformedMessage as u64) {
                         Ok(()) => (),
                         Err(status) => {
-                            self.status = status;
+                            self.status.set(status);
                         },
                     }
                     break;
@@ -546,7 +555,7 @@ impl Client {
                 if self.buffer.expect("A:").is_ok() {
                     let _ = handle_authentication_req(self);
                 } else {
-                    self.status = Status::ClientNotAuthenticated;
+                    self.status.set(Status::ClientNotAuthenticated);
                     break ;
                 }
             } else {
@@ -606,7 +615,7 @@ impl Client {
                     }
 
                     if self.connection.write_with_sleep(buffer.as_bytes()).is_err() {
-                        self.status = Status::FailedToSendToClient;
+                        self.status.set(Status::FailedToSendToClient);
                         return Err(());
                     }
 
@@ -654,11 +663,11 @@ impl Client {
                         try_write_buffer!(self, buffer.write_notification_disconnected(& reason));
 
                         if self.connection.write_with_sleep(buffer.as_bytes()).is_err() {
-                            self.status = Status::FailedToSendToClient;
+                            self.status.set(Status::FailedToSendToClient);
                             return Err(());
                         }
 
-                        self.status = Status::ShutdownOrderedByNode;
+                        self.status.set(Status::ShutdownOrderedByNode);
                     },
                     ClientProtocol::Quit => {
                         info!("Thread received quit command");
@@ -721,7 +730,7 @@ impl Client {
         match msg {
             ClientProtocol::Shutdown { .. } => self.node_message_buffer.push(msg),
             _ => {
-                self.status = Status::FailedToreceiveFromNode;
+                self.status.set(Status::FailedToreceiveFromNode);
                 debug!("Unexpected message from node");
             },
         };
@@ -731,7 +740,7 @@ impl Client {
         if let Err(desc) = self.node_send.send(msg) {
             warn!("Failed to send message to node, id={}, desc={}", self, desc);
             try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::InternalCommunicationError as u64);
-            self.status = Status::FailedToSendToNode;
+            self.status.set(Status::FailedToSendToNode);
             return Err(());
         }
         Ok(())
@@ -794,7 +803,7 @@ fn handle_authentication_req(client: & mut Client) -> Result<(), ()> {
                     if let Status::AuthenticationError { ref mut trial } = client.status {
                         *trial += 1;
                     } else {
-                        client.status = Status::AuthenticationError { trial: 1 };
+                        client.status.set(Status::AuthenticationError { trial: 1 });
                     }
                     (None, Some(Err(())))
                 },
@@ -1686,7 +1695,7 @@ fn node_receive<OkType>(
         let msg = match client.node_receive.try_recv() {
             Ok(msg) => msg,
             Err(TryRecvError::Disconnected) => {
-                client.status = Status::FailedToreceiveFromNode;
+                client.status.set(Status::FailedToreceiveFromNode);
                 return Err(())
             },
             Err(TryRecvError::Empty) => {
@@ -1705,6 +1714,6 @@ fn node_receive<OkType>(
     }
 
     warn!("No response received from node in time, client={}", client);
-    client.status = Status::FailedToreceiveFromNode;
+    client.status.set(Status::FailedToreceiveFromNode);
     Err(())
 }
