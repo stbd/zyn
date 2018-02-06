@@ -1,4 +1,3 @@
-use std::fmt::{ Display, Formatter, Result as FmtResult };
 use std::fs::{ create_dir };
 use std::mem::{ uninitialized };
 use std::path::{ Path, PathBuf };
@@ -17,37 +16,6 @@ use node::crypto::{ Crypto };
 use node::file_handle::{ FileAccess, FileProperties };
 use node::filesystem::{ Filesystem, FilesystemError, Node as FsNode };
 use node::user_authority::{ UserAuthority, Id };
-
-struct FilesystemElementAuthority {
-    read: Id,
-    write: Id,
-}
-
-fn start_signal_listener() -> Result<Receiver<()>, ()> {
-
-    let (sender, receiver) = channel::<()>();
-    let mut signal_set: [size_t; 32] = unsafe { uninitialized() };
-    if unsafe { sigemptyset(signal_set.as_mut_ptr() as _) } != 0 {
-        return Err(())
-    }
-    if unsafe { sigaddset(signal_set.as_mut_ptr() as _, SIGTERM) } != 0 {
-        return Err(())
-    }
-    if unsafe { sigaddset(signal_set.as_mut_ptr() as _, SIGINT) } != 0 {
-        return Err(())
-    }
-    if unsafe { sigprocmask(SIG_SETMASK, signal_set.as_ptr() as _, null_mut()) } != 0 {
-        return Err(());
-    }
-
-    spawn(move || {
-        let mut sig: c_int = 0;
-        unsafe { sigwait(signal_set.as_ptr() as _, & mut sig) };
-        sender.send(()).unwrap();
-    });
-
-    Ok(receiver)
-}
 
 pub enum NodeError {
     InvalidUsernamePassword,
@@ -77,32 +45,30 @@ fn node_error_to_rsp(error: NodeError) -> ErrorResponse {
     }
 }
 
-pub enum FilesystemElement {
+pub enum FilesystemElementType {
     File,
     Folder,
 }
 
-impl Display for FilesystemElement {
-    fn fmt(& self, f: & mut Formatter) -> FmtResult {
-        match *self {
-            FilesystemElement::File =>
-                write!(f, "File"),
-            FilesystemElement::Folder =>
-                write!(f, "Folder"),
-        }
-    }
+pub struct FilesystemElementAuthority {
+    pub read: String,
+    pub write: String,
+}
+
+pub enum FilesystemElement {
+    File {
+        properties: FileProperties,
+        authority: FilesystemElementAuthority
+    },
+    Folder {
+        created_at: Timestamp,
+        modified_at: Timestamp,
+        authority: FilesystemElementAuthority,
+    },
 }
 
 pub struct Counters {
     pub active_connections: u32,
-}
-
-pub struct FilesystemElementDescription {
-    pub element_type: FilesystemElement,
-    pub created_at: Timestamp,
-    pub modified_at: Timestamp,
-    pub read_access: String,
-    pub write_access: String,
 }
 
 pub enum ClientProtocol {
@@ -111,8 +77,8 @@ pub enum ClientProtocol {
     OpenFileResponse { result: Result<(FileAccess, NodeId, FileRevision, FileType, u64), ErrorResponse> },
     Shutdown { reason: String },
     CountersResponse { result: Result<Counters, ErrorResponse> },
-    QueryListResponse { result: Result<Vec<(String, NodeId, FilesystemElement)>, ErrorResponse> },
-    QueryFilesystemResponse { result: Result<FilesystemElementDescription, ErrorResponse> },
+    QueryListResponse { result: Result<Vec<(String, NodeId, FilesystemElementType)>, ErrorResponse> },
+    QueryFilesystemResponse { result: Result<FilesystemElement, ErrorResponse> },
     DeleteResponse { result: Result<(), ErrorResponse> },
     AddUserGroupResponse { result: Result<(), ErrorResponse> },
     ModifyUserGroupResponse { result: Result<(), ErrorResponse> },
@@ -133,6 +99,37 @@ pub enum NodeProtocol {
     AddGroupRequest { user: Id, name: String },
     ModifyGroup { user: Id, name: String, expiration: Option<Option<Timestamp>> },
     Quit,
+}
+
+fn start_signal_listener() -> Result<Receiver<()>, ()> {
+
+    let (sender, receiver) = channel::<()>();
+    let mut signal_set: [size_t; 32] = unsafe { uninitialized() };
+    if unsafe { sigemptyset(signal_set.as_mut_ptr() as _) } != 0 {
+        return Err(())
+    }
+    if unsafe { sigaddset(signal_set.as_mut_ptr() as _, SIGTERM) } != 0 {
+        return Err(())
+    }
+    if unsafe { sigaddset(signal_set.as_mut_ptr() as _, SIGINT) } != 0 {
+        return Err(())
+    }
+    if unsafe { sigprocmask(SIG_SETMASK, signal_set.as_ptr() as _, null_mut()) } != 0 {
+        return Err(());
+    }
+
+    spawn(move || {
+        let mut sig: c_int = 0;
+        unsafe { sigwait(signal_set.as_ptr() as _, & mut sig) };
+        sender.send(()).unwrap();
+    });
+
+    Ok(receiver)
+}
+
+struct FilesystemElementAuthorityId {
+    read: Id,
+    write: Id,
 }
 
 struct ClientInfo {
@@ -730,7 +727,7 @@ impl Node {
         auth: & mut UserAuthority,
         user: Id,
         file_descriptor: FileDescriptor,
-    ) -> Result<Vec<(String, NodeId, FilesystemElement)>, ErrorResponse> {
+    ) -> Result<Vec<(String, NodeId, FilesystemElementType)>, ErrorResponse> {
 
         let node_id = Node::resolve_file_descriptor(
             node_id_buffer,
@@ -753,8 +750,8 @@ impl Node {
         let mut result = Vec::with_capacity(folder.number_of_children());
         for ref child in folder.children() {
             let type_of = match *fs.node(& child.node_id).unwrap() {
-                FsNode::Folder { .. } => FilesystemElement::Folder,
-                FsNode::File { .. } => FilesystemElement::File,
+                FsNode::Folder { .. } => FilesystemElementType::Folder,
+                FsNode::File { .. } => FilesystemElementType::File,
                 FsNode::NotSet { .. } => panic!(),
             };
 
@@ -771,7 +768,7 @@ impl Node {
         crypto: & mut Crypto,
         user: Id,
         file_descriptor: FileDescriptor,
-    ) -> Result<FilesystemElementDescription, ErrorResponse> {
+    ) -> Result<FilesystemElement, ErrorResponse> {
 
         let node_id = Node::resolve_file_descriptor(
             node_id_buffer,
@@ -798,12 +795,13 @@ impl Node {
                         .map_err(| () | node_error_to_rsp(NodeError::InternalError))
                         ? ;
 
-                    let desc = FilesystemElementDescription {
-                        element_type: FilesystemElement::Folder,
+                    let desc = FilesystemElement::Folder {
                         created_at: folder.created(),
                         modified_at: folder.modified(),
-                        read_access: read,
-                        write_access: write,
+                        authority: FilesystemElementAuthority {
+                            read: read,
+                            write: write,
+                        },
                     };
 
                     auth.is_authorized(& folder.read(), & user, utc_timestamp())
@@ -827,12 +825,12 @@ impl Node {
             .map_err(| () | node_error_to_rsp(NodeError::InternalError))
             ? ;
 
-        let desc = FilesystemElementDescription {
-            element_type: FilesystemElement::File,
-            created_at: properties.created_at,
-            modified_at: properties.modified_at,
-            read_access: read,
-            write_access: write,
+        let desc = FilesystemElement::File {
+            properties: properties,
+            authority: FilesystemElementAuthority {
+                read: read,
+                write: write,
+            },
         };
 
         auth.is_authorized(& file_auth.read, & user, utc_timestamp())
@@ -1011,7 +1009,7 @@ impl Node {
         file_node_id: & NodeId,
         fs: & mut Filesystem,
         crypto: & mut Crypto,
-    ) -> Result<(FileProperties, FilesystemElementAuthority), ErrorResponse> {
+    ) -> Result<(FileProperties, FilesystemElementAuthorityId), ErrorResponse> {
 
         let properties = fs.mut_file(& file_node_id)
             .map_err(fs_error_to_rsp)
@@ -1031,9 +1029,9 @@ impl Node {
 
         Ok((
             properties,
-            FilesystemElementAuthority {
-            read: folder.read().clone(),
-            write: folder.write().clone(),
+            FilesystemElementAuthorityId {
+                read: folder.read().clone(),
+                write: folder.write().clone(),
             }
         ))
     }

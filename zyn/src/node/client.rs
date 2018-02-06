@@ -11,7 +11,7 @@ use node::common::{ NodeId, Buffer, OpenMode, FileType };
 use node::connection::{ Connection };
 use node::file_handle::{ FileAccess, FileError, Notification, FileLock };
 use node::filesystem::{ FilesystemError };
-use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, ErrorResponse, NodeError };
+use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, FilesystemElementType, ErrorResponse, NodeError };
 use node::user_authority::{ Id };
 
 /*
@@ -1423,8 +1423,8 @@ fn handle_query_list_req(client: & mut Client) -> Result<(), ()>
                         try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
                         try_in_receive_loop!(client, buffer.write_unsigned(
                             match type_of {
-                                FilesystemElement::Folder => FOLDER,
-                                FilesystemElement::File => FILE,
+                                FilesystemElementType::Folder => FOLDER,
+                                FilesystemElementType::File => FILE,
                             }
                         ), Status::FailedToWriteToSendBuffer);
 
@@ -1483,17 +1483,23 @@ fn handle_query_fs_req(client: & mut Client) -> Result<(), ()>
                     result: Ok(desc),
                 } => {
 
-                    let type_int = match desc.element_type {
-                        FilesystemElement::Folder => 1,
-                        FilesystemElement::File => 0,
-                    };
-
                     let mut map = KeyValueMap2::new();
-                    map.insert(String::from("type"), Value2::Unsigned { value: type_int as u64 });
-                    map.insert(String::from("created"), Value2::Unsigned { value: desc.created_at as u64 });
-                    map.insert(String::from("modified"), Value2::Unsigned { value: desc.modified_at as u64 });
-                    map.insert(String::from("read-access"), Value2::String { value: desc.read_access });
-                    map.insert(String::from("write-access"), Value2::String { value: desc.write_access });
+                    match desc {
+                        FilesystemElement::File { properties, authority } => {
+                            map.insert(String::from("type"), Value2::Unsigned { value: FILE as u64 });
+                            map.insert(String::from("created"), Value2::Unsigned { value: properties.created_at as u64 });
+                            map.insert(String::from("modified"), Value2::Unsigned { value: properties.modified_at as u64 });
+                            map.insert(String::from("read-access"), Value2::String { value: authority.read });
+                            map.insert(String::from("write-access"), Value2::String { value: authority.write });
+                        },
+                        FilesystemElement::Folder { created_at, modified_at, authority } => {
+                            map.insert(String::from("type"), Value2::Unsigned { value: FOLDER as u64 });
+                            map.insert(String::from("created"), Value2::Unsigned { value: created_at as u64 });
+                            map.insert(String::from("modified"), Value2::Unsigned { value: modified_at as u64 });
+                            map.insert(String::from("read-access"), Value2::String { value: authority.read });
+                            map.insert(String::from("write-access"), Value2::String { value: authority.write });
+                        },
+                    }
 
                     let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
                     try_in_receive_loop!(client, buffer.write_key_value_list(map), Status::FailedToWriteToSendBuffer);
