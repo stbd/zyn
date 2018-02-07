@@ -1,32 +1,8 @@
-use std::collections::{ HashMap };
 use std::io::{ Write };
 use std::path::{ PathBuf };
 use std::vec::{ Vec };
 
 use node::common::{ Buffer, NodeId, FileDescriptor };
-
-pub enum Value2 {
-    Unsigned { value: u64 },
-    String { value: String },
-}
-
-impl Value2 {
-    pub fn to_string(self) -> Result<String, ()> {
-        match self {
-            Value2::String { value } => Ok(value),
-            _ => Err(()),
-        }
-    }
-
-    pub fn to_unsigned(self) -> Result<u64, ()> {
-        match self {
-            Value2::Unsigned { value } => Ok(value),
-            _ => Err(()),
-        }
-    }
-}
-
-pub type KeyValueMap2 = HashMap<String, Value2>;
 
 pub static FIELD_END_MARKER: & 'static str = "E:;";
 
@@ -217,38 +193,29 @@ impl ReceiveBuffer {
         }
     }
 
-    pub fn parse_key_value_list_(& mut self) -> Result<KeyValueMap2, ()> {
-
-        let mut map = KeyValueMap2::new();
-
+    pub fn parse_list_start(& mut self) -> Result<u64, ()> {
         self.expect("L:") ? ;
-        let number_of_elements = self.parse_unsigned() ? ;
+        self.parse_unsigned()
+    }
 
-        for _ in 0..number_of_elements {
+    pub fn parse_list_end(& mut self) -> Result<(), ()> {
+        self.expect(";")
+    }
 
-            self.expect("LE:KVP:") ? ;
-            let key = self.parse_string() ? ;
-            let value = {
+    pub fn parse_list_element_start(& mut self) -> Result<(), ()> {
+        self.expect("LE:")
+    }
 
-                // todo: implement possibility to peek
+    pub fn parse_list_element_end(& mut self) -> Result<(), ()> {
+        self.expect(";")
+    }
 
-                let unsigned = self.parse_unsigned();
-                let string = self.parse_string();
-                if unsigned.is_ok() {
-                    Value2::Unsigned { value: unsigned.unwrap() }
-                } else if string.is_ok() {
-                    Value2::String { value: string.unwrap() }
-                } else {
-                    return Err(())
-                }
-            };
+    pub fn parse_key_value_pair_start(& mut self) -> Result<(), ()> {
+        self.expect("KVP:")
+    }
 
-            map.insert(key, value);
-            self.expect(";;") ? ;
-        }
-
-        self.expect(";") ? ;
-        Ok(map)
+    pub fn parse_key_value_pair_end(& mut self) -> Result<(), ()> {
+        self.expect(";")
     }
 }
 
@@ -305,32 +272,6 @@ impl SendBuffer {
         write!(self.buffer, "{};;", value).map_err(| _ | ())
     }
 
-    pub fn write_key_value_list(& mut self, elements: KeyValueMap2) -> Result<(), ()> {
-        write!(self.buffer, "L:").map_err(| _ | ()) ? ;
-
-        self.write_unsigned(elements.len() as u64) ? ;
-
-        for (key, value) in elements {
-            write!(self.buffer, "LE:KVP:")
-                .map_err(| _ | ()) ? ;
-
-            self.write_string(key) ? ;
-
-            match value {
-                Value2::Unsigned { value } => {
-                    self.write_unsigned(value) ? ;
-                },
-                Value2::String { value } => {
-                    self.write_string(value) ? ;
-                },
-            }
-
-            write!(self.buffer, ";;").map_err(| _ | ()) ? ;
-        }
-
-        write!(self.buffer, ";").map_err(| _ | ())
-    }
-
     pub fn write_list_start(& mut self, number_of_elements: usize) -> Result<(), ()> {
         write!(self.buffer, "L:").map_err(| _ | ()) ? ;
 
@@ -347,6 +288,28 @@ impl SendBuffer {
 
     pub fn write_list_element_end(& mut self) -> Result<(), ()> {
         write!(self.buffer, ";").map_err(| _ | ())
+    }
+
+    pub fn write_key_value_pair_start(& mut self) -> Result<(), ()> {
+        write!(self.buffer, "KVP:").map_err(| _ | ())
+    }
+
+    pub fn write_key_value_pair_end(& mut self) -> Result<(), ()> {
+        write!(self.buffer, ";").map_err(| _ | ())
+    }
+
+    pub fn write_key_value_string_unsigned(& mut self, key: String, value: u64) -> Result<(), ()> {
+        self.write_key_value_pair_start() ? ;
+        self.write_string(key) ? ;
+        self.write_unsigned(value) ? ;
+        self.write_key_value_pair_end()
+    }
+
+    pub fn write_key_value_string_string(& mut self, key: String, value: String) -> Result<(), ()> {
+        self.write_key_value_pair_start() ? ;
+        self.write_string(key) ? ;
+        self.write_string(value) ? ;
+        self.write_key_value_pair_end()
     }
 
     pub fn write_notification_field(& mut self) -> Result<(), ()> {

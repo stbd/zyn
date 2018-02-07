@@ -6,8 +6,8 @@ use std::time::{ Duration };
 use std::vec::{ Vec };
 use std::{ str };
 
-use node::client_protocol_buffer::{ ReceiveBuffer, SendBuffer, KeyValueMap2, Value2 };
-use node::common::{ NodeId, Buffer, OpenMode, FileType };
+use node::client_protocol_buffer::{ ReceiveBuffer, SendBuffer };
+use node::common::{ NodeId, Buffer, OpenMode, FileType, Timestamp };
 use node::connection::{ Connection };
 use node::file_handle::{ FileAccess, FileError, Notification, FileLock };
 use node::filesystem::{ FilesystemError };
@@ -1353,14 +1353,17 @@ fn handle_query_counters_req(client: & mut Client) -> Result<(), ()>
                 ClientProtocol::CountersResponse {
                     result: Ok(counters),
                 } => {
-
-                    let mut map = KeyValueMap2::new();
-                    map.insert(String::from("active-connections"), Value2::Unsigned {
-                        value: counters.active_connections as u64
-                    });
-
                     let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
-                    try_in_receive_loop!(client, buffer.write_key_value_list(map), Status::FailedToWriteToSendBuffer);
+
+                    try_in_receive_loop!(client, buffer.write_list_start(1), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_key_value_pair_start(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_string(String::from("active-connections")), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_unsigned(counters.active_connections as u64), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_key_value_pair_end(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
+
                     try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
                     (None, Some(Ok(())))
@@ -1483,26 +1486,48 @@ fn handle_query_fs_req(client: & mut Client) -> Result<(), ()>
                     result: Ok(desc),
                 } => {
 
-                    let mut map = KeyValueMap2::new();
+                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
                     match desc {
                         FilesystemElement::File { properties, authority } => {
-                            map.insert(String::from("type"), Value2::Unsigned { value: FILE as u64 });
-                            map.insert(String::from("created"), Value2::Unsigned { value: properties.created_at as u64 });
-                            map.insert(String::from("modified"), Value2::Unsigned { value: properties.modified_at as u64 });
-                            map.insert(String::from("read-access"), Value2::String { value: authority.read });
-                            map.insert(String::from("write-access"), Value2::String { value: authority.write });
+                            try_in_receive_loop!(client, buffer.write_list_start(5), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_key_value_string_unsigned(String::from("type"), FILE as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_key_value_string_unsigned(String::from("created"), properties.created_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_key_value_string_unsigned(String::from("modified"), properties.modified_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_key_value_string_string(String::from("read-access"), authority.read), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_key_value_string_string(String::from("write-access"), authority.write), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
                         },
                         FilesystemElement::Folder { created_at, modified_at, authority } => {
-                            map.insert(String::from("type"), Value2::Unsigned { value: FOLDER as u64 });
-                            map.insert(String::from("created"), Value2::Unsigned { value: created_at as u64 });
-                            map.insert(String::from("modified"), Value2::Unsigned { value: modified_at as u64 });
-                            map.insert(String::from("read-access"), Value2::String { value: authority.read });
-                            map.insert(String::from("write-access"), Value2::String { value: authority.write });
+                            try_in_receive_loop!(client, buffer.write_list_start(5), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_key_value_string_unsigned(String::from("type"), FOLDER as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_key_value_string_unsigned(String::from("created"), created_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_key_value_string_unsigned(String::from("modified"), modified_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_key_value_string_string(String::from("read-access"), authority.read), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_key_value_string_string(String::from("write-access"), authority.write), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
                         },
                     }
 
-                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
-                    try_in_receive_loop!(client, buffer.write_key_value_list(map), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
                     (None, Some(Ok(())))
@@ -1594,40 +1619,49 @@ Modify user/group
 */
 fn handle_mod_user_group(client: & mut Client) -> Result<(), ()>
 {
+    let mut password: Option<String> = None;
+    let mut expiration: Option<Option<Timestamp>> = None;
+
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let type_of = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
     let name = try_parse!(client.buffer.parse_string(), client, transaction_id);
-    let mut key_value_map = client.buffer.parse_key_value_list_() ? ;
+
+    let number_of_elements = try_parse!(client.buffer.parse_list_start(), client, transaction_id);
+    for _ in 0..number_of_elements {
+        if client.buffer.parse_list_element_start().is_err() {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
+            return Err(());
+        }
+
+        try_parse!(client.buffer.parse_key_value_pair_start(), client, transaction_id);
+        let key = try_parse!(client.buffer.parse_string(), client, transaction_id);
+
+        if key == "password" {
+            password = Some(try_parse!(client.buffer.parse_string(), client, transaction_id));
+        } else if key == "expiration" {
+            let value = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+            if value == 0 {
+                expiration = Some(None);
+            } else {
+                expiration = Some(Some(value as i64));
+            }
+        } else {
+            warn!("Failed to parse key value");
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
+            return Err(());
+        }
+
+        try_parse!(client.buffer.parse_key_value_pair_end(), client, transaction_id);
+        try_parse!(client.buffer.parse_list_element_end(), client, transaction_id);
+    }
+    try_parse!(client.buffer.parse_list_end(), client, transaction_id);
+
     try_parse!(client.buffer.expect(";"), client, transaction_id);
     try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
 
     let user = client.user.as_ref().unwrap().clone();
     let msg = match type_of {
         TYPE_USER => {
-
-            let password = key_value_map.remove("password")
-                .ok_or(())
-                .map(| value |
-                     value.to_string()
-                     .ok()
-                )
-                ? ;
-
-            let expiration = key_value_map.remove("expiration")
-                .ok_or(())
-                .map(| value |
-                     value.to_unsigned()
-                     .ok()
-                     .map(| value | {
-                         if value != 0 {
-                             Some(value as i64)
-                         } else {
-                             None
-                         }
-                     })
-                )
-                ? ;
-
             NodeProtocol::ModifyUser {
                 user: user,
                 name: name,
@@ -1636,22 +1670,6 @@ fn handle_mod_user_group(client: & mut Client) -> Result<(), ()>
             }
         },
         TYPE_GROUP => {
-
-            let expiration = key_value_map.remove("expiration")
-                .ok_or(())
-                .map(| value |
-                     value.to_unsigned()
-                     .ok()
-                     .map(| value | {
-                         if value != 0 {
-                             Some(value as i64)
-                         } else {
-                             None
-                         }
-                     })
-                )
-                ? ;
-
             NodeProtocol::ModifyGroup {
                 user: user,
                 name: name,
