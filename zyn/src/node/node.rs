@@ -71,18 +71,21 @@ pub struct Counters {
     pub active_connections: u32,
 }
 
+pub enum ShutdownReason {
+    NodeClosing,
+}
+
 pub enum ClientProtocol {
     AuthenticateResponse { result: Result<Id, ErrorResponse> },
     CreateFilesystemElementResponse { result: Result<NodeId, ErrorResponse> },
     OpenFileResponse { result: Result<(FileAccess, NodeId, FileRevision, FileType, u64), ErrorResponse> },
-    Shutdown { reason: String },
+    Shutdown { reason: ShutdownReason },
     CountersResponse { result: Result<Counters, ErrorResponse> },
     QueryListResponse { result: Result<Vec<(String, NodeId, FilesystemElementType)>, ErrorResponse> },
     QueryFilesystemResponse { result: Result<FilesystemElement, ErrorResponse> },
     DeleteResponse { result: Result<(), ErrorResponse> },
     AddUserGroupResponse { result: Result<(), ErrorResponse> },
     ModifyUserGroupResponse { result: Result<(), ErrorResponse> },
-    Quit,
 }
 
 pub enum NodeProtocol {
@@ -581,7 +584,7 @@ impl Node {
 
         for client in self.clients.iter() {
             let _ = client.transmit.send(ClientProtocol::Shutdown {
-                reason: String::from("Node shutting down")
+                reason: ShutdownReason::NodeClosing,
             });
         }
 

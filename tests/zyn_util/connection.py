@@ -31,7 +31,6 @@ class ZynConnection:
             keyfile=self._path_key,
             certfile=self._path_cert
         )
-        self._socket.settimeout(2.)
 
         self._log.debug("Connected to {}:{}".format(remote_ip, remote_port))
 
@@ -404,12 +403,16 @@ class ZynConnection:
         eom = end_of_message_field or self.field_end_of_message()
         eom = eom.encode('utf-8')
 
+        self._socket.settimeout(1.)
+
         message = ''
         while True:
             try:
                 d = self._socket.recv()
+            except ssl.SSLWantReadError:
+                continue
             except Exception as e:
-                print('Exception while reading message:', e)
+                print('Exception while reading message:', type(e), e)
                 d = None
             if not d:
                 raise TimeoutError('Socket disconnected')
@@ -733,6 +736,11 @@ def _malfomed_message():
     raise RuntimeError('Malformed message')
 
 
+def _validate_file_system_element_type(type_of_element):
+    if type_of_element not in [FILE_TYPE_FILE, FILE_TYPE_FOLDER]:
+        _malfomed_message()
+
+
 class Message:
     NOTIFICATION = 1
     RESPONSE = 2
@@ -762,6 +770,121 @@ class Message:
         return self._rsp[key]
 
 
+class CreateResponse:
+    def __init__(self, response):
+        self._rsp = response
+        if response.number_of_fields() != 1:
+            _malfomed_message()
+        self.node_id = response.field(0).as_node_id()
+
+
+class WriteResponse:
+    def __init__(self, response):
+        self._rsp = response
+        if response.number_of_fields() != 1:
+            _malfomed_message()
+        self.revision = response.field(0).as_uint()
+
+
+class DeleteResponse(WriteResponse):
+    pass
+
+
+class InsertResponse(WriteResponse):
+    pass
+
+
+class ReadResponse:
+    def __init__(self, response):
+        self._rsp = response
+        if response.number_of_fields() != 2:
+            _malfomed_message()
+        self.revision = response.field(0).as_uint()
+        self.offset, self.size = response.field(1).as_block()
+
+
+class OpenResponse:
+    def __init__(self, response):
+        self._rsp = response
+        if response.number_of_fields() != 4:
+            _malfomed_message()
+
+        self.node_id = response.field(0).as_node_id()
+        self.revision = response.field(1).as_uint()
+        self.size = response.field(2).as_uint()
+        self.type_of_element = response.field(3).as_uint()
+        _validate_file_system_element_type(self.type_of_element)
+
+    def is_file(self):
+        return self.type == FILE_TYPE_FILE
+
+    def is_folder(self):
+        return self.type == FILE_TYPE_FOLDER
+
+
+class QueryElement:
+    def __init__(self, name, node_id, type_of_element):
+        self.name = name
+        self.node_id = node_id
+        self.type_of_element = type_of_element
+        _validate_file_system_element_type(self.type_of_element)
+
+
+class QueryListResponse:
+    def __init__(self, response):
+        self._rsp = response
+        if response.number_of_fields() != 1:
+            _malfomed_message()
+
+        self.elements = []
+
+        for e in response.field(0).as_list():
+            self.elements.append(
+                QueryElement(
+                    e[0].as_string(),
+                    e[1].as_node_id(),
+                    e[2].as_uint(),
+                )
+            )
+
+    def number_of_elements(self):
+        return len(self.elements)
+
+
+class QueryFilesystemElementResponse:
+    def __init__(self, response):
+        if response.number_of_fields() != 1:
+            _malfomed_message()
+
+        desc = response.field(0).key_value_list_to_dict()
+        if len(desc) != 5:
+            _malfomed_message()
+
+        self.type_of_element = desc['type'].as_uint()
+        self.write_access = desc['write-access'].as_string()
+        self.read_access = desc['read-access'].as_string()
+        self.created = desc['created'].as_uint()
+        self.modified = desc['modified'].as_uint()
+        _validate_file_system_element_type(self.type_of_element)
+
+
+class QueryCountersResponse:
+    def __init__(self, response):
+        self._rsp = response
+        if response.number_of_fields() != 1:
+            _malfomed_message()
+
+        desc = response.field(0).key_value_list_to_dict()
+        if len(desc) != 1:
+            _malfomed_message()
+
+        self._number_of_counters = 1
+        self.active_connections = desc['active-connections'].as_uint()
+
+    def number_of_counters(self):
+        return self._number_of_counters
+
+
 class Response(Message):
     def type(self):
         return Message.RESPONSE
@@ -780,61 +903,31 @@ class Response(Message):
         return Field(self._rsp[2 + index])
 
     def as_create_rsp(self):
-        return \
-            self.field(0).as_node_id()
+        return CreateResponse(self)
 
     def as_open_rsp(self):
-        return \
-            self.field(0).as_node_id(), \
-            self.field(1).as_uint(), \
-            self.field(2).as_uint(), \
-            self.field(3).as_uint()
+        return OpenResponse(self)
 
     def as_write_rsp(self):
-        return \
-            self.field(0).as_uint()
+        return WriteResponse(self)
 
     def as_insert_rsp(self):
-        return self.as_write_rsp()
+        return InsertResponse(self)
 
     def as_delete_rsp(self):
-        return self.as_write_rsp()
+        return DeleteResponse(self)
 
     def as_read_rsp(self):
-        return \
-            self.field(0).as_uint(), \
-            self.field(1).as_block()
+        return ReadResponse(self)
 
     def as_query_list_rsp(self):
-        desc = []
-        for e in self.field(0).as_list():
-            desc.append([
-                e[0].as_string(),
-                e[1].as_node_id(),
-                e[2].as_uint(),
-            ])
-        return desc
+        return QueryListResponse(self)
 
     def as_query_counters_rsp(self):
-        desc = self.field(0).key_value_list_to_dict()
-        desc['active-connections'] = desc['active-connections'].as_uint()
-        for key, value in desc.items():
-            if isinstance(value, Field):
-                raise RuntimeError('Unhandled counter: {}'.format(key))
-        return desc
+        return QueryCountersResponse(self)
 
     def as_query_filesystem_rsp(self):
-        desc = self.field(0).key_value_list_to_dict()
-
-        desc['type'] = desc['type'].as_uint()
-        desc['write-access'] = desc['write-access'].as_string()
-        desc['read-access'] = desc['read-access'].as_string()
-        desc['created'] = desc['created'].as_uint()
-        desc['modified'] = desc['modified'].as_uint()
-        for key, value in desc.items():
-            if isinstance(value, Field):
-                raise RuntimeError('Unhandled fs item: {}'.format(key))
-        return desc
+        return QueryFilesystemElementResponse(self)
 
 
 class Notification(Message):

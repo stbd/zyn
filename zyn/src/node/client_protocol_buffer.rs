@@ -4,6 +4,7 @@ use std::vec::{ Vec };
 
 use node::common::{ Buffer, NodeId, FileDescriptor };
 
+// todo: collect all static str to constants
 pub static FIELD_END_MARKER: & 'static str = "E:;";
 
 pub struct ReceiveBuffer {

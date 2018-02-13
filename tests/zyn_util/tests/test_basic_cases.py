@@ -95,7 +95,8 @@ class TestBasicUsage(BasicsCommon):
         rsp = c.query_counters()
         self._validate_response(rsp, c)
         counters = rsp.as_query_counters_rsp()
-        self.assertEqual(counters['active-connections'], 1)
+        self.assertEqual(counters.number_of_counters(), 1)
+        self.assertEqual(counters.active_connections, 1)
 
 
 class TestBasicFilesystem(BasicsCommon):
@@ -121,15 +122,15 @@ class TestBasicFilesystem(BasicsCommon):
         c = self._start_and_connect_to_node_and_handle_auth()
         rsp = c.create_folder('folder-1', parent_node_id=0)
         self._validate_response(rsp, c)
-        parent_node_id = rsp.as_create_rsp()
-        rsp = c.create_file_random_access('file-1', parent_node_id=parent_node_id)
+        create_rsp = rsp.as_create_rsp()
+        rsp = c.create_file_random_access('file-1', parent_node_id=create_rsp.node_id)
         rsp.as_create_rsp()
 
     def _open_close(self, use_node_id, write):
         c = self._start_and_connect_to_node_and_handle_auth()
         rsp = c.create_file_random_access('file-1', parent_path='/')
         self._validate_response(rsp, c)
-        node_id_create = rsp.as_create_rsp()
+        create_rsp = rsp.as_create_rsp()
 
         if write:
             open_func = c.open_file_write
@@ -137,17 +138,17 @@ class TestBasicFilesystem(BasicsCommon):
             open_func = c.open_file_read
 
         if use_node_id:
-            rsp = open_func(node_id=node_id_create)
+            rsp = open_func(node_id=create_rsp.node_id)
         else:
             rsp = open_func(path='/file-1')
 
         self._validate_response(rsp, c)
-        node_id_open, _, _, _ = rsp.as_open_rsp()
-        self.assertEqual(node_id_create, node_id_open)
-        rsp = c.close_file(node_id_create)
+        open_rsp = rsp.as_open_rsp()
+        self.assertEqual(create_rsp.node_id, open_rsp.node_id)
+        rsp = c.close_file(create_rsp.node_id)
         self._validate_response(rsp, c)
 
-        rsp, _ = c.read_file(node_id_open, 0, 5)
+        rsp, _ = c.read_file(open_rsp.node_id, 0, 5)
         self.assertEqual(rsp.error_code(), zyn_util.errors.ErrorFileIsNotOpen)
 
     def test_open_read_with_path_and_close_file(self):
@@ -162,43 +163,67 @@ class TestBasicFilesystem(BasicsCommon):
     def test_open_write_with_node_id_and_close_file(self):
         self._open_close(use_node_id=True, write=True)
 
+    def _validate_query_response(
+            self,
+            element,
+            expected_name,
+            expected_node_id,
+            expected_element_type
+    ):
+        self.assertEqual(element.name, expected_name)
+        self.assertEqual(element.node_id, expected_node_id)
+        self.assertEqual(element.type_of_element, expected_element_type)
+
     def test_query_list(self):
         c = self._start_and_connect_to_node_and_handle_auth()
-        node_id_file_1 = c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
-        node_id_folder = c.create_folder('folder-1', parent_path='/').as_create_rsp()
-        node_id_file_2 = c.create_file_random_access('file-2', parent_path='/').as_create_rsp()
+        create_rsp_file_1 = c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
+        create_rsp_folder = c.create_folder('folder-1', parent_path='/').as_create_rsp()
+        create_rsp_file_2 = c.create_file_random_access('file-2', parent_path='/').as_create_rsp()
 
         rsp = c.query_list(path='/')
         self._validate_response(rsp, c)
-        query = rsp.as_query_list_rsp()
+        query_rsp = rsp.as_query_list_rsp()
 
-        self.assertEqual(len(query), 3)
-        names = [e[0] for e in query]
+        self.assertEqual(query_rsp.number_of_elements(), 3)
+        names = [e.name for e in query_rsp.elements]
         index_file_1 = names.index('file-1')
         index_file_2 = names.index('file-2')
         index_folder = names.index('folder-1')
-        self.assertEqual(query[index_file_1],
-                         ['file-1', node_id_file_1, zyn_util.connection.FILE_TYPE_FILE])
-        self.assertEqual(query[index_file_2],
-                         ['file-2', node_id_file_2, zyn_util.connection.FILE_TYPE_FILE])
-        self.assertEqual(query[index_folder],
-                         ['folder-1', node_id_folder, zyn_util.connection.FILE_TYPE_FOLDER])
+
+        self._validate_query_response(
+            query_rsp.elements[index_file_1],
+            'file-1',
+            create_rsp_file_1.node_id,
+            zyn_util.connection.FILE_TYPE_FILE
+        )
+        self._validate_query_response(
+            query_rsp.elements[index_file_2],
+            'file-2',
+            create_rsp_file_2.node_id,
+            zyn_util.connection.FILE_TYPE_FILE
+        )
+        self._validate_query_response(
+            query_rsp.elements[index_folder],
+            'folder-1',
+            create_rsp_folder.node_id,
+            zyn_util.connection.FILE_TYPE_FOLDER
+        )
 
     def test_query_filesystem_file(self):
         c = self._start_and_connect_to_node_and_handle_auth()
-        node_id = c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
-        rsp = c.query_filesystem(node_id=node_id)
+        create_rsp = c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
+        rsp = c.query_filesystem(node_id=create_rsp.node_id)
         self._validate_response(rsp, c)
-        desc = rsp.as_query_filesystem_rsp()
-        self.assertEqual(desc['type'], zyn_util.connection.FILE_TYPE_FILE)
+        query_rsp = rsp.as_query_filesystem_rsp()
+        self.assertEqual(query_rsp.type_of_element, zyn_util.connection.FILE_TYPE_FILE)
 
     def test_query_filesystem_folder(self):
         c = self._start_and_connect_to_node_and_handle_auth()
-        node_id = c.create_folder('folder-1', parent_path='/').as_create_rsp()
-        rsp = c.query_filesystem(node_id=node_id)
+        create_rsp = c.create_folder('folder-1', parent_path='/').as_create_rsp()
+        rsp = c.query_filesystem(node_id=create_rsp.node_id)
         self._validate_response(rsp, c)
-        desc = rsp.as_query_filesystem_rsp()
-        self.assertEqual(desc['type'], zyn_util.connection.FILE_TYPE_FOLDER)
+        query_rsp = rsp.as_query_filesystem_rsp()
+        self.assertEqual(query_rsp.type_of_element, zyn_util.connection.FILE_TYPE_FOLDER)
 
     def _validate_fs_element_does_not_exist(self, connection, node_id=None, path=None):
         rsp = connection.open_file_write(node_id=node_id, path=path)
@@ -206,24 +231,24 @@ class TestBasicFilesystem(BasicsCommon):
 
     def test_delete_file_with_node_id(self):
         c = self._start_and_connect_to_node_and_handle_auth()
-        node_id = c.create_file_random_access('file', parent_path='/').as_create_rsp()
-        rsp = c.delete(node_id=node_id)
+        create_rsp = c.create_file_random_access('file', parent_path='/').as_create_rsp()
+        rsp = c.delete(node_id=create_rsp.node_id)
         self._validate_response(rsp, c)
-        self._validate_fs_element_does_not_exist(c, node_id)
+        self._validate_fs_element_does_not_exist(c, create_rsp.node_id)
 
     def test_delete_file_with_path(self):
         c = self._start_and_connect_to_node_and_handle_auth()
-        node_id = c.create_file_random_access('file', parent_path='/').as_create_rsp()
+        create_rsp = c.create_file_random_access('file', parent_path='/').as_create_rsp()
         rsp = c.delete(path='/file')
         self._validate_response(rsp, c)
-        self._validate_fs_element_does_not_exist(c, node_id)
+        self._validate_fs_element_does_not_exist(c, create_rsp.node_id)
 
     def test_delete_folder_with_path(self):
         c = self._start_and_connect_to_node_and_handle_auth()
-        node_id = c.create_folder('folder', parent_path='/').as_create_rsp()
+        create_rsp = c.create_folder('folder', parent_path='/').as_create_rsp()
         rsp = c.delete(path='/folder')
         self._validate_response(rsp, c)
-        self._validate_fs_element_does_not_exist(c, node_id)
+        self._validate_fs_element_does_not_exist(c, create_rsp.node_id)
 
 
 class TestBasicEditFile(BasicsCommon):
@@ -250,66 +275,66 @@ class TestBasicEditFile(BasicsCommon):
     def _read(self, connection, node_id, offset, size, expected_revision, expected_data):
         rsp, data = connection.read_file(node_id, offset, size)
         self._validate_response(rsp, connection)
-        revision, _ = rsp.as_read_rsp()
+        read_rsp = rsp.as_read_rsp()
         data = data.decode('utf-8')
         self.assertEqual(data, expected_data)
-        self.assertEqual(revision, expected_revision)
+        self.assertEqual(read_rsp.revision, expected_revision)
         return rsp, data
 
     def test_write_read_random_access(self):
         c = self._start_and_connect_to_node_and_handle_auth()
-        node_id = c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
-        _, revision, _, _ = c.open_file_write(node_id=node_id).as_open_rsp()
+        create_rsp = c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
+        open_rsp = c.open_file_write(node_id=create_rsp.node_id).as_open_rsp()
 
         data = 'data'
-        revision = self._ra_write(c, node_id, revision, 0, data)
-        self._read(c, node_id, 0, len(data), revision, data)
+        write_rsp = self._ra_write(c, create_rsp.node_id, open_rsp.revision, 0, data)
+        self._read(c, create_rsp.node_id, 0, len(data), write_rsp.revision, data)
 
     def test_edit_random_access_file(self):
         c = self._start_and_connect_to_node_and_handle_auth()
-        node_id = c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
-        _, revision, _, file_type = c.open_file_write(node_id=node_id).as_open_rsp()
-        self.assertEqual(file_type, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
+        create_rsp = c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
+        open_rsp = c.open_file_write(node_id=create_rsp.node_id).as_open_rsp()
+        self.assertEqual(open_rsp.type_of_element, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
 
-        revision = self._ra_write(c, node_id, revision, 0, 'data')
-        self._read(c, node_id, 0, 10, revision, 'data')
+        rsp = self._ra_write(c, create_rsp.node_id, open_rsp.revision, 0, 'data')
+        self._read(c, create_rsp.node_id, 0, 10, rsp.revision, 'data')
 
-        revision = self._ra_insert(c, node_id, revision, 2, '--')
-        self._read(c, node_id, 0, 10, revision, 'da--ta')
+        rsp = self._ra_insert(c, create_rsp.node_id, rsp.revision, 2, '--')
+        self._read(c, create_rsp.node_id, 0, 10, rsp.revision, 'da--ta')
 
-        revision = self._ra_delete(c, node_id, revision, 4, 2)
-        self._read(c, node_id, 0, 10, revision, 'da--')
+        rsp = self._ra_delete(c, create_rsp.node_id, rsp.revision, 4, 2)
+        self._read(c, create_rsp.node_id, 0, 10, rsp.revision, 'da--')
 
-        revision = self._ra_write(c, node_id, revision, 4, 'qwerty')
-        self._read(c, node_id, 0, 10, revision, 'da--qwerty')
+        rsp = self._ra_write(c, create_rsp.node_id, rsp.revision, 4, 'qwerty')
+        self._read(c, create_rsp.node_id, 0, 10, rsp.revision, 'da--qwerty')
 
     def test_edit_blob_file(self):
         c = self._start_and_connect_to_node_and_handle_auth()
-        node_id = c.create_file_blob('file-1', parent_path='/').as_create_rsp()
+        create_rsp = c.create_file_blob('file-1', parent_path='/').as_create_rsp()
 
-        _, revision, _, file_type = c.open_file_write(node_id=node_id).as_open_rsp()
-        self.assertEqual(file_type, zyn_util.connection.FILE_TYPE_BLOB)
+        open_rsp = c.open_file_write(node_id=create_rsp.node_id).as_open_rsp()
+        self.assertEqual(open_rsp.type_of_element, zyn_util.connection.FILE_TYPE_BLOB)
 
-        revision = self._blob_write(c, node_id, revision, 'data')
-        self._read(c, node_id, 0, 10, revision, 'data')
+        rsp = self._blob_write(c, create_rsp.node_id, open_rsp.revision, 'data')
+        self._read(c, create_rsp.node_id, 0, 10, rsp.revision, 'data')
 
-        revision = self._blob_write(c, node_id, revision, 'qwerty')
-        self._read(c, node_id, 0, 10, revision, 'qwerty')
+        rsp = self._blob_write(c, create_rsp.node_id, rsp.revision, 'qwerty')
+        self._read(c, create_rsp.node_id, 0, 10, rsp.revision, 'qwerty')
 
     def test_multiple_files_open_at_sametime(self):
         c = self._start_and_connect_to_node_and_handle_auth()
-        node_id_1 = c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
-        node_id_2 = c.create_file_random_access('file-2', parent_path='/').as_create_rsp()
-        _, revision_1, _, _ = c.open_file_write(node_id=node_id_1).as_open_rsp()
-        _, revision_2, _, _ = c.open_file_write(node_id=node_id_2).as_open_rsp()
+        create_rsp_1 = c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
+        create_rsp_2 = c.create_file_random_access('file-2', parent_path='/').as_create_rsp()
+        open_rsp_1 = c.open_file_write(node_id=create_rsp_1.node_id).as_open_rsp()
+        open_rsp_2 = c.open_file_write(node_id=create_rsp_2.node_id).as_open_rsp()
 
         data_1 = 'qwerty'
         data_2 = 'zxcvbn'
-        revision_1 = self._ra_write(c, node_id_1, revision_1, 0, data_1)
-        revision_2 = self._ra_write(c, node_id_2, revision_2, 0, data_2)
+        rsp_1 = self._ra_write(c, create_rsp_1.node_id, open_rsp_1.revision, 0, data_1)
+        rsp_2 = self._ra_write(c, create_rsp_2.node_id, open_rsp_2.revision, 0, data_2)
 
-        rsp, data = self._read(c, node_id_1, 0, 100, revision_1, data_1)
-        rsp, data = self._read(c, node_id_2, 0, 100, revision_2, data_2)
+        rsp, data = self._read(c, create_rsp_1.node_id, 0, 100, rsp_1.revision, data_1)
+        rsp, data = self._read(c, create_rsp_2.node_id, 0, 100, rsp_2.revision, data_2)
 
 
 class TestUserAuthority(BasicsCommon):

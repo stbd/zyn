@@ -11,7 +11,7 @@ use node::common::{ NodeId, Buffer, OpenMode, FileType, Timestamp };
 use node::connection::{ Connection };
 use node::file_handle::{ FileAccess, FileError, Notification, FileLock };
 use node::filesystem::{ FilesystemError };
-use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, FilesystemElementType, ErrorResponse, NodeError };
+use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, FilesystemElementType, ErrorResponse, NodeError, ShutdownReason };
 use node::user_authority::{ Id };
 
 /*
@@ -153,6 +153,9 @@ const FILE_TYPE_BLOB: u64 = 1;
 const TYPE_USER: u64 = 0;
 const TYPE_GROUP: u64 = 1;
 
+const DISCONNET_REASON_INTERNAL_ERROR: & str = "internal-error";
+const DISCONNET_REASON_NODE_CLOSING: & str = "node-closing";
+
 // ## Messages:
 // todo
 
@@ -187,6 +190,8 @@ enum Status {
     ClientNotAuthenticated,
     FailedToWriteToSendBuffer,
     ShutdownOrderedByNode,
+    InternalError,
+    ProtocolProcessingError,
 }
 
 impl Display for Status {
@@ -208,6 +213,10 @@ impl Display for Status {
                 write!(f, "FailedToWriteToSendBuffer"),
             Status::ShutdownOrderedByNode =>
                 write!(f, "ShutdownOrderedByNode"),
+            Status::InternalError =>
+                write!(f, "InternalError"),
+            Status::ProtocolProcessingError =>
+                write!(f, "ProtocolProcessingError"),
         }
     }
 }
@@ -225,9 +234,9 @@ impl Status {
 
     fn set(& mut self, new_status: Status) {
         if self.is_in_error_state() {
-            debug!("Status already in error \"{}\" when trying to set status to \"{}\"", *self, new_status);
+            debug!("Status already in error \"{}\" when trying to set it to \"{}\"", *self, new_status);
         } else {
-            debug!("Setting status to \"{}\"", new_status);
+            debug!("Status set to \"{}\"", new_status);
             *self = new_status;
         }
     }
@@ -391,6 +400,16 @@ impl Client {
 
             let mut is_processing: bool = false;
 
+            if self.handle_messages_from_node()
+                .is_err() {
+                    error!("Error while processing notification from node");
+                    break ;
+                }
+
+            if self.status.is_in_error_state() {
+                break ;
+            }
+
             if self.handle_notifications_from_open_files()
                 .and_then(| number_of_processed_notification | {
                     if number_of_processed_notification > 0 {
@@ -400,12 +419,6 @@ impl Client {
                 })
                 .is_err() {
                     error!("Error while processing notification from files");
-                    break ;
-                }
-
-            if self.handle_messages_from_node()
-                .is_err() {
-                    error!("Error while processing notification from node");
                     break ;
                 }
 
@@ -454,7 +467,9 @@ impl Client {
                     self.status.set(Status::ClientNotAuthenticated);
                     break ;
                 }
+
             } else {
+
                 if message_handlers
                     .iter()
                     .find( | && (ref handler_name, _, handler_namespace) | {
@@ -467,6 +482,7 @@ impl Client {
                     })
                     .is_none() {
                         error!("Failed to find handler for message");
+                        self.status.set(Status::ProtocolProcessingError);
                         break ;
                     }
             }
@@ -476,6 +492,10 @@ impl Client {
             if self.status.is_in_error_state() {
                 break ;
             }
+        }
+
+        for mut open_file in self.open_files.drain(..) {
+            let _ = open_file.access.close();
         }
 
         info!("Closing connection to client, client={}, status={}", self, self.status);
@@ -510,11 +530,7 @@ impl Client {
                         None => break,
                     }
 
-                    if self.connection.write_with_sleep(buffer.as_bytes()).is_err() {
-                        self.status.set(Status::FailedToSendToClient);
-                        return Err(());
-                    }
-
+                    try_with_set_error_state!(self, self.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
                     number_of_processed_notifications += 1;
 
                     if remove.is_some() {
@@ -534,48 +550,41 @@ impl Client {
         Ok(number_of_processed_notifications)
     }
 
+    fn send_close_notification(& mut self, reason: & str) -> Result<(), ()> {
+        let mut buffer = try_write_buffer!(self, Client::create_notification_buffer());
+        try_write_buffer!(self, buffer.write_notification_disconnected(& reason));
+        try_with_set_error_state!(self, self.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+        Ok(())
+    }
+
     fn handle_messages_from_node(& mut self) -> Result<(), ()> {
 
         match self.receive_from_node() {
             Err(()) => {
-                error!("Error receiving from node");
-                // todo: send notification
+                self.status.set(Status::FailedToreceiveFromNode);
+                self.send_close_notification(DISCONNET_REASON_INTERNAL_ERROR) ? ;
                 return Err(());
             }
-
             Ok(None) => (),
             Ok(Some(message)) => {
 
                 match message {
                     ClientProtocol::Shutdown { reason } => {
-
-                        debug!("Received shutdown order from node");
-
-                        for mut open_file in self.open_files.drain(..) {
-                            let _ = open_file.access.close();
-                        }
-
-                        let mut buffer = try_write_buffer!(self, Client::create_notification_buffer());
-                        try_write_buffer!(self, buffer.write_notification_disconnected(& reason));
-
-                        if self.connection.write_with_sleep(buffer.as_bytes()).is_err() {
-                            self.status.set(Status::FailedToSendToClient);
-                            return Err(());
-                        }
-
                         self.status.set(Status::ShutdownOrderedByNode);
-                    },
-                    ClientProtocol::Quit => {
-                        info!("Thread received quit command");
-                        panic!("Unahdled");
+                        let reason_string = match reason {
+                            ShutdownReason::NodeClosing => {
+                                DISCONNET_REASON_NODE_CLOSING
+                            },
+                        };
+                        self.send_close_notification(& reason_string) ? ;
                     },
                     _ => {
-                        panic!("Unahdled");
+                        error!("Unhandled notification from node");
+                        self.status.set(Status::InternalError);
                     },
                 }
             },
         }
-
         Ok(())
     }
 
@@ -596,7 +605,7 @@ impl Client {
     }
 
     fn create_response_buffer(transaction_id: u64, error_code: u64) -> Result<SendBuffer, ()> {
-        let mut buffer = SendBuffer::with_capacity(1024);
+        let mut buffer = SendBuffer::with_capacity(1024 * 4);
         buffer.write_message_namespace(1) ? ;
         buffer.write_response(transaction_id, error_code) ? ;
         Ok(buffer)
@@ -626,8 +635,8 @@ impl Client {
         match msg {
             ClientProtocol::Shutdown { .. } => self.node_message_buffer.push(msg),
             _ => {
-                self.status.set(Status::FailedToreceiveFromNode);
-                debug!("Unexpected message from node");
+                warn!("Unexpected message from node");
+                self.status.set(Status::InternalError);
             },
         };
     }
@@ -635,8 +644,8 @@ impl Client {
     fn send_to_node(& mut self, transaction_id: u64, msg: NodeProtocol) -> Result<(), ()> {
         if let Err(desc) = self.node_send.send(msg) {
             warn!("Failed to send message to node, id={}, desc={}", self, desc);
-            try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::InternalCommunicationError as u64);
             self.status.set(Status::FailedToSendToNode);
+            try_send_response_without_fields!(self, transaction_id, CommonErrorCodes::InternalCommunicationError as u64);
             return Err(());
         }
         Ok(())
@@ -645,7 +654,7 @@ impl Client {
     fn fill_buffer(connection: & mut Connection, buffer: & mut Buffer) {
         while buffer.len() != buffer.capacity() {
             if ! connection.read(buffer).unwrap() {
-                sleep(Duration::from_millis(500));
+                sleep(Duration::from_millis(100));
             }
         }
     }
@@ -683,7 +692,7 @@ fn handle_authentication_req(client: & mut Client) -> Result<(), ()>
     try_parse!(client.buffer.expect(";"), client, transaction_id);
     try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
 
-    debug!("Authenticate, username=\"{}\"", username);
+    trace!("Authenticate, username=\"{}\"", username);
 
     client.send_to_node(transaction_id, NodeProtocol::AuthenticateRequest {
         username: username.clone(),
@@ -706,6 +715,7 @@ fn handle_authentication_req(client: & mut Client) -> Result<(), ()>
                     } else {
                         client.status.set(Status::AuthenticationError { trial: 1 });
                     }
+                    debug!("Invalid password for username={}, status={}", username, client.status);
                     (None, Some(Err(())))
                 },
 
@@ -1328,6 +1338,24 @@ fn handle_delete_fs_element_req(client: & mut Client) -> Result<(), ()>
     Ok(())
 }
 
+fn write_le_kv_su(buffer: & mut SendBuffer, key: & str, value: u64) -> Result<(), ()> {
+    buffer.write_list_element_start() ? ;
+    buffer.write_key_value_pair_start() ? ;
+    buffer.write_string(String::from(key)) ? ;
+    buffer.write_unsigned(value) ? ;
+    buffer.write_key_value_pair_end() ? ;
+    buffer.write_list_element_end()
+}
+
+fn write_le_kv_ss(buffer: & mut SendBuffer, key: & str, value: String) -> Result<(), ()> {
+    buffer.write_list_element_start() ? ;
+    buffer.write_key_value_pair_start() ? ;
+    buffer.write_string(String::from(key)) ? ;
+    buffer.write_string(value) ? ;
+    buffer.write_key_value_pair_end() ? ;
+    buffer.write_list_element_end()
+}
+
 /*
 Query system counters
 <- [Version]Q-COUNTERS:[Transaction Id];[End]
@@ -1354,16 +1382,9 @@ fn handle_query_counters_req(client: & mut Client) -> Result<(), ()>
                     result: Ok(counters),
                 } => {
                     let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
-
                     try_in_receive_loop!(client, buffer.write_list_start(1), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_key_value_pair_start(), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_string(String::from("active-connections")), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_unsigned(counters.active_connections as u64), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_key_value_pair_end(), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "active-connections", counters.active_connections as u64), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
-
                     try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
                     (None, Some(Ok(())))
@@ -1389,8 +1410,9 @@ fn handle_query_counters_req(client: & mut Client) -> Result<(), ()>
 /*
 Query list file system contents
 <- [Version]Q-LIST:[Transaction Id][FileDescriptor];[End]
--> [Version]RSP:[Transaction Id][List-of-String-NodeId-Uint];[End]
- * Uint type: 0: file, 1: directory
+-> [Version]RSP:[Transaction Id][List-of-Element-Info];[End]
+ * Element-Info: List-of-(String: name, node_id, uint: type-of-element)
+ * type-of-element: 0: file, 1: directory
 */
 fn handle_query_list_req(client: & mut Client) -> Result<(), ()>
 {
@@ -1490,40 +1512,21 @@ fn handle_query_fs_req(client: & mut Client) -> Result<(), ()>
                     match desc {
                         FilesystemElement::File { properties, authority } => {
                             try_in_receive_loop!(client, buffer.write_list_start(5), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_key_value_string_unsigned(String::from("type"), FILE as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_key_value_string_unsigned(String::from("created"), properties.created_at as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_key_value_string_unsigned(String::from("modified"), properties.modified_at as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_key_value_string_string(String::from("read-access"), authority.read), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_key_value_string_string(String::from("write-access"), authority.write), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "type", FILE as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "created",  properties.created_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "modified",  properties.modified_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_ss(& mut buffer, "read-access",  authority.read), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_ss(& mut buffer, "write-access",  authority.write), Status::FailedToWriteToSendBuffer);
                             try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
+
                         },
                         FilesystemElement::Folder { created_at, modified_at, authority } => {
                             try_in_receive_loop!(client, buffer.write_list_start(5), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_key_value_string_unsigned(String::from("type"), FOLDER as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_key_value_string_unsigned(String::from("created"), created_at as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_key_value_string_unsigned(String::from("modified"), modified_at as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_key_value_string_string(String::from("read-access"), authority.read), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_key_value_string_string(String::from("write-access"), authority.write), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "type", FOLDER as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "created",  created_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "modified",  modified_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_ss(& mut buffer, "read-access",  authority.read), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_ss(& mut buffer, "write-access",  authority.write), Status::FailedToWriteToSendBuffer);
                             try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
                         },
                     }
