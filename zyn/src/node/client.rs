@@ -9,7 +9,7 @@ use std::{ str };
 use node::client_protocol_buffer::{ ReceiveBuffer, SendBuffer };
 use node::common::{ NodeId, Buffer, OpenMode, FileType, Timestamp };
 use node::connection::{ Connection };
-use node::file_handle::{ FileAccess, FileError, Notification, FileLock };
+use node::file_handle::{ FileAccess, FileError, Notification, FileLock, FileProperties };
 use node::filesystem::{ FilesystemError };
 use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, FilesystemElementType, ErrorResponse, NodeError, ShutdownReason };
 use node::user_authority::{ Id };
@@ -883,22 +883,22 @@ fn handle_open_req(client: & mut Client) -> Result<(), ()>
         user: user,
     }) ? ;
 
-    let (access, node_id, file_type) = node_receive::<(FileAccess, NodeId, FileType)>(
+    let (access, node_id, properties) = node_receive::<(FileAccess, NodeId, FileProperties)>(
         client,
         & | msg, client | {
             match msg {
                 ClientProtocol::OpenFileResponse {
-                    result: Ok((access, node_id, revision, file_type, size)),
+                    result: Ok((access, node_id, properties)),
                 } => {
                     let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
                     try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_unsigned(revision), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_unsigned(size), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_unsigned(properties.revision), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_unsigned(properties.size), Status::FailedToWriteToSendBuffer);
 
                     try_in_receive_loop!(
                         client,
                         buffer.write_unsigned(
-                            match file_type {
+                            match properties.file_type {
                                 FileType::RandomAccess => FILE_TYPE_RANDOM_ACCESS,
                                 FileType::Blob => FILE_TYPE_BLOB,
                             }),
@@ -907,7 +907,7 @@ fn handle_open_req(client: & mut Client) -> Result<(), ()>
 
                     try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
-                    (None, Some(Ok((access, node_id, file_type))))
+                    (None, Some(Ok((access, node_id, properties))))
                 },
 
                 ClientProtocol::OpenFileResponse {
@@ -927,7 +927,7 @@ fn handle_open_req(client: & mut Client) -> Result<(), ()>
     client.open_files.push(OpenFile {
         node_id: node_id,
         open_mode: mode,
-        file_type: file_type,
+        file_type: properties.file_type,
         access: access
     });
     Ok(())

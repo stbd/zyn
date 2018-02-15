@@ -10,7 +10,7 @@ use std::vec::{ Vec };
 use libc::{ sigwait, sigemptyset, sigaddset, SIGTERM, SIGINT, c_int, size_t, sigprocmask, SIG_SETMASK };
 
 use node::client::{ Client };
-use node::common::{ NodeId, FileDescriptor, OpenMode, FileRevision, ADMIN_GROUP, Timestamp, FileType, log_crypto_context_error, utc_timestamp };
+use node::common::{ NodeId, FileDescriptor, OpenMode, ADMIN_GROUP, Timestamp, FileType, log_crypto_context_error, utc_timestamp };
 use node::connection::{ Server };
 use node::crypto::{ Crypto };
 use node::file_handle::{ FileAccess, FileProperties };
@@ -79,7 +79,7 @@ pub enum ShutdownReason {
 pub enum ClientProtocol {
     AuthenticateResponse { result: Result<Id, ErrorResponse> },
     CreateFilesystemElementResponse { result: Result<NodeId, ErrorResponse> },
-    OpenFileResponse { result: Result<(FileAccess, NodeId, FileRevision, FileType, u64), ErrorResponse> },
+    OpenFileResponse { result: Result<(FileAccess, NodeId, FileProperties), ErrorResponse> },
     Shutdown { reason: ShutdownReason },
     CountersResponse { result: Result<Counters, ErrorResponse> },
     QueryListResponse { result: Result<Vec<(String, NodeId, FilesystemElementType)>, ErrorResponse> },
@@ -736,7 +736,7 @@ impl Node {
         mode: OpenMode,
         file_descriptor: FileDescriptor,
         user: Id,
-    ) -> Result<(FileAccess, NodeId, FileRevision, FileType, u64), ErrorResponse> {
+    ) -> Result<(FileAccess, NodeId, FileProperties), ErrorResponse> {
 
         let node_id = Node::resolve_file_descriptor(
             node_id_buffer,
@@ -750,7 +750,6 @@ impl Node {
             .map_err(fs_error_to_rsp)
             ? ;
 
-        let file_size = 0; // todo: use properties.size();
         let access = match mode {
             OpenMode::Read => file_auth.read,
             OpenMode::ReadWrite => file_auth.write,
@@ -764,7 +763,7 @@ impl Node {
             .map_err(| () | node_error_to_rsp(NodeError::InternalError))
             ? ;
 
-        Ok((access, node_id, properties.revision, properties.file_type, file_size))
+        Ok((access, node_id, properties))
     }
 
     fn handle_counters_request(
