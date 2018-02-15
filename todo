@@ -1,10 +1,6 @@
 # todo
-
+ * Fix user authority hash usage
  * Refactor
-  * Split large files
-   * Client: parsing and buffer to separate files
-  * Client
-   * Open files to struct from tuple
   * Filesystem
    * Only N files should be stored for each folder
  * Docker configuration for production

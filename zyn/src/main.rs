@@ -11,7 +11,7 @@ use std::str::{ FromStr };
 use std::string::{ String } ;
 use std::vec::{ Vec };
 
-use zyn::node::node::{ Node };
+use zyn::node::node::{ Node, NodeSettings };
 use zyn::node::common::{ ADMIN_GROUP, ADMIN_GROUP_NAME, utc_timestamp };
 use zyn::node::connection::{ Server };
 use zyn::node::crypto::{ Crypto };
@@ -315,6 +315,7 @@ fn run() -> Result<(), ()> {
         .map_err(| () | error!("Failed to init TCP server"))
         ? ;
 
+
     let gpg_fingerprint = args.take(Arguments::name_gpg_fingerprint()).take_string();
 
     let username = args.take(Arguments::default_user_name()).take_string();
@@ -330,6 +331,13 @@ fn run() -> Result<(), ()> {
         ? ;
 
     if create {
+        const MEGABYTE: usize = 1024 * 1024;
+        let node_settings = NodeSettings {
+            page_size_random_access_file: MEGABYTE * 5,
+            page_size_blob_file: MEGABYTE * 10,
+            socket_buffer_size: 1024 * 4,
+        };
+
         let mut user_authority = UserAuthority::new("fixme");
         user_authority.configure_admin_group(& ADMIN_GROUP, ADMIN_GROUP_NAME)
             .map_err(| () | error!("Failed to configure admin group"))
@@ -347,7 +355,8 @@ fn run() -> Result<(), ()> {
         Node::create(
             crypto.clone(),
             user_authority,
-            & data_dir
+            & data_dir,
+            node_settings,
         ).map_err(| () | error!("Failed to initialize node"))
             ? ;
     }

@@ -95,6 +95,85 @@ impl<'de> Deserialize<'de> for FileType {
 
 ////////////////////////////////////////////////////////////////////
 
+#[derive(Serialize, Deserialize)]
+pub struct SerializedNodeSettings {
+    pub client_input_buffer_size: u64,
+    pub page_size_for_random_access_files: u64,
+    pub page_size_for_blob_files: u64,
+}
+
+impl SerializedNodeSettings {
+    fn current_version() -> u32 {
+        1
+    }
+
+    pub fn write(& self, crypto_context: Context, path_basename: & Path)
+                 -> Result<(), ()> {
+
+        let path = path_with_version(path_basename, SerializedNodeSettings::current_version());
+
+        debug!("Serializing node settings to path={}", path.display());
+
+        let serialized = serde_json::to_string(& self)
+            .map_err(log_serde_error)
+            ? ;
+
+        let mut file = OpenOptions::new().read(false).write(true).create(true).open(path)
+            .map_err(log_io_error_to_unit_err)
+            ? ;
+
+        crypto_context.encrypt(& serialized.into_bytes())
+            .map_err(|()| log_crypto_usage_error())
+            .and_then(|encrypted| file.write_all(encrypted.as_slice())
+                      .map_err(log_io_error_to_unit_err)
+            )
+    }
+
+    pub fn read(crypto_context: Context, path_basename: & Path)
+                -> Result<SerializedNodeSettings, ()> {
+
+
+        let (version, path) = find_serialized_file_version(
+            path_basename,
+            SerializedNodeSettings::current_version()
+        )
+            .map_err(|()| error!("Failed to find any version of serialized node settings"))
+            ? ;
+
+        debug!("Deserializing node settings from version={}, path={}", version, path.display());
+
+        let mut file = OpenOptions::new().read(true).write(false).create(false).open(path)
+            .map_err(log_io_error_to_unit_err)
+            ? ;
+
+        let mut buffer = Vec::new();
+        file.read_to_end(& mut buffer)
+            .map_err(log_io_error_to_unit_err)
+            ? ;
+
+
+        let decrypted = crypto_context.decrypt(& buffer)
+            .map_err(|()| log_crypto_usage_error())
+            ? ;
+
+        if version == 1 {
+            let serialized = str::from_utf8(& decrypted)
+                .map_err(log_utf_error)
+                .and_then(
+                    |utf| serde_json::from_str::<SerializedNodeSettings>(utf)
+                        .map_err(log_serde_error)
+                )
+                ? ;
+            return Ok(serialized);
+        } else {
+            error!("Unhandeled node settings version, version={}", version);
+        }
+        Err(())
+    }
+}
+
+////////////////////////////////////////////////////////////////////
+
 pub type SerializedFilesystemFile = (
     NodeId,
     PathBuf,

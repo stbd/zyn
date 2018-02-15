@@ -179,8 +179,6 @@ Configure: Set file/folder rights:
 -> [Version]RSP:[Transaction Id][Uint: error code];[End]
 */
 
-const DEFAULT_BUFFER_SIZE: usize = 1024 * 4;
-
 enum Status {
     Ok,
     AuthenticationError { trial: u8 },
@@ -361,12 +359,15 @@ impl Client {
     pub fn new(
         connection: Connection,
         node_receive: Receiver<ClientProtocol>,
-        node_send: Sender<NodeProtocol>
+        node_send: Sender<NodeProtocol>,
+        socket_buffer_size: usize,
     ) -> Client {
+
+        info!("Creating new client, socket_buffer_size={}", socket_buffer_size);
 
         Client {
             connection: connection,
-            buffer: ReceiveBuffer::with_capacity(DEFAULT_BUFFER_SIZE),
+            buffer: ReceiveBuffer::with_capacity(socket_buffer_size),
             node_receive: node_receive,
             node_send: node_send,
             open_files: Vec::with_capacity(5),

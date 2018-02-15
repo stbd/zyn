@@ -16,6 +16,7 @@ use node::crypto::{ Crypto };
 use node::file_handle::{ FileAccess, FileProperties };
 use node::filesystem::{ Filesystem, FilesystemError, Node as FsNode };
 use node::user_authority::{ UserAuthority, Id };
+use node::serialize::{ SerializedNodeSettings };
 
 pub enum NodeError {
     InvalidUsernamePassword,
@@ -141,11 +142,18 @@ struct ClientInfo {
     thread_handle: JoinHandle<()>,
 }
 
+pub struct NodeSettings {
+    pub page_size_random_access_file: usize,
+    pub page_size_blob_file: usize,
+    pub socket_buffer_size: usize,
+}
+
 pub struct Node {
     server: Server,
     clients: Vec<ClientInfo>,
     filesystem: Filesystem,
     auth: UserAuthority,
+    settings: NodeSettings,
     path_workdir: PathBuf,
     crypto: Crypto,
 }
@@ -164,25 +172,44 @@ impl Node {
         path_workdir.join("fs")
     }
 
+    fn path_node(path_workdir: & Path) -> PathBuf {
+        path_workdir.join("node")
+    }
+
     pub fn create(
         crypto: Crypto,
         auth: UserAuthority,
         path_workdir: & Path,
+        settings: NodeSettings,
     ) -> Result<(), ()> {
 
         info!("Creating node, path_workdir={}", path_workdir.display());
 
-        let context = crypto.create_context()
+        let context_auth = crypto.create_context()
             .map_err(| () | log_crypto_context_error())
             ?;
 
-        auth.store(context, & Node::path_user_authority(path_workdir))
+        let context_node_settings = crypto.create_context()
+            .map_err(| () | log_crypto_context_error())
+            ? ;
+
+        auth.store(context_auth, & Node::path_user_authority(path_workdir))
             .map_err(| () | error!("Failed to store user authority"))
             ? ;
 
         let fs = Filesystem::new(crypto, path_workdir);
         fs.store(& Node::path_filesystem(path_workdir))
             .map_err(| () | error!("Failed to store filesystem"))
+            ? ;
+
+        let serialized_node_settings = SerializedNodeSettings {
+            client_input_buffer_size: settings.socket_buffer_size as u64,
+            page_size_for_random_access_files: settings.page_size_random_access_file as u64,
+            page_size_for_blob_files: settings.page_size_blob_file as u64,
+        };
+
+        serialized_node_settings.write(context_node_settings, & Node::path_node(path_workdir))
+            .map_err(| () | error!("Failed to store node settings"))
             ? ;
 
         Ok(())
@@ -192,17 +219,32 @@ impl Node {
 
         info!("Storing node, path_workdir={}", self.path_workdir.display());
 
-        let context = self.crypto.create_context()
+        let context_auth = self.crypto.create_context()
             .map_err(| () | log_crypto_context_error())
             ?;
 
-        self.auth.store(context, & Node::path_user_authority(& self.path_workdir))
+        let context_node_settings = self.crypto.create_context()
+            .map_err(| () | log_crypto_context_error())
+            ? ;
+
+        self.auth.store(context_auth, & Node::path_user_authority(& self.path_workdir))
             .map_err(| () | error!("Failed to store user authority"))
             ? ;
 
         self.filesystem.store(& Node::path_filesystem(& self.path_workdir))
             .map_err(| () | error!("Failed to store filesystem"))
             ? ;
+
+        let serialized_node_settings = SerializedNodeSettings {
+            client_input_buffer_size: self.settings.socket_buffer_size as u64,
+            page_size_for_random_access_files: self.settings.page_size_random_access_file as u64,
+            page_size_for_blob_files: self.settings.page_size_blob_file as u64,
+        };
+
+        serialized_node_settings.write(context_node_settings, & Node::path_node(& self.path_workdir))
+            .map_err(| () | error!("Failed to store node settings"))
+            ? ;
+
         Ok(())
     }
 
@@ -210,11 +252,14 @@ impl Node {
 
         info!("Loading node, path_workdir={}", path_workdir.display());
 
-        let context = crypto.create_context()
+        let context_auth = crypto.create_context()
             .map_err(| () | log_crypto_context_error())
             ?;
+        let context_node_settings = crypto.create_context()
+            .map_err(| () | log_crypto_context_error())
+            ? ;
 
-        let auth = UserAuthority::load(context, & Node::path_user_authority(path_workdir))
+        let auth = UserAuthority::load(context_auth, & Node::path_user_authority(path_workdir))
             .map_err(| () | error!("Failed to store users"))
             ? ;
 
@@ -228,6 +273,10 @@ impl Node {
             .map_err(| () | error!("Failed to load filesystem"))
             ? ;
 
+        let settings = SerializedNodeSettings::read(context_node_settings, & Node::path_node(path_workdir))
+            .map_err(| () | error!("Failed to load node settings"))
+            ? ;
+
         Ok(Node {
             server: server,
             clients: Vec::new(),
@@ -235,6 +284,11 @@ impl Node {
             auth: auth,
             path_workdir: path_workdir.to_path_buf(),
             crypto: crypto,
+            settings: NodeSettings {
+                page_size_random_access_file: settings.page_size_for_random_access_files as usize,
+                page_size_blob_file: settings.page_size_for_blob_files as usize,
+                socket_buffer_size: settings.client_input_buffer_size as usize,
+            },
         })
     }
 
@@ -557,11 +611,15 @@ impl Node {
 
                     let (tx_node, rx_node) = channel::<ClientProtocol>();
                     let (tx_client, rx_client) = channel::<NodeProtocol>();
+                    let buffer_size = self.settings.socket_buffer_size;
+
                     let handle = spawn( move || {
                         let mut client = Client::new(
                             connection,
                             rx_node,
-                            tx_client);
+                            tx_client,
+                            buffer_size,
+                        );
                         client.process();
                     });
 
