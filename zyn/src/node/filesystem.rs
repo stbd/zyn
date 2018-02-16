@@ -263,6 +263,7 @@ impl Filesystem {
         filename: & str,
         user: Id,
         type_of_file: FileType,
+        page_size: usize,
     ) -> Result<NodeId, FilesystemError> {
 
         let (file, node_id) = {
@@ -281,7 +282,7 @@ impl Filesystem {
                 user.clone(),
                 *parent_node_id,
                 type_of_file,
-                1024
+                page_size,
             )
                 .map_err(| () | {
                     warn!("Failed to create file, user={}, filename={}", user, filename);

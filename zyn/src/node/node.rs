@@ -362,6 +362,7 @@ impl Node {
                                     & mut node_id_buffer,
                                     & mut self.filesystem,
                                     & mut self.auth,
+                                    & self.settings,
                                     parent,
                                     type_of_file,
                                     name,
@@ -663,6 +664,7 @@ impl Node {
         node_id_buffer: & mut [NodeId],
         filesystem: & mut Filesystem,
         auth: & mut UserAuthority,
+        settings: & NodeSettings,
         parent_fd: FileDescriptor,
         type_of_file: FileType,
         name: String,
@@ -686,11 +688,17 @@ impl Node {
                 ? ;
         }
 
+        let page_size = match type_of_file {
+            FileType::RandomAccess => settings.page_size_random_access_file,
+            FileType::Blob => settings.page_size_blob_file,
+        };
+
         filesystem.create_file(
             & parent_id,
             & name,
             user,
             type_of_file,
+            page_size,
         ).map_err(fs_error_to_rsp)
     }
 

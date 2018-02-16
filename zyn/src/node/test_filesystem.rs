@@ -18,6 +18,10 @@ impl State {
         10
     }
 
+    fn page_size() -> usize {
+        1024
+    }
+
     fn user_1() -> Id {
         Id::User(0)
     }
@@ -113,7 +117,7 @@ fn test_create_subfolder() {
 fn test_create_file() {
     let name = "file-1";
     let mut state = State::empty();
-    let node_id = state.fs.create_file(& NODE_ID_ROOT, name, State::user_1(), FileType::RandomAccess).unwrap();
+    let node_id = state.fs.create_file(& NODE_ID_ROOT, name, State::user_1(), FileType::RandomAccess, State::page_size()).unwrap();
     let resolved_ids = state.resolve_from_root(& format!("/{}", name), 2);
     assert!(resolved_ids[1] == node_id);
     assert!(state.fs.node(& node_id).unwrap().to_file().is_ok());
@@ -123,7 +127,7 @@ fn test_create_file() {
 fn test_create_delete_file() {
     let name = "file-1";
     let mut state = State::empty();
-    let node_id = state.fs.create_file(& NODE_ID_ROOT, name, State::user_1(), FileType::RandomAccess).unwrap();
+    let node_id = state.fs.create_file(& NODE_ID_ROOT, name, State::user_1(), FileType::RandomAccess, State::page_size()).unwrap();
     let index = state.find_child_index(name, "/", 1);
     assert!(state.fs.delete(& NODE_ID_ROOT, index, node_id).is_ok());
     assert!(state.fs.node(& node_id).unwrap().is_not_set());
@@ -139,8 +143,8 @@ fn test_serialization() {
     let mut state = State::empty();
 
     let node_id_folder = state.fs.create_folder(& NODE_ID_ROOT, folder_name, State::user_1()).unwrap();
-    let node_id_file_1 = state.fs.create_file(& node_id_folder, filename_1, State::user_1(), FileType::RandomAccess).unwrap();
-    let node_id_file_2 = state.fs.create_file(& node_id_folder, filename_2, State::user_1(), FileType::RandomAccess).unwrap();
+    let node_id_file_1 = state.fs.create_file(& node_id_folder, filename_1, State::user_1(), FileType::RandomAccess, State::page_size()).unwrap();
+    let node_id_file_2 = state.fs.create_file(& node_id_folder, filename_2, State::user_1(), FileType::RandomAccess, State::page_size()).unwrap();
 
     let revision_1;
     {
