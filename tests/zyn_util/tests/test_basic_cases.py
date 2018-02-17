@@ -267,8 +267,8 @@ class TestBasicEditFile(BasicsCommon):
         self._validate_response(rsp, connection)
         return rsp.as_insert_rsp()
 
-    def _blob_write(self, connection, node_id, revision, data):
-        rsp = connection.blob_write(node_id, revision, data.encode('utf-8'), 2)
+    def _blob_write(self, connection, node_id, revision, data, block_size=None):
+        rsp = connection.blob_write(node_id, revision, data.encode('utf-8'), block_size)
         self._validate_response(rsp, connection)
         return rsp.as_write_rsp()
 

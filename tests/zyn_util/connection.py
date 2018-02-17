@@ -172,7 +172,7 @@ class ZynConnection:
 
     def blob_write(self, node_id, revision, data, block_size=None, transaction_id=None):
         if block_size is None:
-            block_size = 1024  # todo: max block size should be queried from the server
+            block_size = len(data)
 
         req = \
             self.field_version() \
@@ -185,7 +185,9 @@ class ZynConnection:
             + ';' \
             + self.field_end_of_message() \
 
-        self.write(req)
+        rsp = self._send_receive(req)
+        if rsp.is_error():
+            return rsp
 
         index_start = 0
         while index_start < (len(data) - 1):
@@ -202,12 +204,13 @@ class ZynConnection:
             + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
             + self.field_node_id(node_id) \
             + self.field_unsigned(revision) \
-            + self.field_unsigned(offset) \
-            + self.field_unsigned(len(data)) \
+            + self.field_block(offset, len(data)) \
             + ';' \
             + self.field_end_of_message() \
 
-        self.write(req)
+        rsp = self._send_receive(req)
+        if rsp.is_error():
+            return rsp
         self._socket.send(data)
         return self.read_response()
 
@@ -218,12 +221,13 @@ class ZynConnection:
             + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
             + self.field_node_id(node_id) \
             + self.field_unsigned(revision) \
-            + self.field_unsigned(offset) \
-            + self.field_unsigned(len(data)) \
+            + self.field_block(offset, len(data)) \
             + ';' \
             + self.field_end_of_message() \
 
-        self.write(req)
+        rsp = self._send_receive(req)
+        if rsp.is_error():
+            return rsp
         self._socket.send(data)
         return self.read_response()
 
@@ -234,8 +238,7 @@ class ZynConnection:
             + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
             + self.field_node_id(node_id) \
             + self.field_unsigned(revision) \
-            + self.field_unsigned(offset) \
-            + self.field_unsigned(size) \
+            + self.field_block(offset, size) \
             + ';' \
             + self.field_end_of_message() \
 
@@ -454,6 +457,10 @@ class ZynConnection:
     @staticmethod
     def field_node_id(value):
         return 'N:{};'.format(ZynConnection.field_unsigned(value))
+
+    @staticmethod
+    def field_block(offset, size):
+        return 'BL:{}{};'.format(ZynConnection.field_unsigned(offset), ZynConnection.field_unsigned(size))
 
     @staticmethod
     def field_unsigned(value):

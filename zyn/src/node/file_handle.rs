@@ -44,6 +44,7 @@ pub struct FileProperties {
     pub size: u64,
     pub parent: NodeId,
     pub file_type: FileType,
+    pub page_size: u64,
     pub open_file_properties: Option<OpenFileProperties>,
 }
 
@@ -59,6 +60,7 @@ impl FileProperties {
             size: size,
             parent: metadata.parent,
             file_type: metadata.file_type,
+            page_size: metadata.max_block_size as u64,
             open_file_properties: open_file_properties,
         }
     }
@@ -108,14 +110,14 @@ impl FileHandle {
         user: Id,
         parent: NodeId,
         file_type: FileType,
-        max_block_size: usize
+        page_size: usize
     ) -> Result<FileHandle, ()> {
 
         let context = crypto.create_context()
             .map_err(| () | log_crypto_context_error())
             ? ;
 
-        FileService::create(& path, context, user, parent, file_type, max_block_size) ? ;
+        FileService::create(& path, context, user, parent, file_type, page_size) ? ;
 
         Ok(FileHandle{
             path: path,

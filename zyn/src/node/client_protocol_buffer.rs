@@ -102,6 +102,14 @@ impl ReceiveBuffer {
         Ok(id as NodeId)
     }
 
+    pub fn parse_block(& mut self) -> Result<(u64, u64), ()> {
+        self.expect("BL:") ? ;
+        let offset = self.parse_unsigned() ? ;
+        let size = self.parse_unsigned() ? ;
+        self.expect(";") ? ;
+        Ok((offset, size))
+    }
+
     pub fn parse_file_descriptor(& mut self) -> Result<FileDescriptor, ()> {
         self.expect("F:") ? ;
         let result_path = self.parse_path();

@@ -99,6 +99,8 @@ enum CommonErrorCodes {
     ErrorFileOpenedInReadMode = 4,
     OperationNotPermitedFotFileType = 5,
     BlockSizeIsTooLarge = 6,
+    InvalidEdit = 7,
+    FailedToReceiveData = 8,
 }
 
 fn map_node_error_to_uint(error: ErrorResponse) -> u64 {
@@ -185,6 +187,7 @@ enum Status {
     FailedToSendToNode,
     FailedToreceiveFromNode,
     FailedToSendToClient,
+    FailedToreceiveFromClient,
     ClientNotAuthenticated,
     FailedToWriteToSendBuffer,
     ShutdownOrderedByNode,
@@ -215,6 +218,8 @@ impl Display for Status {
                 write!(f, "InternalError"),
             Status::ProtocolProcessingError =>
                 write!(f, "ProtocolProcessingError"),
+            Status::FailedToreceiveFromClient =>
+                write!(f, "FailedToreceiveFromClient"),
         }
     }
 }
@@ -244,6 +249,7 @@ struct OpenFile {
     node_id: NodeId,
     open_mode: OpenMode,
     file_type: FileType,
+    page_size: u64,
     access: FileAccess,
 }
 
@@ -652,11 +658,27 @@ impl Client {
         Ok(())
     }
 
-    fn fill_buffer(connection: & mut Connection, buffer: & mut Buffer) {
-        while buffer.len() != buffer.capacity() {
+    fn fill_buffer(receive_buffer: & mut ReceiveBuffer, connection: & mut Connection, mut buffer: & mut Buffer) -> Result<(), ()> {
+
+        receive_buffer.take(& mut buffer);
+        if buffer.len() == buffer.capacity() {
+            return Ok(());
+        }
+
+        let mut trial = 1;
+        const MAX_NUMBER_OF_TRIALS: usize = 10;
+
+        while buffer.len() != buffer.capacity() && trial < MAX_NUMBER_OF_TRIALS {
             if ! connection.read(buffer).unwrap() {
                 sleep(Duration::from_millis(100));
             }
+            trial += 1;
+        }
+
+        if buffer.len() == buffer.capacity() {
+            Ok(())
+        } else {
+            Err(())
         }
     }
 }
@@ -928,6 +950,7 @@ fn handle_open_req(client: & mut Client) -> Result<(), ()>
         node_id: node_id,
         open_mode: mode,
         file_type: properties.file_type,
+        page_size: properties.page_size,
         access: access
     });
     Ok(())
@@ -970,12 +993,32 @@ fn handle_close_req(client: & mut Client) -> Result<(), ()>
     }
 }
 
+fn is_block_in_page(page_size: u64, offset: u64, size: u64) -> bool
+{
+    let page_start = (offset / page_size) * page_size;
+    let page_end = page_start + page_size;
+    if (offset + size) > page_end {
+        false
+    } else {
+        true
+    }
+}
+
+fn is_random_access_edit_allowed(page_size: u64, offset: u64, size: u64) -> bool
+{
+    if offset > page_size {
+        return false;
+    }
+    is_block_in_page(page_size, offset, size)
+}
+
+
 /*
 Write to random access file request
-<- [Version]RA-W:[Transaction Id][Node-Id: file][Block];[End]
+<- [Version]RA-W:[Transaction Id][Node-Id: file][Uint: revision][Block];[End]
  * file needs to be open
  * file needs to be of type random access
--> ([Version]RSP:[Transaction Id][Uint: error code];[End]) Only if there is an error
+-> [Version]RSP:[Transaction Id][Uint: error code];[End]
 <- [data]
 -> [Version]RSP:[Transaction Id][Uint: error code](Uint: revision);[End]
 */
@@ -984,8 +1027,7 @@ fn handle_write_random_access_req(client: & mut Client) -> Result<(), ()>
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
     let revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let (offset, size) = try_parse!(client.buffer.parse_block(), client, transaction_id);
     try_parse!(client.buffer.expect(";"), client, transaction_id);
     try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
 
@@ -1008,10 +1050,20 @@ fn handle_write_random_access_req(client: & mut Client) -> Result<(), ()>
         OpenMode::ReadWrite => (),
     }
 
+    if ! is_random_access_edit_allowed(open_file.page_size, offset, size) {
+        warn!("Invalid edit, edited block not in fist page, page_size={}, offset={}, size={}",
+              open_file.page_size, offset, size);
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::InvalidEdit as u64);
+        return Err(());
+    }
+
+    try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+
     let mut data = Buffer::with_capacity(size as usize);
-    client.buffer.take(& mut data);
-    if data.len() < data.capacity() {
-        Client::fill_buffer(& mut client.connection, & mut data);
+    if Client::fill_buffer(& mut client.buffer, & mut client.connection, & mut data).is_err() {
+        client.status.set(Status::FailedToreceiveFromClient);
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveData as u64);
+        return Err(());
     }
 
     match open_file.access.write(revision, offset, data) {
@@ -1031,10 +1083,10 @@ fn handle_write_random_access_req(client: & mut Client) -> Result<(), ()>
 
 /*
 Insert to random access file
-<- [Version]RA-I:[Transaction Id][Node-Id: opened file][Block];[End]
+<- [Version]RA-I:[Transaction Id][Node-Id: opened file][Uint: revision][Block];[End]
  * file needs to be open
  * file needs to be of type random access
--> ([Version]RSP:[Transaction Id][Uint: error code];[End]) Only if there is an error
+-> [Version]RSP:[Transaction Id][Uint: error code];[End]
 <- [data]
 -> [Version]RSP:[Transaction Id][Uint: error code](Uint: revision);[End]
 */
@@ -1043,8 +1095,7 @@ fn handle_random_access_insert_req(client: & mut Client) -> Result<(), ()>
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
     let revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let (offset, size) = try_parse!(client.buffer.parse_block(), client, transaction_id);
     try_parse!(client.buffer.expect(";"), client, transaction_id);
     try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
 
@@ -1067,10 +1118,20 @@ fn handle_random_access_insert_req(client: & mut Client) -> Result<(), ()>
         OpenMode::ReadWrite => (),
     }
 
+    if ! is_random_access_edit_allowed(open_file.page_size, offset, size) {
+        warn!("Invalid edit, edited block not in fist page, page_size={}, offset={}, size={}",
+              open_file.page_size, offset, size);
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::InvalidEdit as u64);
+        return Err(());
+    }
+
+    try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+
     let mut data = Buffer::with_capacity(size as usize);
-    client.buffer.take(& mut data);
-    if data.len() < data.capacity() {
-        Client::fill_buffer(& mut client.connection, & mut data);
+    if Client::fill_buffer(& mut client.buffer, & mut client.connection, & mut data).is_err() {
+        client.status.set(Status::FailedToreceiveFromClient);
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveData as u64);
+        return Err(());
     }
 
     match open_file.access.insert(revision, offset, data) {
@@ -1090,7 +1151,7 @@ fn handle_random_access_insert_req(client: & mut Client) -> Result<(), ()>
 
 /*
 Delete from random access file
-<- [Version]RA-D:[Transaction Id][Node-Id: opened file][Block];[End]
+<- [Version]RA-D:[Transaction Id][Node-Id: opened file][Uint: revision][Block];[End]
  * file needs to be open
  * file needs to be of type random access
 -> [Version]RSP:[Transaction Id][Uint: error code](Uint: revision);[End]
@@ -1100,8 +1161,7 @@ fn handle_random_access_delete_req(client: & mut Client) -> Result<(), ()>
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
     let revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let (offset, size) = try_parse!(client.buffer.parse_block(), client, transaction_id);
     try_parse!(client.buffer.expect(";"), client, transaction_id);
     try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
 
@@ -1124,6 +1184,13 @@ fn handle_random_access_delete_req(client: & mut Client) -> Result<(), ()>
         OpenMode::ReadWrite => (),
     }
 
+    if ! is_random_access_edit_allowed(open_file.page_size, offset, size) {
+        warn!("Invalid edit, edited block not in fist page, page_size={}, offset={}, size={}",
+              open_file.page_size, offset, size);
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::InvalidEdit as u64);
+        return Err(());
+    }
+
     match open_file.access.delete(revision, offset, size) {
         Ok(revision) => {
             let mut buffer = try_write_buffer!(client, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
@@ -1141,9 +1208,12 @@ fn handle_random_access_delete_req(client: & mut Client) -> Result<(), ()>
 
 /*
 Write to blob file
-FIXME: <- [Version]RA-D:[Transaction Id][Node-Id: opened file][Block];[End]
+<- [Version]RA-D:[Transaction Id][Node-Id: opened file][Uint: revision][Uint: file size][Uint: block size];[End]
  * file needs to be open
  * file needs to be of type blob
+-> [Version]RSP:[Transaction Id][Uint: error code][End]
+<- [data]
+ * Possible in multiple blocks
 -> [Version]RSP:[Transaction Id][Uint: error code](Uint: revision);[End]
 */
 fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
@@ -1184,6 +1254,20 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
         OpenMode::ReadWrite => (),
     }
 
+    if size > open_file.page_size {
+        // If size of file is greater than page size, file must be written in blocks that fit page
+        if block_size % open_file.page_size != 0 {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::BlockSizeIsTooLarge as u64);
+            return Err(());
+        }
+    } else {
+        // If size of file is less than page size, block size must match
+        if size != block_size {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::BlockSizeIsTooLarge as u64);
+            return Err(());
+        }
+    }
+
     let user = client.user.as_ref().unwrap();
     let lock = FileLock::LockedBySystemForBlobWrite {
         user: user.clone(),
@@ -1194,30 +1278,25 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
         return Err(());
     }
 
-    let max_block_size: u64 = 1024 * 1024 * 10;
+    try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+
     let mut bytes_read: u64 = 0;
-
-    if block_size > max_block_size {
-        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::BlockSizeIsTooLarge as u64);
-
-        // todo: this is error case, but since file is locked, return is not possible
-    }
-
     while bytes_read < size {
 
         let bytes_left = size - bytes_read;
         let buffer_size = {
-            if bytes_left < max_block_size {
+            if bytes_left < open_file.page_size {
                 bytes_left
             } else {
-                max_block_size
+                open_file.page_size
             }
         };
 
         let mut buffer = Buffer::with_capacity(buffer_size as usize);
-        client.buffer.take(& mut buffer);
-        if buffer.len() < buffer.capacity() {
-            Client::fill_buffer(& mut client.connection, & mut buffer);
+        if Client::fill_buffer(& mut client.buffer, & mut client.connection, & mut buffer).is_err() {
+            client.status.set(Status::FailedToreceiveFromClient);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveData as u64);
+            return Err(());
         }
 
         revision = match open_file.access.write(revision, bytes_read, buffer) {
