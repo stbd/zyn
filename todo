@@ -1,5 +1,9 @@
 # todo
  * Fix user authority hash usage
+ * Implement automatic release for locks when lock goes out of scope
+ * Think about when to close connection to client
+ * Go trough client to make sure trace levels are consistent
+ * Make sure naming of pages is consistent around system (not block)
  * Refactor
   * Filesystem
    * Only N files should be stored for each folder
