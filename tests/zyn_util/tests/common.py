@@ -116,3 +116,66 @@ class TestZyn(unittest.TestCase):
             remote_port or self._remote_port
         )
         return connection
+
+
+class TestCommon(TestZyn):
+
+    def setUp(self):
+        super(TestCommon, self).setUp()
+        self._process = None
+
+    def tearDown(self):
+        if self._process:
+            self._stop_node(self._process)
+
+    def _stop_node(self, process, expected_return_code=0):
+        ret = process.poll()
+        if ret is not None:
+            assert ret == expected_return_code
+        else:
+            logging.info('Process {} was still alive, stopping'.format(process.pid))
+            process.kill()
+
+    def _validate_socket_is_disconnected(self, connection):
+        with self.assertRaises(TimeoutError):
+            connection.read_message()
+
+    def _start_node(self):
+        self._process = self._start_server(
+            self._work_dir.name,
+            init=True
+        )
+
+    def _connect_to_node(self):
+        connection = self._create_connection_and_connect()
+        connection.enable_debug_messages()
+        return connection
+
+    def _validate_response(
+            self,
+            response,
+            connection,
+            expected_error_code=0,
+            expected_transaction_id=None,
+    ):
+
+        if expected_transaction_id is None:
+            expected_transaction_id = connection.transaction_id() - 1
+        self.assertEqual(response.protocol_version(), 1)
+        self.assertEqual(response.error_code(), expected_error_code)
+        self.assertEqual(response.transaction_id(), expected_transaction_id)
+
+    def _handle_auth(self, connection, username=None, password=None):
+        rsp = connection.authenticate(
+            username or self._username,
+            password or self._password,
+        )
+        self.assertEqual(rsp.number_of_fields(), 0)
+        self._validate_response(rsp, connection)
+        return rsp
+
+    def _start_and_connect_to_node_and_handle_auth(self):
+        self._start_node()
+        c = self._connect_to_node()
+        self._handle_auth(c)
+        return c
