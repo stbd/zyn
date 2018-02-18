@@ -1,5 +1,3 @@
-import logging
-
 import zyn_util.tests.common
 import zyn_util.errors
 

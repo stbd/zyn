@@ -1,5 +1,4 @@
 use std::path::{ PathBuf };
-use std::vec::{ Vec };
 
 extern crate tempdir;
 use self::tempdir::{ TempDir };
@@ -335,16 +334,21 @@ fn test_metadata_size_is_updated() {
 
 #[test]
 fn test_part_of_file_is_allocated() {
-    let buffer: Buffer = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let block_size = 8;
     let mut state = State::init_with_block_size(8);
     let mut access = state.open();
     assert!(state.is_open() == true);
-    let first_half = Vec::from(buffer.get(0 .. 8).unwrap());
-    let second_half = Vec::from(buffer.get(8 .. ).unwrap());
-    assert!(access.write(0, 0, first_half.clone()).is_ok());
-    assert!(access.write(1, 8, second_half.clone()).is_ok());
-    let (read_buffer, _) = access.read(0, 8).unwrap();
-    assert!(read_buffer == first_half);
-    let (read_buffer, _) = access.read(8, 8).unwrap();
-    assert!(read_buffer == second_half);
+    let part_1: Buffer = (block_size * 0 .. block_size * 1).collect();
+    let part_2: Buffer = (block_size * 1 .. block_size * 2).collect();
+    let part_3: Buffer = (block_size * 2 .. block_size * 3).collect();
+
+    assert!(access.write(0, 0, part_1.clone()).is_ok());
+    assert!(access.write(1, block_size as u64 * 1, part_2.clone()).is_ok());
+    assert!(access.write(2, block_size as u64 * 2, part_3.clone()).is_ok());
+    let (read_buffer, _) = access.read(block_size as u64 * 0, block_size as u64).unwrap();
+    assert!(read_buffer == part_1);
+    let (read_buffer, _) = access.read(block_size as u64 * 1, block_size as u64).unwrap();
+    assert!(read_buffer == part_2);
+    let (read_buffer, _) = access.read(block_size as u64 * 2, block_size as u64).unwrap();
+    assert!(read_buffer == part_3);
 }

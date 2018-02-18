@@ -669,10 +669,17 @@ impl Client {
         const MAX_NUMBER_OF_TRIALS: usize = 10;
 
         while buffer.len() != buffer.capacity() && trial < MAX_NUMBER_OF_TRIALS {
-            if ! connection.read(buffer).unwrap() {
-                sleep(Duration::from_millis(100));
+            match connection.read(buffer) {
+                Ok(true) => (),
+                Ok(false) => {
+                    sleep(Duration::from_millis(100));
+                    trial += 1;
+                },
+                Err(()) => return Err(()),
+            };
+            if buffer.len() == buffer.capacity() {
+                break;
             }
-            trial += 1;
         }
 
         if buffer.len() == buffer.capacity() {
@@ -1254,9 +1261,11 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
         OpenMode::ReadWrite => (),
     }
 
+    trace!("Write blob: page_size={}", open_file.page_size);
+
     if size > open_file.page_size {
-        // If size of file is greater than page size, file must be written in blocks that fit page
-        if block_size % open_file.page_size != 0 {
+        // If size of file is greater than page size, file must be written in blocks that do not cross pages
+        if block_size > open_file.page_size || open_file.page_size % block_size != 0 {
             try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::BlockSizeIsTooLarge as u64);
             return Err(());
         }
@@ -1285,10 +1294,10 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
 
         let bytes_left = size - bytes_read;
         let buffer_size = {
-            if bytes_left < open_file.page_size {
+            if bytes_left < block_size {
                 bytes_left
             } else {
-                open_file.page_size
+                block_size
             }
         };
 
@@ -1307,6 +1316,7 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
             }
         };
 
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
         bytes_read += buffer_size;
     }
 

@@ -156,6 +156,7 @@ impl Metadata {
                 return Ok(desc.block_number);
             }
         }
+
         Err(())
     }
 
@@ -170,7 +171,6 @@ impl Metadata {
         if offset > (last_offset + self.max_block_size as u64 - 1)
             && offset < (last_offset + self.max_block_size as u64 * 2)
         {
-
             let block_number = self.add_block();
             return Ok(block_number);
         }
@@ -557,7 +557,7 @@ impl FileImpl {
     }
 
     pub fn path_data(path_basename: & Path, block_number: u32) -> PathBuf {
-        path_basename.with_extension(format!("{}", block_number))
+        path_basename.with_extension(format!("block-{}", block_number))
     }
 
     pub fn create(
@@ -608,26 +608,45 @@ impl FileImpl {
     }
 
     fn load_block(& mut self, block_index: u32) -> Result<(), ()> {
+
+        trace!("Loading block: block_index={}", block_index);
+
         let ref block = self.metadata.block_descriptions[block_index as usize];
         let path = FileImpl::path_data(& self.path_basename, block.block_number);
-        let mut file = match OpenOptions::new().read(true).create(false).open(path.as_path()) {
-            Ok(file) => file,
-            Err(_error_code) => {
-                error!("Failed to open file for reading: path={}", path.display());
-                return Err(());
-            },
-        };
-        let mut data = Buffer::new();
-        match file.read_to_end(& mut data) {
-            Err(_) => {
-                warn!("Failed to write data, path_basename={}", self.path_basename.display());
-            },
-            _ => (),
-        };
-        self.current_block_index = block_index;
-        if data.len() > 0 {
-            self.buffer = self.crypto_context.decrypt(& data) ? ;
+
+
+        if path.exists() {
+            let mut file = match OpenOptions::new().read(true).create(false).open(path.as_path()) {
+                Ok(file) => file,
+                Err(error_code) => {
+                    error!("Failed to open file for reading: path={}, error_code=\"{}\"", path.display(), error_code);
+                    return Err(());
+                },
+            };
+
+            let mut data = Buffer::new();
+            match file.read_to_end(& mut data) {
+                Err(_) => {
+                    warn!("Failed to write data, path_basename={}", self.path_basename.display());
+                },
+                _ => (),
+            };
+            if data.len() > 0 {
+                self.buffer = self.crypto_context.decrypt(& data) ? ;
+            }
+        } else {
+            trace!("Creating new page, path_basename={}, block_index={}", self.path_basename.display(), block_index);
+            match OpenOptions::new().read(true).write(true).create(true).open(path.as_path()) {
+                Ok(_) => (),
+                Err(error_code) => {
+                    error!("Failed to create data file: path={}, error_code=\"{}\"", path.display(), error_code);
+                    return Err(());
+                },
+            };
+            self.buffer = Buffer::with_capacity(DEFAULT_BUFFER_SIZE_BYTES as usize);
         }
+
+        self.current_block_index = block_index;
         Ok(())
     }
 
@@ -659,7 +678,10 @@ impl FileImpl {
                self.current_block_index, block_index, self.display());
 
         self.write_block() ? ;
-        self.load_block(block_index)
+        self.load_block(block_index) ? ;
+
+        debug!("Swap completed, file={}", self.display());
+        Ok(())
     }
 
     fn store(& mut self) {

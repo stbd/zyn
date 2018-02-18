@@ -190,10 +190,14 @@ class ZynConnection:
             return rsp
 
         index_start = 0
+        self._socket.settimeout(60)
         while index_start < (len(data) - 1):
             index_end = index_start + block_size
             self._socket.send(data[index_start:index_end])
             index_start += block_size
+            rsp = self.read_response(timeout=60*5)
+            if rsp.is_error():
+                return rsp
 
         return self.read_response()
 
@@ -381,7 +385,9 @@ class ZynConnection:
         encoded = data.encode('utf-8')
         self._socket.sendall(encoded)
 
-    def read_data(self, length):
+    def read_data(self, length, timeout=None):
+        timeout = timeout or 60.
+        self._socket.settimeout(timeout)
         buffer = b''
         if len(self._input_buffer) > 0:
             buffer = self._input_buffer[:length]
@@ -395,18 +401,19 @@ class ZynConnection:
             buffer += d
         return buffer
 
-    def read_response(self, end_of_message_field=None):
+    def read_response(self, end_of_message_field=None, timeout=None):
         while True:
-            message = self.read_message(end_of_message_field)
+            message = self.read_message(end_of_message_field, timeout)
             if message.type() == Message.NOTIFICATION:
                 self._notifications.append(message)
             return message
 
-    def read_message(self, end_of_message_field=None):
+    def read_message(self, end_of_message_field=None, timeout=None):
         eom = end_of_message_field or self.field_end_of_message()
         eom = eom.encode('utf-8')
 
-        self._socket.settimeout(1.)
+        timeout = timeout or 10.
+        self._socket.settimeout(timeout)
 
         message = ''
         while True:
@@ -460,7 +467,10 @@ class ZynConnection:
 
     @staticmethod
     def field_block(offset, size):
-        return 'BL:{}{};'.format(ZynConnection.field_unsigned(offset), ZynConnection.field_unsigned(size))
+        return 'BL:{}{};'.format(
+            ZynConnection.field_unsigned(offset),
+            ZynConnection.field_unsigned(size)
+        )
 
     @staticmethod
     def field_unsigned(value):

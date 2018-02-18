@@ -428,8 +428,8 @@ impl FileAccess {
     }
 }
 
-static MAX_WAIT_DURATION_PER_MESSAGE_MS: u64 = 500;
-static MAX_NUMBER_OF_ITERATIONS_PER_MESSAGE: u64 = 5;
+static MAX_WAIT_DURATION_PER_MESSAGE_MS: u64 = 10000;
+static MAX_NUMBER_OF_ITERATIONS_PER_MESSAGE: u64 = 20;
 
 fn file_receive<OkType>(
     access: & mut FileAccess,
@@ -459,7 +459,7 @@ fn file_receive<OkType>(
         access.handle_unexpected_message(msg);
     }
 
-    warn!("Received too many unxpected messages");
+    warn!("Received too many unxpected messages or timeout");
     Err(FileError::InternalCommunicationError)
 }
 
