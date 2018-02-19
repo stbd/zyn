@@ -35,7 +35,8 @@ impl Connection {
 
         unsafe {
             let mut offset: usize = 0;
-            for _ in 1..10 {
+            let mut trial: usize = 0;
+            while trial < 10 {
                 let start_point = buffer.as_ptr().offset(offset as isize);
                 let bytes_left = buffer.len() - offset;
                 let write_result = tls_sys::tls_write(self.context, start_point as _, bytes_left);
@@ -57,9 +58,7 @@ impl Connection {
                 }
 
                 sleep(Duration::from_millis(DEFAULT_SLEEP_DURATION_MS));
-            }
-            if offset > 0 {
-                return Ok(offset);
+                trial += 1;
             }
         }
         Err(())

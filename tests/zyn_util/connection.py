@@ -255,8 +255,7 @@ class ZynConnection:
             + 'R:' \
             + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
             + self.field_node_id(node_id) \
-            + self.field_unsigned(offset) \
-            + self.field_unsigned(size) \
+            + self.field_block(offset, size) \
             + ';' \
             + self.field_end_of_message() \
 
@@ -268,7 +267,7 @@ class ZynConnection:
         _, read_size = rsp.field(1).as_block()
         data = bytearray()
         if read_size > 0:
-            data = self.read_data(read_size)
+            data = self.read_data(read_size, 60*10)
         return rsp, data
 
     def query_list(self, node_id=None, path=None, transaction_id=None):

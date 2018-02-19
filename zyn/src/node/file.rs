@@ -680,7 +680,7 @@ impl FileImpl {
         self.write_block() ? ;
         self.load_block(block_index) ? ;
 
-        debug!("Swap completed, file={}", self.display());
+        debug!("Swap completed, file={}, buffer_len={}", self.display(), self.buffer.len());
         Ok(())
     }
 

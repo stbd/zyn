@@ -3,6 +3,8 @@ import os
 import random
 import string
 
+from nose.plugins.attrib import attr
+
 import zyn_util.tests.common
 import zyn_util.errors
 
@@ -34,19 +36,43 @@ class TestLargeFiles(zyn_util.tests.common.TestCommon):
 
         return path_data_file
 
-    def test_edit_large_blob(self):
-        size = self._megabytes_to_bytes(100)
-        block_size = int(self._megabytes_to_bytes(.5))
-        path_data = self._create_binary_blob_for_test_data(size)
+    def _read_file(self, connection, node_id, path_data, block_size):
+        size = os.stat(path_data).st_size
+        fp = open(path_data, 'rb')
+        offset_start = 0
+        offset_end = block_size
+
+        while offset_end < size:
+            expected_data = fp.read(block_size)
+            read_rsp, data = connection.read_file(node_id, offset_start, block_size)
+            self.assertEqual(data, expected_data)
+            offset_start = offset_end
+            offset_end += block_size
+
+    def _test_write_read_file(self, file_size, block_size):
+        path_data = self._create_binary_blob_for_test_data(file_size)
         c = self._start_and_connect_to_node_and_handle_auth()
         create_rsp = c.create_file_blob('blob', parent_path='/').as_create_rsp()
         open_rsp = c.open_file_write(node_id=create_rsp.node_id).as_open_rsp()
 
         data = open(path_data, 'rb').read()
-        write_rsp = c.blob_write(
+        c.blob_write(
             open_rsp.node_id,
             open_rsp.revision,
             data,
             block_size
         ).as_write_rsp()
-        read_rsp, data = c.read_file(open_rsp.node_id, write_rsp.revision, 0, block_size)
+        self._read_file(c, create_rsp.node_id, path_data, block_size)
+
+    def test_edit_blob_20(self):
+        self._test_write_read_file(
+            self._megabytes_to_bytes(20),
+            int(self._megabytes_to_bytes(.5))
+        )
+
+    @attr(speed='slow')
+    def test_edit_blob_100(self):
+        self._test_write_read_file(
+            self._megabytes_to_bytes(100),
+            int(self._megabytes_to_bytes(.5))
+        )

@@ -1344,8 +1344,7 @@ fn handle_read_req(client: & mut Client) -> Result<(), ()>
 {
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
-    let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let (offset, size) = try_parse!(client.buffer.parse_block(), client, transaction_id);
     try_parse!(client.buffer.expect(";"), client, transaction_id);
     try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
 
@@ -1369,8 +1368,9 @@ fn handle_read_req(client: & mut Client) -> Result<(), ()>
 
             if data.len() > 0 {
                 try_with_set_error_state!(client, client.connection.write_with_sleep(& data), Status::FailedToSendToClient);
+            } else {
+                warn!("Read: No data to send");
             }
-
             Ok(())
         },
         Err(error) => {
