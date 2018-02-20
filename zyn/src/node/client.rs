@@ -1803,7 +1803,7 @@ fn handle_mod_user_group(client: & mut Client) -> Result<(), ()>
     Ok(())
 }
 
-static MAX_WAIT_DURATION_FOR_NODE_RESPONSE_MS: u64 = 1000;
+static MAX_WAIT_DURATION_FOR_NODE_RESPONSE_MS: u64 = 1000; // todo: probably needs to be increased
 static MAX_NUMBER_OF_MESSAGES_FROM_NODE: u64 = 5;
 
 fn node_receive<OkType>(
