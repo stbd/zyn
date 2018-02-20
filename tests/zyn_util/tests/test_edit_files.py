@@ -72,7 +72,7 @@ class TestLargeFiles(zyn_util.tests.common.TestCommon):
             int(self._megabytes_to_bytes(.5))
         )
 
-    @attr(speed='slow')
+    @attr('slow')
     def test_edit_blob_100(self):
         c = self._start_and_connect_to_node_and_handle_auth()
         self._create_write_read_file(

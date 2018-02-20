@@ -36,17 +36,29 @@ function zyn-unittests() {
     return "$r"
 }
 
+system_test_files=( \
+    "test_basic_cases.py" \
+    "test_edit_files.py" \
+)
+
+
 function zyn-system-tests() {
     project_path=$HOME/zyn/tests/zyn_util/tests
     pushd $project_path &> /dev/null
-    default_arguments="--nologcapture --nocapture"
+
     r=0
-    nosetests test_basic_cases.py $default_arguments $@ || r=1
+    for file in "${system_test_files[@]}"
+    do
+        echo "$file"
+        nosetests "$file" --nologcapture --nocapture -vv -a '!slow' || r=1
+    done
+
     popd &> /dev/null
     return "$r"
 }
 
 function zyn-static-analysis() {
+    # todo: iterate over all files in repo and also check .sh files
     project_path=$HOME/zyn/tests/zyn_util/
     pushd $project_path &> /dev/null
     r=0
