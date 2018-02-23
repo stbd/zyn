@@ -81,8 +81,7 @@ class TestLargeFiles(zyn_util.tests.common.TestCommon):
             int(self._megabytes_to_bytes(.5))
         )
 
-    def _test_rewrite_large_file_with_smaller(self):
-        # todo: currently fails
+    def test_rewrite_large_file_with_smaller(self):
         filename = 'blob'
         file_size = self._megabytes_to_bytes(20)
         block_size = int(self._megabytes_to_bytes(.5))
@@ -100,4 +99,4 @@ class TestLargeFiles(zyn_util.tests.common.TestCommon):
         )
         read_rsp = read_rsp.as_read_rsp()
         self.assertEqual(read_data, data)
-        # self.assertEqual(read_rsp.size, len(data))
+        self.assertEqual(read_rsp.size, len(data))

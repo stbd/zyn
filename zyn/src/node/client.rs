@@ -1289,6 +1289,14 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
 
     try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
 
+    revision = match open_file.access.delete_data(revision) {
+        Ok(r) => r,
+        Err(error) => {
+            try_send_response_without_fields!(client, transaction_id, map_file_error_to_uint(error));
+            return Err(());
+        }
+    };
+
     let mut bytes_read: u64 = 0;
     while bytes_read < size {
 

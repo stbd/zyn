@@ -5,6 +5,7 @@
  * Go trough client to make sure trace levels are consistent
  * Make sure naming of pages is consistent around system (not block)
  * When writing block file, previous version needs to be deleted
+ * Cleanup responsibilities between file impl and metadata, who owns the data and who does the action
  * Refactor
   * Filesystem
    * Only N files should be stored for each folder
