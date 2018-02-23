@@ -1,12 +1,12 @@
 use std::cmp::{ min };
 use std::fmt::{ Display, Formatter, Result as FmtResult } ;
-use std::fs::{ OpenOptions, File };
+use std::fs::{ OpenOptions, File, remove_file };
 use std::io::{ Read, Write };
 use std::option::{ Option };
 use std::path::{ PathBuf, Path, Display as PathDisplay };
 use std::ptr::{ copy };
 use std::sync::mpsc::{ channel, Sender, Receiver };
-use std::vec::{ Vec };
+use std::vec::{ Vec, Drain };
 
 use node::common::{ utc_timestamp, FileRevision, Buffer, NodeId, FileType, Timestamp };
 use node::crypto::{ Context };
@@ -21,6 +21,7 @@ pub enum FileRequestProtocol {
     Write { revision: FileRevision, offset: u64, buffer: Buffer },
     Insert { revision: FileRevision, offset: u64, buffer: Buffer },
     Delete { revision: FileRevision, offset: u64, size: u64 },
+    DeleteData { revision: FileRevision },
     Read { offset: u64, size: u64 },
     LockFile { revision: FileRevision, description: FileLock },
     UnlockFile { description: FileLock },
@@ -32,6 +33,7 @@ pub enum FileResponseProtocol {
     Write { result: Result<FileRevision, FileError> },
     Insert { result: Result<FileRevision, FileError> },
     Delete { result: Result<FileRevision, FileError> },
+    DeleteData { result: Result<FileRevision, FileError> },
     Read { result: Result<(Buffer, FileRevision), FileError> },
     LockFile { result: Result<(), FileError> },
     UnlockFile { result: Result<(), FileError> },
@@ -175,6 +177,10 @@ impl Metadata {
             return Ok(block_number);
         }
         Err(())
+    }
+
+    fn drain_pages(& mut self) -> Drain<FileBlock> {
+        self.block_descriptions.drain(..)
     }
 
     pub fn path(path_basename: & Path) -> PathBuf {
@@ -420,6 +426,32 @@ impl FileService {
                                 },
                                 Err(status) => {
                                     send_ok = send_response(& user, FileResponseProtocol::Delete {
+                                        result: Err(status),
+                                    }).is_ok();
+                                }
+                            };
+                        },
+
+                        FileRequestProtocol::DeleteData { revision } => {
+                            match self.file.delete_data(& user.user, revision) {
+                                Ok(revision) => {
+                                    /*
+                                    notifications.push(
+                                        (true,
+                                         Some(i),
+                                         Notification::PartOfFileDeleted {
+                                             revision: revision,
+                                             offset: offset,
+                                             size: size
+                                         })
+                                    );
+                                     */
+                                    send_ok = send_response(& user, FileResponseProtocol::DeleteData {
+                                        result: Ok(revision),
+                                    }).is_ok();
+                                },
+                                Err(status) => {
+                                    send_ok = send_response(& user, FileResponseProtocol::DeleteData {
                                         result: Err(status),
                                     }).is_ok();
                                 }
@@ -881,6 +913,39 @@ impl FileImpl {
         let end_offset = offset + size;
         let end_offset = min(end_offset, self.buffer.len() as u64);
         let _: Buffer = self.buffer.drain(offset as usize .. end_offset as usize).collect();
+
+        self.metadata.revision += 1;
+        self.update_current_block_size();
+        Ok(self.metadata.revision)
+    }
+
+    fn delete_data(& mut self, user: & Option<Id>, revision: FileRevision)
+                   -> Result<FileRevision, FileError> {
+
+        if revision != self.metadata.revision {
+            return Err(FileError::RevisionTooOld);
+        }
+
+        self.is_edit_allowed(user) ? ;
+
+        for page in self.metadata.drain_pages() {
+
+            let path = FileImpl::path_data(& self.path_basename, page.block_number);
+            if ! path.exists() {
+                warn!("Block file for block_number={} did not exists when trying to delete file data, path={}",
+                      page.block_number,
+                      path.display()
+                );
+                return Err(FileError::InternalError);
+            }
+            remove_file(& path)
+                .map_err(| _ | FileError::InternalError)
+                ? ;
+
+        }
+        self.metadata.add_block();
+        self.current_block_index = 0;
+        self.buffer = Buffer::with_capacity(DEFAULT_BUFFER_SIZE_BYTES as usize);
 
         self.metadata.revision += 1;
         self.update_current_block_size();

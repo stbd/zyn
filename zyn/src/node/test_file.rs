@@ -335,7 +335,7 @@ fn test_metadata_size_is_updated() {
 #[test]
 fn test_part_of_file_is_allocated() {
     let block_size = 8;
-    let mut state = State::init_with_block_size(8);
+    let mut state = State::init_with_block_size(block_size as usize);
     let mut access = state.open();
     assert!(state.is_open() == true);
     let part_1: Buffer = (block_size * 0 .. block_size * 1).collect();
@@ -345,10 +345,27 @@ fn test_part_of_file_is_allocated() {
     assert!(access.write(0, 0, part_1.clone()).is_ok());
     assert!(access.write(1, block_size as u64 * 1, part_2.clone()).is_ok());
     assert!(access.write(2, block_size as u64 * 2, part_3.clone()).is_ok());
-    let (read_buffer, _) = access.read(block_size as u64 * 0, block_size as u64).unwrap();
-    assert!(read_buffer == part_1);
-    let (read_buffer, _) = access.read(block_size as u64 * 1, block_size as u64).unwrap();
-    assert!(read_buffer == part_2);
-    let (read_buffer, _) = access.read(block_size as u64 * 2, block_size as u64).unwrap();
-    assert!(read_buffer == part_3);
+    let _ = read_and_validate(& mut access, block_size as u64 * 0, block_size as u64, & part_1, & 3);
+    let _ = read_and_validate(& mut access, block_size as u64 * 1, block_size as u64, & part_2, & 3);
+    let _ = read_and_validate(& mut access, block_size as u64 * 2, block_size as u64, & part_3, & 3);
+}
+
+#[test]
+fn test_reset_blob_file() {
+    let block_size = 4;
+    let mut state = State::init_with_block_size(block_size as usize);
+    let mut access = state.open();
+    assert!(state.is_open() == true);
+
+    assert!(access.write(0, 0, vec![1, 1, 1, 1]).is_ok());
+    assert!(access.write(1, block_size, vec![2, 2, 2, 2]).is_ok());
+    assert!(access.delete_data(2).is_ok());
+    assert!(access.properties().unwrap().size == 0);
+    let (data, revision) = access.read(0, block_size as u64).unwrap();
+    assert!(revision == 3);
+    assert!(data.len() == 0);
+
+    let buffer = vec![3, 3, 3, 3];
+    assert!(access.write(3, 0, buffer.clone()).is_ok());
+    let _ = read_and_validate(& mut access, 0, block_size, & buffer, & 4);
 }

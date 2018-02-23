@@ -335,6 +335,25 @@ impl FileAccess {
         })
     }
 
+    pub fn delete_data(& mut self, revision: FileRevision) -> Result<FileRevision, FileError> {
+
+        self.channel_send.send(FileRequestProtocol::DeleteData {
+            revision: revision,
+        }).map_err(| _ | FileError::InternalCommunicationError) ? ;
+
+        file_receive::<FileRevision>(self, & | msg | {
+            match msg {
+                FileResponseProtocol::DeleteData {
+                    result: Ok(revision),
+                } => (None, Some(Ok(revision))),
+                FileResponseProtocol::DeleteData {
+                    result: Err(status),
+                } => return (None, Some(Err(status))),
+                other => (Some(other), None),
+            }
+        })
+    }
+
     pub fn read(& mut self, offset: u64, size: u64)
                 -> Result<(Buffer, FileRevision), FileError> {
 
