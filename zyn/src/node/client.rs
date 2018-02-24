@@ -245,6 +245,21 @@ impl Status {
     }
 }
 
+struct LockContainer<'file> {
+    lock: FileLock,
+    locked_file: &'file mut OpenFile,
+}
+
+impl<'file> Drop for LockContainer<'file> {
+    fn drop(& mut self) {
+        let _ = self.locked_file.access.unlock(& self.lock)
+            .map_err(| error | {
+                error!("Failed to unlock file, error={}", map_file_error_to_uint(error))
+            })
+            ;
+    }
+}
+
 struct OpenFile {
     node_id: NodeId,
     open_mode: OpenMode,
@@ -1287,9 +1302,14 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
         return Err(());
     }
 
+    let lock_container = LockContainer {
+        lock: lock,
+        locked_file: open_file,
+    };
+
     try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
 
-    revision = match open_file.access.delete_data(revision) {
+    revision = match lock_container.locked_file.access.delete_data(revision) {
         Ok(r) => r,
         Err(error) => {
             try_send_response_without_fields!(client, transaction_id, map_file_error_to_uint(error));
@@ -1316,7 +1336,7 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
             return Err(());
         }
 
-        revision = match open_file.access.write(revision, bytes_read, buffer) {
+        revision = match lock_container.locked_file.access.write(revision, bytes_read, buffer) {
             Ok(r) => r,
             Err(error) => {
                 try_send_response_without_fields!(client, transaction_id, map_file_error_to_uint(error));
@@ -1326,11 +1346,6 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
 
         try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
         bytes_read += buffer_size;
-    }
-
-    if let Err(error) = open_file.access.unlock(& lock) {
-        error!("Failed to unlock file, user={}, error={}", user, map_file_error_to_uint(error));
-        return Err(());
     }
 
     let mut buffer = try_write_buffer!(client, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));

@@ -739,6 +739,8 @@ impl FileImpl {
 
         self.lock = Some(desc);
 
+        debug!("File locked, file={}", self.display());
+
         Ok(())
     }
 
@@ -760,6 +762,8 @@ impl FileImpl {
         if release_lock {
             self.lock = None;
         }
+
+        debug!("File unlocked, file={}", self.display());
 
         Ok(())
     }
