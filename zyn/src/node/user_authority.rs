@@ -6,6 +6,7 @@ use std::string::{ String };
 use std::vec::{ Vec };
 
 use sha2::{ Sha256, Digest };
+use rand::{ random };
 
 use node::crypto::{ Context };
 use node::common::{ Timestamp };
@@ -58,13 +59,13 @@ struct Group {
 }
 
 struct User {
+    salt: u64,
     name: String,
     expiration: Option<Timestamp>,
     password: Vec<u8>,
 }
 
 pub struct UserAuthority {
-    salt: String,
     groups: HashMap<u64, Group>,
     users: HashMap<u64, User>,
     next_user_id: u64,
@@ -72,9 +73,8 @@ pub struct UserAuthority {
 }
 
 impl UserAuthority {
-    pub fn new(salt: & str) -> UserAuthority {
+    pub fn new() -> UserAuthority {
         UserAuthority {
-            salt: String::from(salt),
             groups: HashMap::new(),
             users: HashMap::new(),
             next_user_id: 1,
@@ -117,13 +117,12 @@ impl UserAuthority {
                  -> Result<(), ()> {
 
         let mut state = SerializedUserAuthority::new(
-            self.salt.clone(),
             self.next_user_id,
             self.next_group_id
         );
 
         for (id, user) in self.users.iter() {
-            state.add_user(id.clone(), user.name.clone(), user.password.clone(), user.expiration);
+            state.add_user(id.clone(), user.salt.clone(), user.name.clone(), user.password.clone(), user.expiration);
         }
 
         for (id, group) in self.groups.iter() {
@@ -139,16 +138,17 @@ impl UserAuthority {
 
         let state = SerializedUserAuthority::read(crypto_context, & path_basename)
             ? ;
-        let (salt, next_user_id, next_group_id) = state.state();
+        let (next_user_id, next_group_id) = state.state();
 
-        let mut auth = UserAuthority::new(salt);
+        let mut auth = UserAuthority::new();
         auth.next_user_id = next_user_id;
         auth.next_group_id = next_group_id;
 
-        for & (ref id, ref name, ref password, ref serialized_expiration) in state.users_iter() {
+        for & (ref id, ref salt, ref name, ref password, ref serialized_expiration) in state.users_iter() {
             auth.users.insert(
                 id.clone(),
                 User {
+                    salt: salt.clone(),
                     name: name.clone(),
                     expiration: serialized_expiration.clone(),
                     password: password.clone(),
@@ -289,10 +289,11 @@ impl UserAuthority {
         Err(())
     }
 
-    fn hash(& self, content: & str) -> Vec<u8> {
+    fn hash(& self, content: & str, salt: u64) -> Vec<u8> {
         let mut hasher = Sha256::default();
+
         hasher.input(content.as_bytes());
-        hasher.input(self.salt.as_bytes());
+        hasher.input(format!("{}", salt).as_bytes());
 
         let result = hasher.result();
         let length = result.as_slice().len();
@@ -316,10 +317,13 @@ impl UserAuthority {
 
         let id = self.next_user_id;
         self.next_user_id += 1;
-        let hashed_password = self.hash(password);
+
+        let salt = UserAuthority::salt();
+        let hashed_password = self.hash(password, salt);
         self.users.insert(
             id,
             User {
+                salt: salt,
                 name: String::from(name),
                 expiration: expiration,
                 password: hashed_password,
@@ -354,9 +358,11 @@ impl UserAuthority {
             return Err(());
         }
 
-        let hashed_password = self.hash(password);
+        let salt = UserAuthority::salt();
+        let hashed_password = self.hash(password, salt);
         let ref mut user = self.users.get_mut(& id.id()).ok_or(()) ? ;
         user.password = hashed_password;
+        user.salt = salt;
         Ok(())
     }
 
@@ -416,11 +422,15 @@ impl UserAuthority {
             }
         }
 
-        let hashed_password = self.hash(password);
+        let hashed_password = self.hash(password, user.salt);
         if hashed_password != user.password {
             return Err(());
         }
 
         Ok(Id::User(id.clone()))
+    }
+
+    fn salt() -> u64 {
+        random::<u64>()
     }
 }

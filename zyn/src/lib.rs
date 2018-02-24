@@ -4,6 +4,7 @@ extern crate libc;
 extern crate tls_sys;
 extern crate chrono;
 extern crate sha2;
+extern crate rand;
 #[macro_use]
 extern crate log;
 extern crate serde;

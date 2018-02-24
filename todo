@@ -1,10 +1,7 @@
 # todo
- * Fix user authority hash usage
- * Implement automatic release for locks when lock goes out of scope
  * Think about when to close connection to client
  * Go trough client to make sure trace levels are consistent
  * Make sure naming of pages is consistent around system (not block)
- * When writing block file, previous version needs to be deleted
  * Cleanup responsibilities between file impl and metadata, who owns the data and who does the action
   * Cleanup file properties
  * Refactor

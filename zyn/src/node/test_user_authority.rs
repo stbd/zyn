@@ -17,7 +17,7 @@ impl State {
 
         State {
             dir: test_util::create_temp_folder(),
-            auth: UserAuthority::new("salt"),
+            auth: UserAuthority::new(),
         }
     }
 

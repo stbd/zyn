@@ -338,7 +338,7 @@ fn run() -> Result<(), ()> {
             socket_buffer_size: 1024 * 4,
         };
 
-        let mut user_authority = UserAuthority::new("fixme");
+        let mut user_authority = UserAuthority::new();
         user_authority.configure_admin_group(& ADMIN_GROUP, ADMIN_GROUP_NAME)
             .map_err(| () | error!("Failed to configure admin group"))
             ? ;

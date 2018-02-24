@@ -277,12 +277,11 @@ impl SerializedFilesystem {
 
 ////////////////////////////////////////////////////////////////////
 
-pub type UserState = (u64, String, Vec<u8>, Option<Timestamp>);
+pub type UserState = (u64, u64, String, Vec<u8>, Option<Timestamp>);
 pub type GroupState = (u64, String, Vec<(u8, u64)>, Option<Timestamp>);
 
 #[derive(Serialize, Deserialize)]
 pub struct SerializedUserAuthority {
-    salt: String,
     next_user_id: u64,
     next_group_id: u64,
     users: Vec<UserState>,
@@ -294,9 +293,8 @@ impl SerializedUserAuthority {
         1
     }
 
-    pub fn new(salt: String, next_user_id: u64, next_group_id: u64) -> SerializedUserAuthority {
+    pub fn new(next_user_id: u64, next_group_id: u64) -> SerializedUserAuthority {
         SerializedUserAuthority {
-            salt: salt,
             next_user_id: next_user_id,
             next_group_id: next_group_id,
             users: Vec::new(),
@@ -304,8 +302,8 @@ impl SerializedUserAuthority {
         }
     }
 
-    pub fn add_user(& mut self, id: u64, name: String, password: Vec<u8>, expiration: Option<i64>) {
-        self.users.push((id, name, password, expiration));
+    pub fn add_user(& mut self, id: u64, salt: u64, name: String, password: Vec<u8>, expiration: Option<i64>) {
+        self.users.push((id, salt, name, password, expiration));
     }
 
     pub fn add_group(& mut self, id: u64, name: String, members: Vec<(u8, u64)>, expiration: Option<i64>) {
@@ -320,8 +318,8 @@ impl SerializedUserAuthority {
         self.groups.iter()
     }
 
-    pub fn state(& self) -> (& String, u64, u64) {
-        (& self.salt, self.next_user_id, self.next_group_id)
+    pub fn state(& self) -> (u64, u64) {
+        (self.next_user_id, self.next_group_id)
     }
 
     pub fn write(& self, crypto_context: Context, path_basename: & Path)
