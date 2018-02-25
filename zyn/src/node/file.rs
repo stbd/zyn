@@ -932,6 +932,8 @@ impl FileImpl {
 
         self.is_edit_allowed(user) ? ;
 
+        self.store();
+
         for page in self.metadata.drain_pages() {
 
             let path = FileImpl::path_data(& self.path_basename, page.block_number);
