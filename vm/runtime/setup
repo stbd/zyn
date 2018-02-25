@@ -1,0 +1,8 @@
+#!/usr/bin/env python
+
+import argparse
+
+parser = argparse.ArgumentParser(description='Tools to run Zyn Docker container')
+
+args = vars(parser.parse_args())
+print(args)
