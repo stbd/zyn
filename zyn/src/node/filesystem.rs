@@ -1,4 +1,5 @@
 use std::collections::hash_map::{ DefaultHasher };
+use std::fs::{ create_dir, remove_dir_all };
 use std::hash::{ Hash, Hasher };
 use std::path::{ Path, Component, PathBuf };
 use std::result::{ Result };
@@ -197,7 +198,6 @@ impl Filesystem {
             .and_then(| node | {
                 node.to_mut_file()
             })
-
     }
 
     pub fn resolve_path_from_root(
@@ -272,12 +272,16 @@ impl Filesystem {
                 .map_err(| _ | FilesystemError::ParentIsNotFolder)
                 ? ;
 
-            let path_file = self.path_storage_folder.join(
+            let path_file_root = self.path_storage_folder.join(
                 Filesystem::hash_filename(filename)
             );
 
+            create_dir(& path_file_root)
+                .map_err(| _ | FilesystemError::HostFilesystemError)
+               ? ;
+
             let file = FileHandle::create(
-                path_file,
+                path_file_root,
                 & self.crypto.clone(),
                 user.clone(),
                 *parent_node_id,
@@ -364,7 +368,10 @@ impl Filesystem {
                 }
             }
             if let Node::File { ref mut file } = *element {
-                file.close()
+                file.close();
+                remove_dir_all(file.path())
+                    .map_err(| _error | FilesystemError::HostFilesystemError)
+                    ? ;
             }
         }
 

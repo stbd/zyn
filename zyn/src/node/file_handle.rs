@@ -96,6 +96,10 @@ pub struct FileHandle {
 }
 
 impl FileHandle {
+    fn root_path(path_folder: & PathBuf) -> PathBuf {
+        path_folder.join("root")
+    }
+
     pub fn state(& self) -> (PathBuf) {
         (self.path.clone())
     }
@@ -117,7 +121,12 @@ impl FileHandle {
             .map_err(| () | log_crypto_context_error())
             ? ;
 
-        FileService::create(& path, context, user, parent, file_type, page_size) ? ;
+        if path.is_file() {
+            return Err(());
+        }
+
+        let root_file = FileHandle::root_path(& path);
+        FileService::create(& root_file, context, user, parent, file_type, page_size) ? ;
 
         Ok(FileHandle{
             path: path,
@@ -126,7 +135,12 @@ impl FileHandle {
     }
 
     pub fn init(path: PathBuf) -> Result<FileHandle, ()> {
-        if ! FileImpl::exists(& path) {
+        if path.is_file() {
+            return Err(());
+        }
+
+        let root_file = FileHandle::root_path(& path);
+        if ! FileImpl::exists(& root_file) {
             error!("Physical file does not exist, path=\"{}\"", path.display());
             return Err(());
         }
@@ -152,7 +166,8 @@ impl FileHandle {
                 .map_err(| () | log_crypto_context_error())
                 ? ;
 
-            let metadata = Metadata::load(& self.path, & context) ? ;
+            let path_root_file = FileHandle::root_path(& self.path);
+            let metadata = Metadata::load(& path_root_file, & context) ? ;
             Ok(FileProperties::from_closed_file(metadata))
         }
     }
@@ -202,8 +217,9 @@ impl FileHandle {
     fn start_file_service(& mut self, crypto_context: Context, user: Id)
                          -> Result<FileAccess, ()>
     {
-        let metadata = Metadata::load(& self.path, & crypto_context) ? ;
-        let mut file = FileService::open(& self.path, crypto_context, metadata) ? ;
+        let path_root_file = FileHandle::root_path(& self.path);
+        let metadata = Metadata::load(& path_root_file, & crypto_context) ? ;
+        let mut file = FileService::open(& path_root_file, crypto_context, metadata) ? ;
 
         let access_1 = file.create_access(None);
         let access_2 = file.create_access(Some(user));

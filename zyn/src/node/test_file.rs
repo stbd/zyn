@@ -37,7 +37,7 @@ impl State {
     fn init_with_block_size(block_size: usize) -> State {
         test_util::init_logging();
         let dir: TempDir = test_util::create_temp_folder();
-        let path_file = dir.path().to_path_buf().join("file");
+        let path_file = dir.path().to_path_buf();
 
         let user = Id::User(1);
         let user_2 = Id::User(2);
