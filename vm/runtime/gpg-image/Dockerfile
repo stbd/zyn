@@ -3,10 +3,10 @@ FROM debian:latest
 run apt-get update \
     && apt-get install \
        gpg \
-       stress \
+       openssl \
        -y
 
 run mkdir /gpg-keys
-copy run.sh /run.sh
+copy entrypoint.sh /entrypoint.sh
 
-cmd ["/run.sh"]
+cmd ["/entrypoint.sh", "/gpg-keys"]
