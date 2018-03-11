@@ -63,8 +63,16 @@ run apt-get update \
 
 run mkdir /zyn-data
 
+# It looks like files that will mounted to container
+# need to exist before mounting
+run mkdir /zyn-configuration
+run touch /zyn-configuration/gpg-private-key
+run touch /zyn-configuration/gpg-fingerprint
+run touch /zyn-configuration/gpg-password
+run touch /zyn-configuration/cert.pem
+run touch /zyn-configuration/key.pem
+
 volume /zyn-data
-volume /zyn-configuration
 copy entrypoint.sh /entrypoint.sh
 
-cmd ["/entrypoint.sh"]
+entrypoint ["/entrypoint.sh"]

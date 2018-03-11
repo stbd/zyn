@@ -1,0 +1,206 @@
+#!/usr/bin/env python
+
+import argparse
+import base64
+import getpass
+import os
+import os.path
+import subprocess
+import tempfile
+
+
+PATH_DIR = os.path.dirname(os.path.abspath(__file__))
+PATH_IMAGE = PATH_DIR + '/zyn-image'
+PATH_SCRIPT_TO_PACK_ZYN_SRC = PATH_IMAGE + '/create-zyn-src-tar.sh'
+PATH_ZYN_SRC = PATH_IMAGE + '/zyn-src.tar.gz'
+IMAGE_TAG = 'zyn'
+PATH_TEMP_FOLDER = PATH_DIR + '/.tmp'
+
+
+def _base64_file_in_temp_folder(filename, content):
+    path_file = '{}/{}'.format(PATH_TEMP_FOLDER, filename)
+    with open(path_file, 'w') as fp:
+        fp.write(base64.b64encode(content))
+    return path_file
+
+
+def _delete_file(path):
+    _, _, _, _, _, _, size, _, _, _ = os.stat(path)
+    open(path, 'wb').write(os.urandom(size))
+    os.remove(path)
+
+
+def _pack_zyn_src():
+    process = subprocess.Popen(
+        [
+            PATH_SCRIPT_TO_PACK_ZYN_SRC,
+        ],
+        cwd=PATH_DIR,
+    )
+    process.communicate()
+    if process.returncode != 0:
+        raise RuntimeError('Packing Zyn source failed')
+
+
+def _build_image(image_tag):
+    build_cmd = [
+        'docker',
+        'build',
+        '-t',
+        image_tag,
+        PATH_IMAGE
+    ]
+
+    process = subprocess.Popen(
+        build_cmd,
+        cwd=PATH_DIR,
+    )
+    process.communicate()
+    if process.returncode != 0:
+        raise RuntimeError('Building image failed')
+
+def _main():
+    parser = argparse.ArgumentParser(
+        description='Tools to run Zyn server in Docker container'
+    )
+    parser.add_argument(
+        'path-private-key',
+        help='Path to exported GPG private key that will be used for encryption'
+    )
+    parser.add_argument(
+        'gpg-fingerprint',
+        help='Fingerprint of the key used for encrypting'
+    )
+    parser.add_argument(
+        'path-cert-pem',
+        help='Path to exported certifcation pem file that will be used for TLS'
+    )
+    parser.add_argument(
+        'path-key-pem',
+        help='Path to exported key pem file that will be used for TLS'
+    )
+    parser.add_argument(
+        '--log-level',
+        choices=['trace', 'debug', 'info', 'warn', 'error'],
+        default='info',
+        help='Log level for Zyn server'
+    )
+    parser.add_argument(
+        '--init',
+        action='store_true',
+        help='Initialize system and of its settings. Required' \
+        'when server is run for the first time',
+    )
+    parser.add_argument(
+        '--daemon',
+        action='store_true',
+        help='Run server as daemon process and leave it running to background'
+    )
+    parser.add_argument( # todo: Handle
+        '--path-data',
+        default=None,
+        help='Path to folder that will be mounted to container and which will' \
+        'hold data stored by server. If left empty, data will be only in container'
+    )
+    parser.add_argument( # todo: Handle
+        '--admin-username',
+        default=None,
+        help='Username for admin account',
+    )
+    parser.add_argument( # todo: Handle
+        '--admin-password',
+        default=None,
+        help='Password for admin account',
+    )
+    parser.add_argument( # todo: Handle
+        '--admin-expiration',
+        default=None,
+        help='UTC expiration timestamp for admin account',
+    )
+    parser.add_argument(
+        '--skip-packing-src',
+        action='store_true',
+        help='Do not pack zyn sources to new tar. This usefull when working with' \
+        'Docker configuration as it avoid constantly rebuilding image',
+    )
+
+    args = vars(parser.parse_args())
+    print(args)
+
+    if not args['skip_packing_src']:
+        if os.path.exists(PATH_ZYN_SRC):
+            os.remove(PATH_ZYN_SRC)
+        _pack_zyn_src()
+
+    _build_image(IMAGE_TAG)
+
+    if not args['skip_packing_src']:
+        os.remove(PATH_ZYN_SRC)
+
+    if os.path.exists(PATH_TEMP_FOLDER):
+        print('Temp folder "{}" already exists, deleting it'.format(PATH_TEMP_FOLDER))
+        for element in os.listdir(PATH_TEMP_FOLDER):
+            _delete_file('{}/{}'.format(PATH_TEMP_FOLDER, element))
+        os.rmdir(PATH_TEMP_FOLDER)
+
+    path_fingerprint = None
+    path_password = None
+
+    try:
+        password = getpass.getpass('Password for private GPG key: ')
+        os.mkdir(PATH_TEMP_FOLDER)
+        path_fingerprint = _base64_file_in_temp_folder('file-1', args['gpg-fingerprint'])
+        path_password = _base64_file_in_temp_folder('file-2', password)
+
+        run_cmd = [
+            'docker',
+            'run',
+            '-it',
+            '-v', '{}:{}'.format(args['path-private-key'], '/zyn-configuration/gpg-private-key'),
+            '-v', '{}:{}'.format(args['path-cert-pem'], '/zyn-configuration/cert.pem'),
+            '-v', '{}:{}'.format(args['path-key-pem'], '/zyn-configuration/key.pem'),
+            '-v', '{}:{}'.format(path_fingerprint, '/zyn-configuration/gpg-fingerprint'),
+            '-v', '{}:{}'.format(path_password, '/zyn-configuration/gpg-password'),
+            '-e', 'RUST_LOG={}'.format(args['log_level']),
+            '--rm',
+        ]
+
+        if args['path_data']:
+            run_cmd += ['-v', '{}:{}'.format(args['path_data'], '/zyn-data')]
+
+        if args['daemon']:
+            run_cmd += ['--daemon']
+
+        run_cmd += ['{}:latest'.format(IMAGE_TAG)]
+
+        if args['init']:
+            run_cmd += ['--init']
+
+        if args['admin_username']:
+            run_cmd += ['--admin-username', args['admin_username']]
+
+        if args['admin_password']:
+            run_cmd += ['--admin-password', args['admin_password']]
+
+        if args['admin_expiration']:
+            # run_cmd += ['--admin-expiration', args['admin_expiration']]
+            pass
+
+        print (run_cmd)
+        process = subprocess.Popen(
+            run_cmd,
+            cwd=PATH_DIR,
+        )
+        process.communicate()
+
+    finally:
+        if os.path.exists(PATH_TEMP_FOLDER):
+            if path_fingerprint is not None:
+                _delete_file(path_fingerprint)
+            if path_password is not None:
+                _delete_file(path_password)
+            os.rmdir(PATH_TEMP_FOLDER)
+
+
+if __name__ == '__main__':
+    _main()
