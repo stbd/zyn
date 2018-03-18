@@ -5,24 +5,28 @@ authors = ["Olli Huurinainen <huurinainen.olli@gmail.com>"]
 publish = false
 
 [dependencies]
-libc = "0.2.*"
-chrono = "0.3.*"
-log = "0.3"
-env_logger = "0.3.5"
-sha2 = "0.6"
-rand = "0.4"
+libc = "=0.2.*"
+chrono = "=0.3.*"
+log = "=0.3"
+env_logger = "=0.3.5"
+rand = "=0.4"
+
+# Force to use typenum version 1.9.0 as the 1.10.0 fails to compile (at least with Rust 1.18)
+# todo: Try with latest typenum when updating to latest Rust
+typenum = "=1.9.0"
+sha2 = "=0.6"
 
 # Serialization
-serde = "1.*"
-serde_derive = "1.*"
-serde_json = "1.*"
+serde = "=1.*"
+serde_derive = "=1.*"
+serde_json = "=1.*"
 
 # Requires libgpgme: sudo apt-get install libgpgme11-dev
-gpgme-sys = "0.2.0"
-libgpg-error-sys = "0.1.2"
+gpgme-sys = "=0.2.0"
+libgpg-error-sys = "=0.1.2"
 
 # Requires libssl: see env/scripts/install-libsll-debian.sh
-tls-sys="0.1.0"
+tls-sys = "=0.1.0"
 
 [dev-dependencies]
-tempdir = "0.3"
+tempdir = "=0.3"
