@@ -80,6 +80,12 @@ def _main():
         help='Path to exported key pem file that will be used for TLS'
     )
     parser.add_argument(
+        '--bind-to',
+        default="localhost:8080",
+        type=str,
+        help='IP and/or port pair to which bind server'
+    )
+    parser.add_argument(
         '--log-level',
         choices=['trace', 'debug', 'info', 'warn', 'error'],
         default='info',
@@ -162,6 +168,8 @@ def _main():
             '-v', '{}:{}'.format(path_fingerprint, '/zyn-configuration/gpg-fingerprint'),
             '-v', '{}:{}'.format(path_password, '/zyn-configuration/gpg-password'),
             '-e', 'RUST_LOG={}'.format(args['log_level']),
+            '-p', '{}:8080/tcp'.format(args['bind_to']),
+            '--memory', '2g',  # todo: parametritize
             '--rm',
         ]
 
@@ -172,6 +180,9 @@ def _main():
             run_cmd += ['--daemon']
 
         run_cmd += ['{}:latest'.format(IMAGE_TAG)]
+
+        # Address to which Zyn server is bound inside Docker container
+        run_cmd += ['--local-address', '172.17.0.2']
 
         if args['init']:
             run_cmd += ['--init']
