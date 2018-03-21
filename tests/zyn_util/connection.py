@@ -3,6 +3,8 @@ import socket
 import ssl
 import time
 
+import certifi
+
 
 FILE_TYPE_FILE = 0  # todo: Rename FILESYSTEM_ELEMENT_FILE
 FILE_TYPE_FOLDER = 1
@@ -14,25 +16,28 @@ TYPE_GROUP = 1
 
 class ZynConnection:
 
-    def __init__(self, path_key, path_cert, debug_messages=False):
-        self._path_key = path_key
-        self._path_cert = path_cert
+    def __init__(self, path_cert=None, debug_messages=False):
+        self._context = ssl.create_default_context()
+        if path_cert is not None:
+            self._context.load_verify_locations(path_cert)
         self._log = logging.getLogger(__name__)
         self._transaction_id = 1
         self._debug_messages = debug_messages
         self._input_buffer = b''
         self._notifications = []
 
-    def connect(self, remote_ip, remote_port):
+    def load_default_certificate_bundle(self):
+        self._context.load_verify_locations(certifi.where())
+
+    def connect(self, remote_address, remote_port, remote_hostname=None):
         self._socket_ = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._socket_.connect((remote_ip, remote_port))
-        self._socket = ssl.wrap_socket(
+        self._socket_.connect((remote_address, remote_port))
+        self._socket = self._context.wrap_socket(
             self._socket_,
-            keyfile=self._path_key,
-            certfile=self._path_cert
+            server_hostname=remote_hostname or remote_address,
         )
 
-        self._log.debug("Connected to {}:{}".format(remote_ip, remote_port))
+        self._log.debug("Connected to {}:{}".format(remote_address, remote_port))
 
     def disconnect(self):
         self._socket.shutdown(socket.SHUT_WR)
@@ -267,7 +272,7 @@ class ZynConnection:
         _, read_size = rsp.field(1).as_block()
         data = bytearray()
         if read_size > 0:
-            data = self.read_data(read_size, 60*10)
+            data = self.read_data(read_size)
         return rsp, data
 
     def query_list(self, node_id=None, path=None, transaction_id=None):

@@ -5,20 +5,20 @@ import zyn_util.connection
 
 class TestConnection(unittest.TestCase):
     def test_parse_1(self):
-        conn = zyn_util.connection.ZynConnection(None, None)
+        conn = zyn_util.connection.ZynConnection()
         parsed = conn.parse_message('V:1;R:U:1;;E:;')
         # parsed = conn.parse_message_2('Q:U:1;W:2;;R:U:1;;E:;')
         # print (parsed)
         self.assertEqual(parsed, [['V', 1], ['R', ['U', 1]], ['E']])
 
     def test_parse_2(self):
-        conn = zyn_util.connection.ZynConnection(None, None)
+        conn = zyn_util.connection.ZynConnection()
         parsed = conn.parse_message('V:1;Q:U:1;S:U:3;B:qwe;;;E:;')
         # print (parsed)
         self.assertEqual(parsed, [['V', 1], ['Q', ['U', 1], ['S', ['U', 3], ['B', "qwe"]]], ['E']])
 
     def test_parse_3(self):
-        conn = zyn_util.connection.ZynConnection(None, None)
+        conn = zyn_util.connection.ZynConnection()
         conn.parse_message(
             'V:1;RSP:T:U:4;;U:0;;L:U:2;LE:KVP:S:U:4;B:type;'
             ';U:1;;;LE:KVP:S:U:7;B:created;;U:1500665250;;;;;E:;'
@@ -30,7 +30,7 @@ class TestConnection(unittest.TestCase):
 class TestResponse(unittest.TestCase):
 
     def _create_response(self, msg):
-        connection = zyn_util.connection.ZynConnection(None, None)
+        connection = zyn_util.connection.ZynConnection()
         parsed = connection.parse_message(msg)
         return zyn_util.connection.Response(parsed)
 
@@ -85,7 +85,7 @@ class TestResponse(unittest.TestCase):
 class TestNotification(unittest.TestCase):
 
     def _create_notification(self, msg):
-        connection = zyn_util.connection.ZynConnection(None, None)
+        connection = zyn_util.connection.ZynConnection()
         parsed = connection.parse_message(msg)
         return zyn_util.connection.Notification(parsed)
 

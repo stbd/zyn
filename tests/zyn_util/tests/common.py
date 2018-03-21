@@ -15,6 +15,7 @@ PATH_BIN = PATH_FILE + '/../../../zyn/target/debug/zyn'
 PATH_CERT = os.path.expanduser("~/.zyn-certificates/cert.pem")
 PATH_KEY = os.path.expanduser("~/.zyn-certificates/key.pem")
 PATH_GPG_FINGERPRINT = os.path.expanduser("~/.zyn-test-user-gpg-fingerprint")
+DEFAULT_TLS_REMOTE_HOSTNAME = 'zyn'
 
 HOUR_SECONDS = 60 * 60
 DAY_SECONDS = HOUR_SECONDS * 24
@@ -102,18 +103,19 @@ class TestZyn(unittest.TestCase):
 
     def _create_connection_and_connect(
             self,
-            path_key=None,
             path_cert=None,
             remote_port=None,
             remote_ip=None,
+            remote_hostname=DEFAULT_TLS_REMOTE_HOSTNAME
     ):
         connection = zyn_util.connection.ZynConnection(
-            path_key or PATH_KEY,
             path_cert or PATH_CERT
+
         )
         connection.connect(
             remote_ip or self._remote_ip,
-            remote_port or self._remote_port
+            remote_port or self._remote_port,
+            remote_hostname=remote_hostname,
         )
         return connection
 

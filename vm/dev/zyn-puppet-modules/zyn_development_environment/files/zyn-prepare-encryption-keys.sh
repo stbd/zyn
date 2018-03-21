@@ -110,7 +110,7 @@ function create_certificate() {
                 -days 3650 \
                 -out "$path_certificates_folder"/cert.pem \
                 -keyout "$path_certificates_folder"/key.pem \
-                -subj "/C=gb/O=zyn/CN=zyn/emailAddress=tester@invalid.com"
+                -subj "/C=gb/O=$hostname/CN=$hostname/emailAddress=tester@invalid.com"
     fi
 
 }
@@ -123,6 +123,7 @@ fi
 path_user_home=$1
 username=tester
 password=pass
+hostname=zyn
 path_gpg_agent_env_settings=$path_user_home/.zyn-gpg-agent-env-settings
 path_gpg_fingerprint=$path_user_home/.zyn-test-user-gpg-fingerprint
 path_gpg_agent_start_cmd=$path_user_home/.zyn-gpg-agent-start-cmd

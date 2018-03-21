@@ -195,14 +195,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('username', help='Username')
     parser.add_argument('--password', '-p', help='Username')
-    parser.add_argument('remote-ip', help='')
+    parser.add_argument('remote-address', help='')
     parser.add_argument('remote-port', help='', type=int)
-    parser.add_argument('path-to-key', help='')
-    parser.add_argument('path-to-cert', help='')
 
     parser.add_argument('path-data-dir', help='')
     parser.add_argument('path-work-dir', help='')
 
+    parser.add_argument('--path-to-cert', help='', default=None)
     parser.add_argument('--debug-protocol', help='', action='store_true')
     parser.add_argument('--verbose', '-v', action='count', default=0)
 
@@ -220,12 +219,12 @@ if __name__ == '__main__':
         password = getpass.getpass('Password: ')
 
     connection = zyn_util.connection.ZynConnection(
-        args['path-to-key'],
-        args['path-to-cert'],
+        args['path_to_cert'],
         args['debug_protocol'],
     )
+    connection.load_default_certificate_bundle()
     connection.connect(
-        args['remote-ip'],
+        args['remote-address'],
         args['remote-port'],
     )
 
