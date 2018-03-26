@@ -143,8 +143,10 @@ class TestCommon(TestZyn):
             connection.read_message()
 
     def _start_node(self):
+        server_workdir = self._work_dir.name + '/server'
+        os.mkdir(server_workdir)
         self._process = self._start_server(
-            self._work_dir.name,
+            server_workdir,
             init=True
         )
 
