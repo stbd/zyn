@@ -13,3 +13,5 @@
 
 ## Issues
  * It is possible to create file/folder with name that already exists under parent
+ * Think about how to handle reopening file
+  * Could user promote file from read mode to write mode?
