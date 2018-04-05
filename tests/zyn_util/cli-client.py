@@ -4,9 +4,13 @@ import getpass
 import logging
 import os.path
 import sys
+import datetime
 
 import zyn_util.connection
 import zyn_util.client
+
+
+PATH_TO_DEFAULT_STATE_FILE = os.path.expanduser("~/.zyn-cli-client")
 
 
 class ZynCliClient(cmd.Cmd):
@@ -35,13 +39,13 @@ class ZynCliClient(cmd.Cmd):
 
         self.prompt = '{}:{} {}$ '.format("127.0.0.1", "1234", current_folder)
 
-    def _to_absolute_remote_path(self, filename):
-        if os.path.isabs(filename):
-            return filename
+    def _to_absolute_remote_path(self, path):
+        if os.path.isabs(path):
+            return path
 
         if self._pwd == '/':
-            return '/' + filename
-        return self._pwd + '/' + filename
+            return '/' + path
+        return self._pwd + '/' + path
 
     def _file_type_to_string(self, file_type):
         if file_type == zyn_util.connection.FILE_TYPE_RANDOM_ACCESS:
@@ -89,8 +93,8 @@ class ZynCliClient(cmd.Cmd):
         self._log.debug('Creating random access file, path="{}"'.format(path))
 
         try:
-            node_id = self._client.create_random_access_file(path)
-            print('File "{}" created successfully with Node Id {}'.format(path, node_id))
+            rsp = self._client.create_random_access_file(path)
+            print('"{}" created, Node Id: {}'.format(path, rsp.node_id))
         except zyn_util.client.ZynClientException as e:
             print(e)
             return
@@ -103,50 +107,12 @@ class ZynCliClient(cmd.Cmd):
             print('Invalid arguments: expected folder name')
             return
 
-        path = self._to_absolute_remote_path(args[0])
         try:
-            node_id = self._client.create_folder(path)
-            print('Folder "{}" created successfully with Node Id {}'.format(path, node_id))
-        except zyn_util.client.ZynClientException as e:
-            print(e)
-            return
+            path = self._to_absolute_remote_path(args[0])
+            self._log.debug('Creating folder, path={}'.format(path))
 
-    def do_fetch(self, args):
-        'Fetch remote file to local machine: [String: filename]'
-
-        args = self._parse_args(args)
-        if len(args) != 1:
-            print('Invalid arguments: expected filename')
-            return
-
-        path = self._to_absolute_remote_path(args[0])
-        print('Fetching file, path={}'.format(path))
-
-        try:
-            node_id, revision, size, file_type, path_in_data = self._client.fetch(path)
-            print('File "{}" fetched to "{}" successfully'.format(path, path_in_data))
-            print('Node Id: {}, revision: {}, size: {}, type: {}'.format(
-                node_id, revision, size, self._file_type_to_string(file_type)))
-
-        except zyn_util.client.ZynClientException as e:
-            print(e)
-            return
-
-    def do_sync(self, args):
-        'Synchronize local changes to remote: [String: filename]'
-
-        args = self._parse_args(args)
-        if len(args) != 1:
-            print('Invalid arguments: expected filename')
-            return
-
-        path = self._to_absolute_remote_path(args[0])
-        print('Synchronizing, path={}'.format(path))
-
-        try:
-            revision = self._client.sync(path)
-            print('File {} synchronized to revision {}'.format(path, revision))
-
+            rsp = self._client.create_folder(path)
+            print('"{}" created, Node Id: {}'.format(path, rsp.node_id))
         except zyn_util.client.ZynClientException as e:
             print(e)
             return
@@ -164,14 +130,62 @@ class ZynCliClient(cmd.Cmd):
             return
 
         try:
-            for element in self._client.query_list(path):
-                print(element)  # todo: format
+            rsp = self._client.connection().query_list(path=path)
+            zyn_util.client.check_rsp(rsp)
+            rsp = rsp.as_query_list_rsp()
+            print('{:6} {:7} {}'.format('Type', 'Node Id', 'Name'))
+            for element in rsp.elements:
+                type_of = 'file'
+                name = element.name
+                if element.type_of_element == zyn_util.connection.FILE_TYPE_FOLDER:
+                    type_of = 'dir'
+                    name += '/'
+                print('{:<6} {:<7} {}'.format(type_of, element.node_id, name))
+
         except zyn_util.client.ZynClientException as e:
+            print(e)
+
+    def do_modify_user(self, args):
+        '''Modify user: [string: username] [--expiration [String: datetime]]
+[--expiration-format: [String: format, default='%d.%m.%Y']]
+        '''
+        parser = argparse.ArgumentParser()
+        parser.add_argument('username', type=str)
+        parser.add_argument('--expiration', type=str)
+        parser.add_argument('--expiration-format', type=str, default='%d.%m.%Y')
+        try:
+            # print (args, type(args))
+            args = vars(parser.parse_args(self._parse_args(args)))
+        except SystemExit as e:
             print(e)
             return
 
-    def do_delete_local_file(self, args):
-        'Delete file from local filesystem: [String: path]'
+        # print (args)
+
+        password = None
+        expiration = args['expiration']
+        username = args['username']
+
+        if password is None and expiration is None:
+            print('Please specify modified value')
+            return
+
+        if expiration is not None:
+            expiration = int(datetime.datetime.strptime(
+                expiration,
+                args['expiration_format'],
+            ).timestamp())
+
+        rsp = self._client.connection().modify_user(
+            username=username,
+            expiration=expiration,
+            password=password
+        )
+        zyn_util.client.check_rsp(rsp)
+        print('Ok')
+
+    def do_fetch(self, args):
+        'Fetch remote file to local machine: [String: filename]'
 
         args = self._parse_args(args)
         if len(args) != 1:
@@ -179,8 +193,31 @@ class ZynCliClient(cmd.Cmd):
             return
 
         path = self._to_absolute_remote_path(args[0])
+        print('Fetching file, path={}'.format(path))
+
         try:
-            self._client.remove_local_file(path)
+            file = self._client.fetch(path)
+            print('File "{}" fetched to "{}" successfully'.format(file._path_in_remote, 'FIXME'))
+
+        except zyn_util.client.ZynClientException as e:
+            print(e)
+            return
+
+    def do_sync(self, args):
+        'Synchronize local changes to remote: [String: filename]'
+
+        args = self._parse_args(args)
+        if len(args) != 1:
+            print('Invalid arguments: expected filename')
+            return
+
+        path = self._to_absolute_remote_path(args[0])
+        print('Synchronizing, path={}'.format(path))
+
+        try:
+            self._client.sync(path)
+            print('File {} synchronized to revision {}'.format(path, None))
+
         except zyn_util.client.ZynClientException as e:
             print(e)
             return
@@ -197,13 +234,12 @@ if __name__ == '__main__':
     parser.add_argument('--password', '-p', help='Username')
     parser.add_argument('remote-address', help='')
     parser.add_argument('remote-port', help='', type=int)
-
-    parser.add_argument('path-data-dir', help='')
-    parser.add_argument('path-work-dir', help='')
-
+    parser.add_argument('--init-data-directory-at', help='')
     parser.add_argument('--path-to-cert', help='', default=None)
+    parser.add_argument('--path-to-client-file', help='', default=PATH_TO_DEFAULT_STATE_FILE)
     parser.add_argument('--debug-protocol', help='', action='store_true')
     parser.add_argument('--verbose', '-v', action='count', default=0)
+    parser.add_argument('--remote-hostname', default=None)
 
     args = vars(parser.parse_args())
 
@@ -214,6 +250,34 @@ if __name__ == '__main__':
         level=args['verbose'],
     )
 
+    path_data = args['init_data_directory_at']
+    path_state_file = args['path_to_client_file']
+
+    if path_data is not None and os.path.exists(path_state_file):
+        raise NotImplementedError()
+        sys.exit(1)
+
+    if not os.path.exists(path_state_file):
+        print('Zyn client file "{}" does not exist,'
+              ' file will be created and client initialized'.format(
+                  path_state_file
+              ))
+
+        if path_data is None:
+            print('To initialize the client, please pass'
+                  ' --init-data-directory-at [path-to-data-directory]')
+            sys.exit(1)
+
+        answer = input('yes/no? ')
+        if answer.lower() == 'yes':
+            zyn_util.client.ZynFilesystemClient.init_state_file(
+                path_state_file,
+                path_data,
+            )
+        else:
+            print('Aborting initialization')
+            sys.exit(1)
+
     password = args['password']
     if password is None:
         password = getpass.getpass('Password: ')
@@ -222,20 +286,24 @@ if __name__ == '__main__':
         args['path_to_cert'],
         args['debug_protocol'],
     )
-    connection.load_default_certificate_bundle()
+
+    if args['path_to_cert'] is None:
+        connection.load_default_certificate_bundle()
+
     connection.connect(
         args['remote-address'],
         args['remote-port'],
+        args['remote_hostname'],
     )
 
     client = zyn_util.client.ZynFilesystemClient(
         connection,
-        args['path-data-dir'],
-        args['path-work-dir'],
+        args['path_to_client_file'],
     )
 
     try:
-        client.authenticate(args['username'], password)
+        rsp = client.connection().authenticate(args['username'], password)
+        zyn_util.client.check_rsp(rsp)
     except zyn_util.client.ZynClientException as e:
         print(e)
         sys.exit(1)

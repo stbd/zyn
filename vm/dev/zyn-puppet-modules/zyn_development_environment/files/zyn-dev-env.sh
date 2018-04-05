@@ -74,9 +74,10 @@ function zyn-run-cli-client() {
             admin \
             127.0.0.1 \
             4433 \
-            $HOME/.zyn-certificates/key.pem \
-            $HOME/.zyn-certificates/cert.pem \
+            --path-to-cert $HOME/.zyn-certificates/cert.pem \
             -p admin \
+            --debug-protocol \
+            --remote-hostname zyn \
             $@
 }
 
