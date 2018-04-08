@@ -850,6 +850,12 @@ class QueryElement:
         self.type_of_element = type_of_element
         _validate_file_system_element_type(self.type_of_element)
 
+    def is_file(self):
+        return self.type_of_element == FILE_TYPE_FILE
+
+    def is_directory(self):
+        return self.type_of_element == FILE_TYPE_FOLDER
+
 
 class QueryListResponse:
     def __init__(self, response):

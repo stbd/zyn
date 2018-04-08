@@ -1,8 +1,9 @@
 import difflib
+import glob
+import hashlib
 import json
 import logging
 import os.path
-import hashlib
 
 import zyn_util.errors
 
@@ -37,6 +38,22 @@ def _split_path(path):  # todo: rename?
 
 def _join_paths(path_1, path_2):
     return '{}/{}'.format(path_1, path_2)
+
+
+def _join_paths_(list_of_paths):
+    path = os.path.normpath('/'.join(list_of_paths))
+    if path.startswith('//'):
+        path = path[1:]
+    return path
+
+
+class FileState:
+    def __init__(self, file, path_data):
+        self.revision = file._revision
+        self.node_id = file._node_id
+        self.revision = file._revision
+        self.path_remote = file._path_in_remote
+        self.path_local = file.path_to_local_file(path_data)
 
 
 class LocalFile:
@@ -172,6 +189,32 @@ class LocalFile:
                 close_rsp = connection.close_file(open_rsp.node_id)
                 check_rsp(close_rsp)
 
+    def push(self, connection, path_data_root):
+
+        path_local = self.path_to_local_file(path_data_root)
+        try:
+            open_rsp = connection.open_file_write(path=self._path_in_remote)
+            check_rsp(open_rsp)
+            open_rsp = open_rsp.as_open_rsp()
+            if not self.is_initialized():
+                self._node_id = open_rsp.node_id
+                self._file_type = open_rsp.type_of_element
+                self._revision = open_rsp.revision
+
+            if open_rsp.size > 0:
+                raise ZynClientException('Remote file was not empty')
+
+            local_data = open(path_local, 'rb').read()
+            if len(local_data) > 0:
+                rsp = connection.ra_insert(self._node_id, self._revision, 0, local_data)
+                check_rsp(rsp)
+                self._revision = rsp.as_insert_rsp().revision
+
+        finally:
+            if open_rsp is not None:
+                close_rsp = connection.close_file(open_rsp.node_id)
+                check_rsp(close_rsp)
+
     def fetch(self, connection, path_data_root):
 
         path_local = self.path_to_local_file(path_data_root)
@@ -265,7 +308,7 @@ class ZynFilesystemClient:
         return self._connection
 
     def file(self, path_in_remote):
-        return self._local_files[path_in_remote]
+        return FileState(self._local_files[path_in_remote], self._path_data)
 
     def _load(self):
         self._log.info('Loading client state, path="{}"'.format(self._path_state))
@@ -324,7 +367,6 @@ class ZynFilesystemClient:
 
         file.fetch(self._connection, self._path_data)
         self._local_files[path_in_remote] = file
-        return file
 
     def sync(self, path_in_remote):
 
@@ -348,3 +390,65 @@ class ZynFilesystemClient:
         ))
 
         file.sync(self._connection, self._path_data, self._log)
+
+    def list(self, path_parent):
+
+        # todo: handle case where node id is used
+
+        rsp = self._connection.query_list(path=path_parent)
+        check_rsp(rsp)
+        rsp = rsp.as_query_list_rsp()
+
+        local_files = [
+            os.path.basename(p)
+            for p in glob.glob(_join_paths_([self._path_data, path_parent, '*']))
+        ]
+
+        self._log.debug('Found local files: {}'.format(local_files))
+
+        class Localfile:
+            def __init__(self, exists, tracked):
+                self.tracked = tracked
+                self.exists_locally = exists
+
+        class Element:
+            def __init__(self, remote_file, local_file):
+                self.remote_file = remote_file
+                self.local_file = local_file
+
+        elements = []
+        for element in rsp.elements:
+            exists_locally = False
+            tracked = False
+            file_path = _join_paths_([path_parent, element.name])
+
+            if file_path in self._local_files:
+                file = self._local_files[file_path]
+                if file.exists_locally(self._path_data):
+                    exists_locally = True
+                    tracked = True
+                    local_files.remove(element.name)
+            else:
+                if element.name in local_files:
+                    exists_locally = True
+                    local_files.remove(element.name)
+
+            elements.append(Element(element, Localfile(exists_locally, tracked)))
+
+        return elements, [_join_paths_([path_parent, f]) for f in local_files]
+
+    def add(self, path_in_remote):
+
+        rsp = self._connection.query_list(path=path_in_remote)
+        if rsp.error_code() == zyn_util.errors.InvalidPath:
+            exists = False
+        else:
+            exists = True
+
+        if exists:
+            raise ZynClientException('File "{}" already exists'.format(path_in_remote))
+
+        self.create_random_access_file(path_in_remote)
+        file = LocalFile(path_in_remote)
+        file.push(self._connection, self._path_data)
+        self._local_files[path_in_remote] = file

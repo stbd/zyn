@@ -9,6 +9,13 @@ def _join_paths(path_1, path_2):
     return '{}/{}'.format(path_1, path_2)
 
 
+def _join_paths_(list_of_paths):
+    path = os.path.normpath('/'.join(list_of_paths))
+    if path.startswith('//'):
+        path = path[1:]
+    return path
+
+
 class ClientState:
     def __init__(self, path_workdir, path_state_file, path_data, zyn_client):
         self.path_workdir = path_workdir
@@ -30,6 +37,14 @@ class ClientState:
         assert os.path.exists(path_file)
         data = text_content.encode('utf-8')
         open(path_file, 'wb').write(data)
+
+    def create_directory(self, path_remote):
+        path_local = _join_paths(self.path_data, path_remote)
+        os.makedirs(path_local)
+
+    def create_local_file(self, path_remote):
+        path_local = _join_paths_([self.path_data, path_remote])
+        open(path_local, 'w')
 
 
 class TestClient(zyn_util.tests.common.TestCommon):
@@ -117,3 +132,56 @@ class TestClient(zyn_util.tests.common.TestCommon):
         client_state_1.write_local_file_text(path_in_remote, data_1)
         client_state_1.client.sync(path_in_remote)
         client_state_2.client.sync(path_in_remote)
+
+    def _validate_tracked_file(self, tracked_files, name, exists_locally, tracked):
+        for f in tracked_files:
+            if f.remote_file.name != name:
+                continue
+            self.assertEqual(f.local_file.tracked, tracked)
+            self.assertEqual(f.local_file.exists_locally, exists_locally)
+            return
+        self.assertFalse('tracked file not found')
+
+    def _name_to_remote_path(self, filename, path_parent='/'):
+        path = _join_paths_([path_parent, filename])
+        return filename, path
+
+    def test_list(self):
+        client_state_1 = self._start_server_and_create_client(1)
+        remote_tracked_1, path_remote_tracked_1 = self._name_to_remote_path('tracked_file-1')
+        remote_tracked_2, path_remote_tracked_2 = self._name_to_remote_path('tracked_file-2')
+        remote_tracked_3, path_remote_tracked_3 = self._name_to_remote_path('tracked_file-3')
+        remote_untracked_1, path_remote_untracked_1 = self._name_to_remote_path('untracked_file-1')
+
+        client_state_1.client.create_random_access_file(path_remote_tracked_1)
+        client_state_1.client.fetch(path_remote_tracked_1)
+
+        client_state_1.client.create_random_access_file(path_remote_tracked_2)
+        client_state_1.create_local_file(path_remote_tracked_2)
+
+        client_state_1.client.create_random_access_file(path_remote_tracked_3)
+
+        client_state_1.create_local_file(path_remote_untracked_1)
+
+        tracked_files, untracked_files = client_state_1.client.list('/')
+        self.assertEqual(len(tracked_files), 3)
+        self._validate_tracked_file(
+            tracked_files, remote_tracked_1, exists_locally=True, tracked=True)
+        self._validate_tracked_file(
+            tracked_files, remote_tracked_2, exists_locally=True, tracked=False)
+        self._validate_tracked_file(
+            tracked_files, remote_tracked_3, exists_locally=False, tracked=False)
+        self.assertEqual(len(untracked_files), 1)
+        self.assertTrue(remote_untracked_1 in untracked_files)
+
+    def test_add(self):
+        client_state = self._start_server_and_create_client(1)
+        path_remote_1 = '/file-1'
+        path_remote_2 = '/file-2'
+
+        client_state.create_local_file(path_remote_1)
+        client_state.client.add(path_remote_1)
+
+        client_state.create_local_file(path_remote_2)
+        client_state.write_local_file_text(path_remote_2, 'Hello')
+        client_state.client.add(path_remote_2)

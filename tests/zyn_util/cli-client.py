@@ -13,6 +13,10 @@ import zyn_util.client
 PATH_TO_DEFAULT_STATE_FILE = os.path.expanduser("~/.zyn-cli-client")
 
 
+def _command_completed():
+    print('Command completed successfully')
+
+
 class ZynCliClient(cmd.Cmd):
     intro = 'Zyn CLI client, type "help" for help'
     prompt = ' '
@@ -117,52 +121,101 @@ class ZynCliClient(cmd.Cmd):
             print(e)
             return
 
-    def do_list(self, args):
-        'List folder content: [String: path, default=pwd]'
+    def _parser_list(self):
+        parser = argparse.ArgumentParser(prog='list')
+        parser.add_argument('--path', type=str)
+        parser.add_argument('--show-local-files', action='store_false')  # todo: fixme, use
+        return parser
 
-        args = self._parse_args(args)
-        if len(args) == 0:
-            path = self._pwd
-        elif len(args) == 1:
-            path = self._to_absolute_remote_path(args[0])
+    def help_list(self):
+        print(self._parser_list().format_help())
+
+    def do_list(self, args):
+        parser = self._parser_list()
+        args = vars(parser.parse_args(self._parse_args(args)))
+
+        path = args['path']
+        if path is None:
+            path_remote = self._pwd
         else:
-            print('Invalid arguments: expected filename')
+            path_remote = self._to_absolute_remote_path(path)
+
+        tracked_files, untracked_files = self._client.list(path_remote)
+
+        print()
+        print('{:6} {:8} {:12} {}'.format('Type', 'Node Id', 'Local file', 'Name'))
+        for f in sorted(tracked_files, key=lambda e: e.remote_file.is_file()):
+            name = f.remote_file.name
+            type_of = 'file'
+            if f.remote_file.is_directory():
+                name += '/'
+                type_of = 'dir'
+
+            if f.remote_file.is_file():
+                state = None
+                if f.local_file.exists_locally and f.local_file.tracked:
+                    state = 'Tracked'
+                elif f.local_file.exists_locally and not f.local_file.tracked:
+                    state = 'Conflict'
+                elif not f.local_file.exists_locally and f.local_file.tracked:
+                    state = 'Out of sync'
+                elif not f.local_file.exists_locally and not f.local_file.tracked:
+                    state = 'Not fetched'
+
+                if state is None:
+                    raise RuntimeError()
+            else:
+                state = ''
+
+            print('{:<6} {:<8} {:<12} {}'.format(type_of, f.remote_file.node_id, state, name))
+
+        if len(untracked_files) == 0:
             return
 
-        try:
-            rsp = self._client.connection().query_list(path=path)
-            zyn_util.client.check_rsp(rsp)
-            rsp = rsp.as_query_list_rsp()
-            print('{:6} {:7} {}'.format('Type', 'Node Id', 'Name'))
-            for element in rsp.elements:
-                type_of = 'file'
-                name = element.name
-                if element.type_of_element == zyn_util.connection.FILE_TYPE_FOLDER:
-                    type_of = 'dir'
-                    name += '/'
-                print('{:<6} {:<7} {}'.format(type_of, element.node_id, name))
+        print()
+        print('Untracked files:')
+        for f in untracked_files:
+            print(f)
 
-        except zyn_util.client.ZynClientException as e:
-            print(e)
+    def _parser_add(self):
+        parser = argparse.ArgumentParser(prog='add')
+        parser.add_argument('file', type=str)
+        return parser
 
-    def do_modify_user(self, args):
-        '''Modify user: [string: username] [--expiration [String: datetime]]
-[--expiration-format: [String: format, default='%d.%m.%Y']]
-        '''
-        parser = argparse.ArgumentParser()
+    def help_add(self):
+        print(self._parser_add().format_help())
+
+    def do_add(self, args):
+        parser = self._parser_add()
+        args = vars(parser.parse_args(self._parse_args(args)))
+        file = args['file']
+        path_remote = self._to_absolute_remote_path(file)
+        self._client.add(path_remote)
+
+        file = self._client.file(path_remote)
+        print('File "{}" (Node Id: {}, revision: {}) pushed remote successfully'.format(
+            file.path_remote,
+            file.node_id,
+            file.revision,
+        ))
+
+    def _parser_modify_user(self):
+        parser = argparse.ArgumentParser(prog='modify_user')
         parser.add_argument('username', type=str)
         parser.add_argument('--expiration', type=str)
         parser.add_argument('--expiration-format', type=str, default='%d.%m.%Y')
-        try:
-            # print (args, type(args))
-            args = vars(parser.parse_args(self._parse_args(args)))
-        except SystemExit as e:
-            print(e)
-            return
+        return parser
+
+    def help_modify_user(self):
+        print(self._parser_modify_user().format_help())
+
+    def do_modify_user(self, args):
+        parser = self._parser_modify_user()
+        args = vars(parser.parse_args(self._parse_args(args)))
 
         # print (args)
 
-        password = None
+        password = None  # todo: implement
         expiration = args['expiration']
         username = args['username']
 
@@ -182,26 +235,32 @@ class ZynCliClient(cmd.Cmd):
             password=password
         )
         zyn_util.client.check_rsp(rsp)
-        print('Ok')
+        _command_completed()
+
+    def _parser_fetch(self):
+        parser = argparse.ArgumentParser(prog='fetch')
+        parser.add_argument('file', type=str)
+        return parser
+
+    def help_fetch(self):
+        print(self._parser_fetch().format_help())
 
     def do_fetch(self, args):
-        'Fetch remote file to local machine: [String: filename]'
+        parser = self._parser_fetch()
+        args = vars(parser.parse_args(self._parse_args(args)))
 
-        args = self._parse_args(args)
-        if len(args) != 1:
-            print('Invalid arguments: expected filename')
-            return
+        file = args['file']
+        path_remote = self._to_absolute_remote_path(file)
 
-        path = self._to_absolute_remote_path(args[0])
-        print('Fetching file, path={}'.format(path))
-
-        try:
-            file = self._client.fetch(path)
-            print('File "{}" fetched to "{}" successfully'.format(file._path_in_remote, 'FIXME'))
-
-        except zyn_util.client.ZynClientException as e:
-            print(e)
-            return
+        print('Fetching file, path={}'.format(path_remote))
+        self._client.fetch(path_remote)
+        file = self._client.file(path_remote)
+        print('File "{}" (Node Id: {}, revision: {}) fetched to "{}" successfully'.format(
+            file.path_remote,
+            file.node_id,
+            file.revision,
+            file.path_local
+        ))
 
     def do_sync(self, args):
         'Synchronize local changes to remote: [String: filename]'
@@ -220,7 +279,6 @@ class ZynCliClient(cmd.Cmd):
 
         except zyn_util.client.ZynClientException as e:
             print(e)
-            return
 
     def do_exit(self, _):
         'Close connection and exit client'
@@ -308,10 +366,20 @@ if __name__ == '__main__':
         print(e)
         sys.exit(1)
 
-    print('Successfully connected and authenticated')
+    print('Successfully connected to Zyn server and authenticated')
 
     cli = ZynCliClient(client)
-    try:
-        cli.cmdloop()
-    finally:
-        client.store()
+    while True:
+        try:
+            cli.cmdloop()
+        except zyn_util.client.ZynException as e:
+            print('Exception while processing command')
+            print(e)
+        except KeyboardInterrupt:
+            break
+        except SystemExit as e:
+            print(e)
+        finally:
+            print()
+            print('Storing Zyn state')
+            client.store()
