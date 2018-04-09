@@ -59,12 +59,15 @@ pub struct FilesystemElementAuthority {
 pub enum FilesystemElement {
     File {
         properties: FileProperties,
-        authority: FilesystemElementAuthority
+        authority: FilesystemElementAuthority,
+        node_id: NodeId,
+
     },
     Folder {
         created_at: Timestamp,
         modified_at: Timestamp,
         authority: FilesystemElementAuthority,
+        node_id: NodeId,
     },
 }
 
@@ -870,6 +873,7 @@ impl Node {
                             read: read,
                             write: write,
                         },
+                        node_id: node_id,
                     };
 
                     auth.is_authorized(& folder.read(), & user, utc_timestamp())
@@ -899,6 +903,7 @@ impl Node {
                 read: read,
                 write: write,
             },
+            node_id: node_id,
         };
 
         auth.is_authorized(& file_auth.read, & user, utc_timestamp())

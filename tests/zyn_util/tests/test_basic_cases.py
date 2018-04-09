@@ -80,6 +80,7 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         self._validate_response(rsp, c)
         open_rsp = rsp.as_open_rsp()
         self.assertEqual(create_rsp.node_id, open_rsp.node_id)
+        self.assertNotEqual(open_rsp.block_size, 0)
         rsp = c.close_file(create_rsp.node_id)
         self._validate_response(rsp, c)
 
@@ -98,7 +99,7 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
     def test_open_write_with_node_id_and_close_file(self):
         self._open_close(use_node_id=True, write=True)
 
-    def _validate_query_response(
+    def _validate_query_list_response(
             self,
             element,
             expected_name,
@@ -125,19 +126,19 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         index_file_2 = names.index('file-2')
         index_folder = names.index('folder-1')
 
-        self._validate_query_response(
+        self._validate_query_list_response(
             query_rsp.elements[index_file_1],
             'file-1',
             create_rsp_file_1.node_id,
             zyn_util.connection.FILE_TYPE_FILE
         )
-        self._validate_query_response(
+        self._validate_query_list_response(
             query_rsp.elements[index_file_2],
             'file-2',
             create_rsp_file_2.node_id,
             zyn_util.connection.FILE_TYPE_FILE
         )
-        self._validate_query_response(
+        self._validate_query_list_response(
             query_rsp.elements[index_folder],
             'folder-1',
             create_rsp_folder.node_id,
@@ -151,6 +152,8 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         self._validate_response(rsp, c)
         query_rsp = rsp.as_query_filesystem_rsp()
         self.assertEqual(query_rsp.type_of_element, zyn_util.connection.FILE_TYPE_FILE)
+        self.assertEqual(query_rsp.node_id, create_rsp.node_id)
+        self.assertNotEqual(query_rsp.block_size, 0)
 
     def test_query_filesystem_folder(self):
         c = self._start_and_connect_to_node_and_handle_auth()
@@ -159,6 +162,7 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         self._validate_response(rsp, c)
         query_rsp = rsp.as_query_filesystem_rsp()
         self.assertEqual(query_rsp.type_of_element, zyn_util.connection.FILE_TYPE_FOLDER)
+        self.assertEqual(query_rsp.node_id, create_rsp.node_id)
 
     def _validate_fs_element_does_not_exist(self, connection, node_id=None, path=None):
         rsp = connection.open_file_write(node_id=node_id, path=path)

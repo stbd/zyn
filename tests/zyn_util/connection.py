@@ -827,13 +827,14 @@ class ReadResponse:
 class OpenResponse:
     def __init__(self, response):
         self._rsp = response
-        if response.number_of_fields() != 4:
+        if response.number_of_fields() != 5:
             _malfomed_message()
 
         self.node_id = response.field(0).as_node_id()
         self.revision = response.field(1).as_uint()
         self.size = response.field(2).as_uint()
-        self.type_of_element = response.field(3).as_uint()
+        self.block_size = response.field(3).as_uint()
+        self.type_of_element = response.field(4).as_uint()
         _validate_file_system_element_type(self.type_of_element)
 
     def is_file(self):
@@ -884,15 +885,21 @@ class QueryFilesystemElementResponse:
             _malfomed_message()
 
         desc = response.field(0).key_value_list_to_dict()
-        if len(desc) != 5:
+        self.type_of_element = desc['type'].as_uint()
+        _validate_file_system_element_type(self.type_of_element)
+
+        if self.type_of_element == FILE_TYPE_FILE and len(desc) == 7:
+            self.block_size = desc['block-size'].as_uint()
+        elif self.type_of_element == FILE_TYPE_FOLDER and len(desc) == 6:
+            pass
+        else:
             _malfomed_message()
 
-        self.type_of_element = desc['type'].as_uint()
+        self.node_id = desc['node-id'].as_uint()
         self.write_access = desc['write-access'].as_string()
         self.read_access = desc['read-access'].as_string()
         self.created = desc['created'].as_uint()
         self.modified = desc['modified'].as_uint()
-        _validate_file_system_element_type(self.type_of_element)
 
 
 class QueryCountersResponse:

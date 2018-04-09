@@ -1,12 +1,13 @@
 # todo
  * Think about when to close connection to client
  * Go trough client to make sure trace levels are consistent
- * Make sure naming of pages is consistent around system (not block)
+ * Make sure naming of blocks is consistent around system (not pages)
  * Cleanup responsibilities between file impl and metadata, who owns the data and who does the action
   * Cleanup file properties
- * Refactor
- * Docker configuration for production
- * Possibility to store protocol messages to file, to make debugging easier
+ * Possibility to store protocol messages to file, to make debugging easier?
+ * Replace anything that mentions folder to directory
+ * Open response should include block size
+ * Rethink were properties should be stored, some cases it would make sense to have them in filesystem instead of description/metadata for faster access
 
 ## Check
  * Are files closed when user disconnects, system test case
