@@ -313,6 +313,18 @@ class ZynConnection:
         rsp = self.read_response()
         return rsp
 
+    def query_system(self, transaction_id=None):
+        req = \
+            self.field_version() \
+            + 'Q-SYSTEM:' \
+            + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
+            + ';' \
+            + self.field_end_of_message() \
+
+        self.write(req)
+        rsp = self.read_response()
+        return rsp
+
     def create_user_group(self, name, type_user_or_group, transaction_id=None):
         req = \
             self.field_version() \
@@ -919,6 +931,20 @@ class QueryCountersResponse:
         return self._number_of_counters
 
 
+class QuerySystemResponse:
+    def __init__(self, response):
+        self._rsp = response
+        if response.number_of_fields() != 1:
+            _malfomed_message()
+
+        desc = response.field(0).key_value_list_to_dict()
+        if len(desc) != 2:
+            _malfomed_message()
+
+        self.started_at = desc['started-at'].as_uint()
+        self.server_id = desc['server-id'].as_uint()
+
+
 class Response(Message):
     def type(self):
         return Message.RESPONSE
@@ -962,6 +988,9 @@ class Response(Message):
 
     def as_query_filesystem_rsp(self):
         return QueryFilesystemElementResponse(self)
+
+    def as_query_system_rsp(self):
+        return QuerySystemResponse(self)
 
 
 class Notification(Message):

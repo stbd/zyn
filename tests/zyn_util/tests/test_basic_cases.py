@@ -33,6 +33,14 @@ class TestBasicUsage(zyn_util.tests.common.TestCommon):
         self.assertEqual(counters.number_of_counters(), 1)
         self.assertEqual(counters.active_connections, 1)
 
+    def test_query_system(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        rsp = c.query_system()
+        self._validate_response(rsp, c)
+        query = rsp.as_query_system_rsp()
+        self.assertNotEqual(query.started_at, 0)
+        self.assertNotEqual(query.server_id, 0)
+
 
 class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
     def test_create_file_with_parent_path(self):

@@ -414,6 +414,7 @@ impl Client {
             ("Q-COUNTERS:", handle_query_counters_req, 1),
             ("Q-LIST:", handle_query_list_req, 1),
             ("Q-FILESYSTEM:", handle_query_fs_req, 1),
+            ("Q-SYSTEM:", handle_query_system, 1),
             ("ADD-USER-GROUP:", handle_add_user_group, 1),
             ("MOD-USER-GROUP:", handle_mod_user_group, 1),
         ];
@@ -1654,6 +1655,60 @@ fn handle_query_fs_req(client: & mut Client) -> Result<(), ()>
                 },
 
                 ClientProtocol::QueryFilesystemResponse {
+                    result: Err(error),
+                } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    (None, Some(Err(())))
+                },
+
+                other => {
+                    (Some(other), None)
+                }
+            }
+        })
+        ? ;
+
+    Ok(())
+}
+
+/*
+Query system properties
+<- [Version]Q-FILESYSTEM:[Transaction Id];[End]
+-> [Version]RSP:[Transaction Id][List-of-key-value-pairs];[End]
+*/
+fn handle_query_system(client: & mut Client) -> Result<(), ()>
+{
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    try_parse!(client.buffer.expect(";"), client, 0);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Query system: user={}", client);
+
+    let user = client.user.as_ref().unwrap().clone();
+    client.send_to_node(transaction_id, NodeProtocol::QuerySystemRequest {
+        user: user,
+    }) ? ;
+
+    node_receive::<()>(
+        client,
+        & | msg, client | {
+            match msg {
+                ClientProtocol::QuerySystemResponse {
+                    result: Ok(desc),
+                } => {
+
+                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
+
+                    try_in_receive_loop!(client, buffer.write_list_start(2), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "server-id", desc.server_id), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "started-at", desc.started_at as u64), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    (None, Some(Ok(())))
+                },
+
+                ClientProtocol::QuerySystemResponse {
                     result: Err(error),
                 } => {
                     try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));

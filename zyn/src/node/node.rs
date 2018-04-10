@@ -8,6 +8,7 @@ use std::time::{ Duration };
 use std::vec::{ Vec };
 
 use libc::{ sigwait, sigemptyset, sigaddset, SIGTERM, SIGINT, c_int, size_t, sigprocmask, SIG_SETMASK };
+use rand::{ random };
 
 use node::client::{ Client };
 use node::common::{ NodeId, FileDescriptor, OpenMode, ADMIN_GROUP, Timestamp, FileType, log_crypto_context_error, utc_timestamp };
@@ -75,6 +76,11 @@ pub struct Counters {
     pub active_connections: u32,
 }
 
+pub struct SystemInformation {
+    pub started_at: Timestamp,
+    pub server_id: u64,
+}
+
 pub enum ShutdownReason {
     NodeClosing,
 }
@@ -85,6 +91,7 @@ pub enum ClientProtocol {
     OpenFileResponse { result: Result<(FileAccess, NodeId, FileProperties), ErrorResponse> },
     Shutdown { reason: ShutdownReason },
     CountersResponse { result: Result<Counters, ErrorResponse> },
+    QuerySystemResponse { result: Result<SystemInformation, ErrorResponse> },
     QueryListResponse { result: Result<Vec<(String, NodeId, FilesystemElementType)>, ErrorResponse> },
     QueryFilesystemResponse { result: Result<FilesystemElement, ErrorResponse> },
     DeleteResponse { result: Result<(), ErrorResponse> },
@@ -98,6 +105,7 @@ pub enum NodeProtocol {
     CreateFolderRequest { parent: FileDescriptor, name: String, user: Id },
     OpenFileRequest { mode: OpenMode, file_descriptor: FileDescriptor, user: Id },
     CountersRequest { user: Id, },
+    QuerySystemRequest { user: Id, },
     QueryListRequest { user: Id, fd: FileDescriptor, },
     QueryFilesystemRequest { user: Id, fd: FileDescriptor, },
     DeleteRequest { user: Id, fd: FileDescriptor },
@@ -159,6 +167,8 @@ pub struct Node {
     settings: NodeSettings,
     path_workdir: PathBuf,
     crypto: Crypto,
+    started_at: Timestamp,
+    server_id: u64,
 }
 
 impl Node {
@@ -292,6 +302,8 @@ impl Node {
                 page_size_blob_file: settings.page_size_for_blob_files as usize,
                 socket_buffer_size: settings.client_input_buffer_size as usize,
             },
+            started_at: utc_timestamp(),
+            server_id: random::<u64>(),
         })
     }
 
@@ -436,6 +448,24 @@ impl Node {
 
                                 send_failed = client.transmit.send(
                                     ClientProtocol::CountersResponse {
+                                        result: result
+                                    },
+                                ).is_err();
+                            },
+
+                            NodeProtocol::QuerySystemRequest { user } => {
+
+                                trace!("Query system request, user={}", user);
+
+                                let result = Node::handle_query_system_request(
+                                    & mut self.auth,
+                                    self.started_at,
+                                    self.server_id,
+                                    user,
+                                );
+
+                                send_failed = client.transmit.send(
+                                    ClientProtocol::QuerySystemResponse {
                                         result: result
                                     },
                                 ).is_err();
@@ -789,6 +819,19 @@ impl Node {
 
         Ok(Counters {
             active_connections: clients.len() as u32,
+        })
+    }
+
+    fn handle_query_system_request(
+        _auth: & mut UserAuthority,
+        started_at: Timestamp,
+        server_id: u64,
+        _user: Id,
+    ) -> Result<SystemInformation, ErrorResponse> {
+
+        Ok(SystemInformation {
+            started_at: started_at,
+            server_id: server_id,
         })
     }
 
