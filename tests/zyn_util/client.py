@@ -277,14 +277,36 @@ class LocalFile:
             raise NotImplementedError()
 
 
-class ZynFilesystemClient:
+class ServerInfo:
+    def __init__(self):
+        self.server_id = None
+        self.server_started = None
 
+    def is_initialized(self):
+        return not (
+            self.server_id is None
+            or self.server_started is None
+        )
+
+    def set(self, server_id, server_started):
+        self.server_id = server_id
+        self.server_started = server_started
+
+    def is_same_server(self, server_id, server_started):
+        return \
+            self.server_id == server_id \
+            and self.server_started == server_started
+
+
+class ZynFilesystemClient:
     def init_state_file(path_file, path_data_directory):
         if os.path.exists(path_file):
             raise RuntimeError('Client state file already exists, path={}'.format(path_file))
 
         with open(path_file, 'w') as fp:
             json.dump({
+                'server-started': None,
+                'server-id': None,
                 'path-data-directory': path_data_directory,
                 'local-files': [],
             }, fp)
@@ -299,6 +321,7 @@ class ZynFilesystemClient:
         self._connection = connection
         self._path_state = path_state
         self._path_data = None
+        self._server_info = ServerInfo()
 
         if not os.path.exists(path_state):
             raise RuntimeError()
@@ -307,6 +330,24 @@ class ZynFilesystemClient:
     def connection(self):
         return self._connection
 
+    def is_server_info_initialized(self):
+        return self._server_info.is_initialized()
+
+    def initialize_server_info(self):
+        rsp = self._connection.query_system()
+        check_rsp(rsp)
+        rsp = rsp.as_query_system_rsp()
+        self._server_info.set(rsp.server_id, rsp.started_at)
+
+    def is_connected_to_same_server(self):
+        rsp = self._connection.query_system()
+        check_rsp(rsp)
+        rsp = rsp.as_query_system_rsp()
+        return self._server_info.is_same_server(rsp.server_id, rsp.started_at)
+
+    def server_info(self):
+        return self._server_info
+
     def file(self, path_in_remote):
         return FileState(self._local_files[path_in_remote], self._path_data)
 
@@ -314,7 +355,13 @@ class ZynFilesystemClient:
         self._log.info('Loading client state, path="{}"'.format(self._path_state))
         with open(self._path_state, 'r') as fp:
             content = json.load(fp)
+
             self._path_data = content['path-data-directory']
+            self._server_info.set(
+                content['server-id'],
+                content['server-started'],
+            )
+
             for desc in content['local-files']:
                 file = LocalFile.from_json(desc)
                 self._local_files[file.path_to_local_file(self._path_data)] = file
@@ -330,6 +377,8 @@ class ZynFilesystemClient:
             ]
 
             json.dump({
+                'server-started': self._server_info.server_started,
+                'server-id': self._server_info.server_id,
                 'path-data-directory': self._path_data,
                 'local-files': local_files,
             }, fp)

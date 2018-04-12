@@ -106,6 +106,18 @@ class TestClient(zyn_util.tests.common.TestCommon):
         client_state_2.write_local_file_text(path_in_remote, data_2)
         client_state_1.client.sync(path_in_remote)
 
+    def test_validating_server(self):
+        client_state_1 = self._start_server_and_create_client(1)
+
+        self.assertFalse(client_state_1.client.is_server_info_initialized())
+        client_state_1.client.initialize_server_info()
+        self.assertTrue(client_state_1.client.is_server_info_initialized())
+        client_state_1.client.store()
+
+        client_state_2 = self._create_client(1, False)
+        self.assertTrue(client_state_2.client.is_server_info_initialized())
+        self.assertTrue(client_state_2.client.is_connected_to_same_server())
+
     def test_edit_fetch_random_access_file(self):
         client_state_1, client_state_2 = self._start_server_and_create_number_of_clients(2)
         path_in_remote = '/test_file'
@@ -172,7 +184,7 @@ class TestClient(zyn_util.tests.common.TestCommon):
         self._validate_tracked_file(
             tracked_files, remote_tracked_3, exists_locally=False, tracked=False)
         self.assertEqual(len(untracked_files), 1)
-        self.assertTrue(remote_untracked_1 in untracked_files)
+        self.assertTrue(path_remote_untracked_1 in untracked_files)
 
     def test_add(self):
         client_state = self._start_server_and_create_client(1)

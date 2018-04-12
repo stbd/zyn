@@ -368,6 +368,21 @@ if __name__ == '__main__':
 
     print('Successfully connected to Zyn server and authenticated')
 
+    if client.is_server_info_initialized():
+        client.initialize_server_info()
+    else:
+        if not client.is_connected_to_same_server():
+            print('It looks like the server you are connected is not the same server as before')
+            server_info = client.server_info()
+            print('Server has Id of {} and was started at {}'.format(
+                server_info.server_id,
+                server_info.started_at
+            ))
+            print('Are you sure this is safe')
+            answer = input('yes/no? ')
+            if answer.lower() != 'yes':
+                sys.exit(0)
+
     cli = ZynCliClient(client)
     while True:
         try:
