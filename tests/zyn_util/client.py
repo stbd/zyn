@@ -96,6 +96,9 @@ class LocalFile:
     def _calculate_cheksum_from_file(self, path_data_root):
         return self._calculate_checksum(open(self.path_to_local_file(path_data_root), 'rb').read())
 
+    def path_remote(self):
+        return self._path_in_remote
+
     def update_checksum(self, path_data_root):
         self._cheksum = self._calculate_cheksum_from_file(path_data_root)
 
@@ -280,22 +283,22 @@ class LocalFile:
 class ServerInfo:
     def __init__(self):
         self.server_id = None
-        self.server_started = None
+        self.server_started_at = None
 
     def is_initialized(self):
         return not (
             self.server_id is None
-            or self.server_started is None
+            or self.server_started_at is None
         )
 
-    def set(self, server_id, server_started):
+    def set(self, server_id, server_started_at):
         self.server_id = server_id
-        self.server_started = server_started
+        self.server_started_at = server_started_at
 
-    def is_same_server(self, server_id, server_started):
+    def is_same_server(self, server_id, server_started_at):
         return \
             self.server_id == server_id \
-            and self.server_started == server_started
+            and self.server_started_at == server_started_at
 
 
 class ZynFilesystemClient:
@@ -329,6 +332,9 @@ class ZynFilesystemClient:
 
     def connection(self):
         return self._connection
+
+    def set_connection(self, connection):
+        self._connection = connection
 
     def is_server_info_initialized(self):
         return self._server_info.is_initialized()
@@ -364,7 +370,7 @@ class ZynFilesystemClient:
 
             for desc in content['local-files']:
                 file = LocalFile.from_json(desc)
-                self._local_files[file.path_to_local_file(self._path_data)] = file
+                self._local_files[file.path_remote()] = file
 
     def store(self):
         self._log.info('Storing client state, path="{}", number_of_files={}'.format(
@@ -377,7 +383,7 @@ class ZynFilesystemClient:
             ]
 
             json.dump({
-                'server-started': self._server_info.server_started,
+                'server-started': self._server_info.server_started_at,
                 'server-id': self._server_info.server_id,
                 'path-data-directory': self._path_data,
                 'local-files': local_files,
@@ -453,6 +459,7 @@ class ZynFilesystemClient:
             for p in glob.glob(_join_paths_([self._path_data, path_parent, '*']))
         ]
 
+        self._log.debug('Client has {} known local file'.format(len(self._local_files)))
         self._log.debug('Found local files: {}'.format(local_files))
 
         class Localfile:
@@ -471,20 +478,30 @@ class ZynFilesystemClient:
             tracked = False
             file_path = _join_paths_([path_parent, element.name])
 
+            self._log.debug('Processing "{}"'.format(file_path))
+
             if file_path in self._local_files:
+
+                self._log.debug('"{}" found in local files'.format(file_path))
+
                 file = self._local_files[file_path]
                 if file.exists_locally(self._path_data):
                     exists_locally = True
                     tracked = True
                     local_files.remove(element.name)
             else:
+
                 if element.name in local_files:
                     exists_locally = True
                     local_files.remove(element.name)
 
             elements.append(Element(element, Localfile(exists_locally, tracked)))
 
-        return elements, [_join_paths_([path_parent, f]) for f in local_files]
+        return elements, \
+            [
+                _join_paths_([path_parent, f])
+                for f in local_files
+            ]
 
     def add(self, path_in_remote):
 
@@ -497,7 +514,11 @@ class ZynFilesystemClient:
         if exists:
             raise ZynClientException('File "{}" already exists'.format(path_in_remote))
 
-        self.create_random_access_file(path_in_remote)
+        self.create_random_access_file(path_in_remote)  # todo: parametritize
         file = LocalFile(path_in_remote)
         file.push(self._connection, self._path_data)
         self._local_files[path_in_remote] = file
+
+    def add_tracked_files_to_remote(self):
+        for path_remote, file in self._local_files.items():
+            self.add(path_remote)

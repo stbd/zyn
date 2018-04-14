@@ -1,4 +1,5 @@
 import os
+import random
 
 import zyn_util.tests.common
 import zyn_util.errors
@@ -51,6 +52,13 @@ class TestClient(zyn_util.tests.common.TestCommon):
     def _path_clients_data(self):
         return '{}/clients'.format(self._work_dir.name)
 
+    def _restart_server_and_replace_connection(self, client_state):
+        connection = self._restart_node_and_connect_and_handle_auth(
+            init=True,
+            server_workdir='server-workdir-{}'.format(random.random())
+        )
+        client_state.client.set_connection(connection)
+
     def _init_client(self, client_id, connection, init_data=True):
         path_clients_data = self._path_clients_data()
         if not os.path.exists(path_clients_data):
@@ -91,20 +99,28 @@ class TestClient(zyn_util.tests.common.TestCommon):
         return [client_1] + clients
 
     def test_resume_client(self):
-        client_state_1 = self._start_server_and_create_client(1)
-        path_in_remote = '/test_file'
         data_1 = 'data'
         data_2 = 'datazxcc'
+        filename, path_remote = self._name_to_remote_path('file-1')
 
-        client_state_1.client.create_random_access_file(path_in_remote)
-        client_state_1.client.fetch(path_in_remote)
-        client_state_1.write_local_file_text(path_in_remote, data_1)
-        client_state_1.client.sync(path_in_remote)
+        client_state_1 = self._start_server_and_create_client(1)
+        client_state_1.client.create_random_access_file(path_remote)
+        client_state_1.client.fetch(path_remote)
+        client_state_1.write_local_file_text(path_remote, data_1)
+        client_state_1.client.sync(path_remote)
+
+        tracked_files, _ = client_state_1.client.list('/')
+        self.assertEqual(len(tracked_files), 1)
+        self._validate_tracked_file(tracked_files, filename, exists_locally=True, tracked=True)
         client_state_1.client.store()
 
         client_state_2 = self._create_client(1, False)
-        client_state_2.write_local_file_text(path_in_remote, data_2)
-        client_state_1.client.sync(path_in_remote)
+        tracked_files, _ = client_state_2.client.list('/')
+        self.assertEqual(len(tracked_files), 1)
+        self._validate_tracked_file(tracked_files, filename, exists_locally=True, tracked=True)
+
+        client_state_2.write_local_file_text(path_remote, data_2)
+        client_state_2.client.sync(path_remote)
 
     def test_validating_server(self):
         client_state_1 = self._start_server_and_create_client(1)
@@ -117,6 +133,8 @@ class TestClient(zyn_util.tests.common.TestCommon):
         client_state_2 = self._create_client(1, False)
         self.assertTrue(client_state_2.client.is_server_info_initialized())
         self.assertTrue(client_state_2.client.is_connected_to_same_server())
+
+        # todo: add case where server is restarted to verify that it is noticed
 
     def test_edit_fetch_random_access_file(self):
         client_state_1, client_state_2 = self._start_server_and_create_number_of_clients(2)
@@ -197,3 +215,42 @@ class TestClient(zyn_util.tests.common.TestCommon):
         client_state.create_local_file(path_remote_2)
         client_state.write_local_file_text(path_remote_2, 'Hello')
         client_state.client.add(path_remote_2)
+
+    def test_add_tracked_files_to_remote_after_restart(self):
+        client_state = self._start_server_and_create_client(1)
+        filename_1, path_remote_1 = self._name_to_remote_path('file-1')
+        filename_2, path_remote_2 = self._name_to_remote_path('file-2')
+
+        client_state.create_local_file(path_remote_1)
+        client_state.write_local_file_text(path_remote_1, 'data-1')
+        client_state.create_local_file(path_remote_2)
+        client_state.write_local_file_text(path_remote_2, 'data-2')
+        client_state.client.add(path_remote_1)
+        client_state.client.add(path_remote_2)
+
+        self._restart_server_and_replace_connection(client_state)
+        client_state.client.add_tracked_files_to_remote()
+
+        tracked_files, _ = client_state.client.list('/')
+        self.assertEqual(len(tracked_files), 2)
+        self._validate_tracked_file(tracked_files, filename_1, exists_locally=True, tracked=True)
+        self._validate_tracked_file(tracked_files, filename_1, exists_locally=True, tracked=True)
+
+    def test_reconnecting_to_server(self):
+        client_state = self._start_server_and_create_client(1)
+        filename_1, path_remote_1 = self._name_to_remote_path('file-1')
+        filename_2, path_remote_2 = self._name_to_remote_path('file-2')
+
+        client_state.create_local_file(path_remote_1)
+        client_state.write_local_file_text(path_remote_1, 'data-1')
+        client_state.create_local_file(path_remote_2)
+        client_state.write_local_file_text(path_remote_2, 'data-2')
+        client_state.client.add(path_remote_1)
+        client_state.client.add(path_remote_2)
+
+        client_state.client.set_connection(self._connect_to_node_and_handle_auth())
+
+        tracked_files, _ = client_state.client.list('/')
+        self.assertEqual(len(tracked_files), 2)
+        self._validate_tracked_file(tracked_files, filename_1, exists_locally=True, tracked=True)
+        self._validate_tracked_file(tracked_files, filename_1, exists_locally=True, tracked=True)

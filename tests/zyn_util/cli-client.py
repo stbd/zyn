@@ -262,23 +262,24 @@ class ZynCliClient(cmd.Cmd):
             file.path_local
         ))
 
+    def _parser_sync(self):
+        parser = argparse.ArgumentParser(prog='sync')
+        parser.add_argument('file', type=str)
+        return parser
+
+    def help_sync(self):
+        print(self._parser_sync().format_help())
+
     def do_sync(self, args):
-        'Synchronize local changes to remote: [String: filename]'
+        parser = self._parser_sync()
+        args = vars(parser.parse_args(self._parse_args(args)))
 
-        args = self._parse_args(args)
-        if len(args) != 1:
-            print('Invalid arguments: expected filename')
-            return
+        path_remote = self._to_absolute_remote_path(args['file'])
+        self._log.debug('Synchronizing, path={}'.format(path_remote))
 
-        path = self._to_absolute_remote_path(args[0])
-        print('Synchronizing, path={}'.format(path))
-
-        try:
-            self._client.sync(path)
-            print('File {} synchronized to revision {}'.format(path, None))
-
-        except zyn_util.client.ZynClientException as e:
-            print(e)
+        self._client.sync(path_remote)
+        file = self._client.file(path_remote)
+        print('File {} synchronized to revision {}'.format(path_remote, file.revision))
 
     def do_exit(self, _):
         'Close connection and exit client'
@@ -368,7 +369,7 @@ if __name__ == '__main__':
 
     print('Successfully connected to Zyn server and authenticated')
 
-    if client.is_server_info_initialized():
+    if not client.is_server_info_initialized():
         client.initialize_server_info()
     else:
         if not client.is_connected_to_same_server():
@@ -376,12 +377,19 @@ if __name__ == '__main__':
             server_info = client.server_info()
             print('Server has Id of {} and was started at {}'.format(
                 server_info.server_id,
-                server_info.started_at
+                server_info.server_started_at
             ))
             print('Are you sure this is safe')
             answer = input('yes/no? ')
             if answer.lower() != 'yes':
                 sys.exit(0)
+
+            client.initialize_server_info()
+
+            print('Would you like to try add all tracked local files to remote')
+            answer = input('yes/no? ')
+            if answer.strip().lower() == 'yes':
+                client.add_tracked_files_to_remote()
 
     cli = ZynCliClient(client)
     while True:

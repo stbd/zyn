@@ -16,6 +16,7 @@ PATH_CERT = os.path.expanduser("~/.zyn-certificates/cert.pem")
 PATH_KEY = os.path.expanduser("~/.zyn-certificates/key.pem")
 PATH_GPG_FINGERPRINT = os.path.expanduser("~/.zyn-test-user-gpg-fingerprint")
 DEFAULT_TLS_REMOTE_HOSTNAME = 'zyn'
+DEFAULT_SERVER_WORKDIR = 'server-workdir'
 
 HOUR_SECONDS = 60 * 60
 DAY_SECONDS = HOUR_SECONDS * 24
@@ -142,12 +143,12 @@ class TestCommon(TestZyn):
         with self.assertRaises(TimeoutError):
             connection.read_message()
 
-    def _start_node(self):
-        server_workdir = self._work_dir.name + '/server'
+    def _start_node(self, server_workdir, init=True):
+        server_workdir = '{}/{}'.format(self._work_dir.name, server_workdir)
         os.mkdir(server_workdir)
         self._process = self._start_server(
             server_workdir,
-            init=True
+            init=init,
         )
 
     def _connect_to_node(self):
@@ -178,8 +179,20 @@ class TestCommon(TestZyn):
         self._validate_response(rsp, connection)
         return rsp
 
-    def _start_and_connect_to_node_and_handle_auth(self):
-        self._start_node()
+    def _connect_to_node_and_handle_auth(self):
         c = self._connect_to_node()
         self._handle_auth(c)
         return c
+
+    def _start_and_connect_to_node_and_handle_auth(self, server_workdir=DEFAULT_SERVER_WORKDIR):
+        self._start_node(server_workdir)
+        return self._connect_to_node_and_handle_auth()
+
+    def _restart_node_and_connect_and_handle_auth(
+            self,
+            init=False,
+            server_workdir=DEFAULT_SERVER_WORKDIR
+    ):
+        self._stop_node(self._process)
+        self._start_node(server_workdir, init=init)
+        return self._connect_to_node_and_handle_auth()
