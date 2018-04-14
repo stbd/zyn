@@ -6,7 +6,9 @@ import getpass
 import os
 import os.path
 import subprocess
+import sys
 import tempfile
+import time
 
 
 PATH_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -61,7 +63,12 @@ def _build_image(image_tag):
 
 def _main():
     parser = argparse.ArgumentParser(
-        description='Tools to run Zyn server in Docker container'
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description='Tools to run Zyn server in Docker container',
+        epilog='''
+Example:
+run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --init --bind-to "localhost:8080" --  --memory 2g --detach --rm
+'''
     )
     parser.add_argument(
         'path-private-key',
@@ -83,7 +90,7 @@ def _main():
         '--bind-to',
         default="localhost:8080",
         type=str,
-        help='IP and/or port pair to which bind server'
+        help='IP and/or port pair to which bind Docker container'
     )
     parser.add_argument(
         '--log-level',
@@ -96,11 +103,6 @@ def _main():
         action='store_true',
         help='Initialize system and of its settings. Required' \
         'when server is run for the first time',
-    )
-    parser.add_argument(
-        '--daemon',
-        action='store_true',
-        help='Run server as daemon process and leave it running to background'
     )
     parser.add_argument( # todo: Handle
         '--path-data',
@@ -126,11 +128,18 @@ def _main():
     parser.add_argument(
         '--skip-packing-src',
         action='store_true',
-        help='Do not pack zyn sources to new tar. This usefull when working with' \
-        'Docker configuration as it avoid constantly rebuilding image',
+        help='Do not pack Zyn sources to new tar. This is useful when working with' \
+        'Docker configuration, as it avoids constantly needing to rebuilding image',
     )
 
-    args = vars(parser.parse_args())
+
+    system_args = sys.argv[1:]
+    docker_args = []
+    if '--' in system_args:
+        docker_args = system_args[system_args.index('--') + 1:]
+        system_args = system_args[:system_args.index('--')]
+    args = vars(parser.parse_args(system_args))
+
     print(args)
 
     if not args['skip_packing_src']:
@@ -161,7 +170,6 @@ def _main():
         run_cmd = [
             'docker',
             'run',
-            '-it',
             '-v', '{}:{}'.format(args['path-private-key'], '/zyn-configuration/gpg-private-key'),
             '-v', '{}:{}'.format(args['path-cert-pem'], '/zyn-configuration/cert.pem'),
             '-v', '{}:{}'.format(args['path-key-pem'], '/zyn-configuration/key.pem'),
@@ -169,15 +177,10 @@ def _main():
             '-v', '{}:{}'.format(path_password, '/zyn-configuration/gpg-password'),
             '-e', 'RUST_LOG={}'.format(args['log_level']),
             '-p', '{}:8080/tcp'.format(args['bind_to']),
-            '--memory', '2g',  # todo: parametritize
-            '--rm',
-        ]
+        ] + docker_args
 
         if args['path_data']:
             run_cmd += ['-v', '{}:{}'.format(args['path_data'], '/zyn-data')]
-
-        if args['daemon']:
-            run_cmd += ['--daemon']
 
         run_cmd += ['{}:latest'.format(IMAGE_TAG)]
 
@@ -189,20 +192,25 @@ def _main():
 
         if args['admin_username']:
             run_cmd += ['--admin-username', args['admin_username']]
+            raise NotImplementedError()
 
         if args['admin_password']:
             run_cmd += ['--admin-password', args['admin_password']]
+            raise NotImplementedError()
 
         if args['admin_expiration']:
             # run_cmd += ['--admin-expiration', args['admin_expiration']]
-            pass
+            raise NotImplementedError()
 
         print (run_cmd)
+        is_daemon = '--detach' in run_cmd or '-d' in run_cmd
         process = subprocess.Popen(
             run_cmd,
             cwd=PATH_DIR,
         )
         process.communicate()
+        if is_daemon:
+            time.sleep(5)
 
     finally:
         if os.path.exists(PATH_TEMP_FOLDER):
