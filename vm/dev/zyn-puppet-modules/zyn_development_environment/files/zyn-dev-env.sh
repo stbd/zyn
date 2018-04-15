@@ -88,6 +88,7 @@ function zyn-run-web-client() {
             4433 \
             $HOME/.zyn-certificates/key.pem \
             $HOME/.zyn-certificates/cert.pem \
+            --remote-hostname zyn \
             $@
 }
 

@@ -94,12 +94,15 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             path = msg['content']['path']
 
             files = []
-            for element in self._connection.zyn_connection().query_list(path=path)\
-                                                            .as_query_list_rsp():
-                files.append({
-                    'name': element[0],
-                    'node-id': element[1],
-                })
+            rsp = self._connection.zyn_connection().query_list(path=path)
+
+            if not rsp.is_error():
+                rsp = rsp.as_query_list_rsp()
+                for element in rsp.elements:
+                    files.append({
+                        'name': element.name,
+                        'node-id': element.node_id,
+                    })
 
             self.write_message(json.dumps({
                 'type': msg_type + '-rsp',
@@ -114,10 +117,11 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
             content = b''
             rsp = self._connection.zyn_connection().open_file_read(node_id=node_id)
-            node_id, revision, size, file_type = rsp.as_open_rsp()
-            if size > 0:
-                rsp, data = self._connection.zyn_connection().read_file(node_id, 0, size)
-                content = str(base64.b64encode(data), 'ascii')
+            if not rsp.is_error():
+                rsp = rsp.as_open_rsp()
+                if rsp.size > 0:
+                    rsp, data = self._connection.zyn_connection().read_file(node_id, 0, rsp.size)
+                    content = str(base64.b64encode(data), 'ascii')
 
             self.write_message(json.dumps({
                 'type': msg_type + '-rsp',
@@ -145,26 +149,25 @@ class MainHandler(tornado.web.RequestHandler):
         password = self.get_body_argument("password")
 
         log = logging.getLogger(__name__)
-        log.info("Login, username=%s" % username)
+        log.info('Login, username="%s", path_file="%s"' % (username, path_file))
 
         global connection_factory
         zyn_connection = connection_factory.create_connection_and_connect()
-        try:
-            rsp = zyn_connection.authenticate(username, password)
-        except zyn_util.client.ZynClientException as e:
-            log.error("Failed to login, username=%s" % username)
-            return
+        rsp = zyn_connection.authenticate(username, password)
 
         if rsp.is_error():
-            log.info("Failed to login, username=%s" % username)
+            log.info('Failed to login, username="%s", error="%d"' % (username, rsp.error_code()))
             return
 
         user_id = connections.add_connection(Connection(zyn_connection))
 
-        log.info("Login successful, username=%s" % username)
+        log.info('Login successful, username="%s"' % username)
 
         self.set_secure_cookie(COOKIE_NAME, str(user_id))
-        self.redirect(path_file)
+        if len(path_file) > 0:
+            self.redirect(path_file)
+        else:
+            self.redirect('/')
 
     def get(self, path_file):
         global connections
@@ -199,6 +202,7 @@ class ZynConnectionFactory:
             path_cert,
             server_ip,
             server_port,
+            remote_hostname=None,
             debug_protocol=False,
     ):
         self._path_key = path_key
@@ -206,16 +210,17 @@ class ZynConnectionFactory:
         self._server_ip = server_ip
         self._server_port = server_port
         self._debug_protocol = debug_protocol
+        self._remote_hostname = remote_hostname
 
     def create_connection_and_connect(self):
         connection = zyn_util.connection.ZynConnection(
-            self._path_key,
             self._path_cert,
             self._debug_protocol
         )
         connection.connect(
             self._server_ip,
             self._server_port,
+            self._remote_hostname,
         )
         return connection
 
@@ -230,6 +235,7 @@ def run_tornado():
 
     parser.add_argument('--debug-protocol', action='store_true', help='')
     parser.add_argument('--verbose', '-v', action='count', default=0)
+    parser.add_argument('--remote-hostname', default=None)
 
     args = vars(parser.parse_args())
 
@@ -239,6 +245,7 @@ def run_tornado():
         args['zyn-server-path-to-cert'],
         args['zyn-server-ip'],
         args['zyn-server-port'],
+        args['remote_hostname'],
         args['debug_protocol'],
     )
 
