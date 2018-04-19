@@ -12,4 +12,9 @@ setup(name='Zyn Util',
           'tornado==4.5.2',
           'certifi',
       ],
+      entry_points={
+          'console_scripts': [
+              'zyn-cli=zyn_util.cli_client:main',
+          ]
+      }
 )

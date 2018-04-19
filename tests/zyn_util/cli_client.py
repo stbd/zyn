@@ -287,7 +287,7 @@ class ZynCliClient(cmd.Cmd):
         sys.exit(0)
 
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('username', help='Username')
     parser.add_argument('--password', '-p', help='Username')
@@ -406,3 +406,7 @@ if __name__ == '__main__':
             print()
             print('Storing Zyn state')
             client.store()
+
+
+if __name__ == '__main__':
+    main()
