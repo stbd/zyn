@@ -160,3 +160,6 @@ create_certificate
 # /usr/lib/gnupg2/gpg-preset-passphrase --preset --passphrase pass 5B4AFFE9E029E5C020B6D35EB7D333BC9571F0DF
 # gpg-connect-agent
 # GET_PASSPHRASE --no-ask 988CDD7E4D586CF95B6FC095CA88446874DA32CA Err Pmt Des
+
+# To debug gpg use env variable
+# GPGME_DEBUG=9:/home/user/mygpgme.log
