@@ -12,7 +12,6 @@ use std::thread::{ sleep };
 use std::time::{ Duration };
 
 use node::crypto::{ Crypto, Context };
-use node::crypto_gpg::{ CryptoGpg, ContextGpg };
 
 
 #[allow(dead_code)]
@@ -33,21 +32,6 @@ pub fn assert_retry(function: & mut FnMut() -> bool) {
         sleep_ms(trial * 1000);
     }
     assert!(false);
-}
-
-pub fn create_crypto_gpg() -> CryptoGpg {
-    let mut buffer = String::new();
-    let mut path = home_dir().unwrap();
-    path.push(".zyn-test-user-gpg-fingerprint");
-    let mut file = File::open(path).unwrap();;
-    file.read_to_string(& mut buffer).unwrap();
-    buffer.pop();
-    CryptoGpg::new(buffer).unwrap()
-}
-
-pub fn create_crypto_context_gpg() -> ContextGpg {
-    let c = create_crypto_gpg();
-    c.create_context().unwrap()
 }
 
 pub fn create_crypto() -> Crypto {

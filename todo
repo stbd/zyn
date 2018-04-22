@@ -8,6 +8,7 @@
  * Replace anything that mentions folder to directory
  * Open response should include block size
  * Rethink were properties should be stored, some cases it would make sense to have them in filesystem instead of description/metadata for faster access
+ * Cleanup and remove references to GPGME
 
 ## Check
  * Are files closed when user disconnects, system test case
