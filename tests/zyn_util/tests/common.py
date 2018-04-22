@@ -143,7 +143,7 @@ class TestCommon(TestZyn):
         with self.assertRaises(TimeoutError):
             connection.read_message()
 
-    def _start_node(self, server_workdir, init=True):
+    def _start_node(self, server_workdir=DEFAULT_SERVER_WORKDIR, init=True):
         server_workdir = '{}/{}'.format(self._work_dir.name, server_workdir)
         os.mkdir(server_workdir)
         self._process = self._start_server(
