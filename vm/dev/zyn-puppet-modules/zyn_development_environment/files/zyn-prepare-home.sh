@@ -22,6 +22,7 @@ tag=ZYN-DEV-ENV
 sed -i "/$tag/,/$tag/d" "$path_user_home/.bashrc"
 cat <<EOF >> "$path_user_home/.bashrc"
 # $tag
+export ZYN_ROOT=$path_user_home/zyn
 source "$path_user_home/.zyn-dev-env.sh"
 # /$tag
 EOF
