@@ -646,26 +646,8 @@ impl FileImpl {
         let ref block = self.metadata.block_descriptions[block_index as usize];
         let path = FileImpl::path_data(& self.path_basename, block.block_number);
 
-
         if path.exists() {
-            let mut file = match OpenOptions::new().read(true).create(false).open(path.as_path()) {
-                Ok(file) => file,
-                Err(error_code) => {
-                    error!("Failed to open file for reading: path={}, error_code=\"{}\"", path.display(), error_code);
-                    return Err(());
-                },
-            };
-
-            let mut data = Buffer::new();
-            match file.read_to_end(& mut data) {
-                Err(_) => {
-                    warn!("Failed to write data, path_basename={}", self.path_basename.display());
-                },
-                _ => (),
-            };
-            if data.len() > 0 {
-                self.buffer = self.crypto_context.decrypt(& data) ? ;
-            }
+            self.buffer = self.crypto_context.decrypt_from_file(& path) ? ;
         } else {
             trace!("Creating new page, path_basename={}, block_index={}", self.path_basename.display(), block_index);
             match OpenOptions::new().read(true).write(true).create(true).open(path.as_path()) {
@@ -685,24 +667,15 @@ impl FileImpl {
     fn write_block(& mut self) -> Result<(), ()> {
 
         let path = FileImpl::path_data(& self.path_basename, self.current_block_index);
-        let mut file = File::create(path.as_path())
-            .map_err(| error | error!("Failed to open file for writing: path={}, error={}",
-                                      path.display(), error))
-            ? ;
-
-        let encrypted = self.crypto_context.encrypt(& self.buffer) ? ;
-
-        match file.write_all(& encrypted) {
-            Err(_error_code) => {
-                warn!("Failed to write data, path_basename={}", self.path_basename.display());
-                Err(())
-            },
-            _ => {
-                let ref mut desc = self.metadata.block_descriptions[self.current_block_index as usize];
-                desc.size = self.buffer.len() as u64;
-                Ok(())
-            },
+        if path.exists() {
+            remove_file(& path)
+                .map_err(| _ | ())
+                ? ;
         }
+        self.crypto_context.encrypt_to_file(& self.buffer, & path) ? ;
+        let ref mut desc = self.metadata.block_descriptions[self.current_block_index as usize];
+        desc.size = self.buffer.len() as u64;
+        Ok(())
     }
 
     fn swap_block(& mut self, block_index: u32) -> Result<(), ()> {
