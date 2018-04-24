@@ -6,6 +6,8 @@ use std::env::{ home_dir };
 use std::fs::{ File };
 use std::io::Read;
 use std::path::{ PathBuf };
+
+use std::process::{ Command, Stdio };
 use std::str;
 use std::sync::{ Once, ONCE_INIT };
 use std::thread::{ sleep };
@@ -57,6 +59,59 @@ pub fn certificate_paths() -> (PathBuf, PathBuf) {
     let mut key = path_folder.clone();
     key.push("key.pem");
     (cert, key)
+}
+
+pub fn create_file_of_random_1024_blocks(number_of_blocks: usize) -> PathBuf{
+
+    let size = 1024 * number_of_blocks;
+    let mut path = home_dir().unwrap();
+    path.push(format!(".zyn-test-data-{}.data", size));
+
+    info!("Creating random data file, size={}, path=\"{}\"",
+          size,
+          path.display(),
+    );
+
+    if path.exists() {
+        info!("Random file exists, skipping creation, path={}",
+              path.display()
+        );
+        return path;
+    }
+
+    let process = Command::new("dd")
+        .arg("bs=1024")
+        .arg(format!("count={}", number_of_blocks))
+        .arg("if=/dev/urandom")
+        .arg(format!("of={}", path.to_str().unwrap()))
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .stdout(Stdio::null())
+        .spawn()
+        .map_err(| error | {
+            panic!("Creating random file spawn process failed, path={}, error=\"{}\"",
+                   path.display(),
+                   error,
+            )
+        }).unwrap();
+
+    let output = match process.wait_with_output() {
+        Ok(output) => output,
+        Err(error) => {
+            panic!("Creating random file failed, path={}, error=\"{}\"",
+                   path.display(),
+                   error,
+            );
+        }
+    };
+
+    if output.status.success() {
+        return path;
+    }
+
+    panic!("Creating random file process failed with error, path={}",
+           path.display()
+    );
 }
 
 struct UnitTestLogger;

@@ -1,7 +1,9 @@
 use std::io::{ BufWriter, Write };
+use std::option::{ Option };
+use std::path::{ Path };
 use std::process::{ Command, Stdio, Output };
-use std::string::{ String };
 use std::result::{ Result };
+use std::string::{ String };
 use std::vec::{ Vec };
 
 #[derive(Clone)]
@@ -32,7 +34,7 @@ pub struct Context {
 }
 
 impl Context {
-    fn run_command(& self, command: & mut Command, input_data: &[u8])
+    fn run_command(& self, command: & mut Command, input_data: Option<&[u8]>)
                    -> Result<Output, ()> {
 
         let mut process = command.spawn()
@@ -41,21 +43,26 @@ impl Context {
             })
             ? ;
 
-        match & mut process.stdin {
-            & mut Some(ref mut stdin) => {
-                let mut writer = BufWriter::new(stdin);
-                writer.write_all(input_data)
-                    .map_err(| error | {
-                        error!("Failed to write to GPG process stdin, error=\"{}\"",
-                               error
-                        );
-                    })
-                    ? ;
+        match input_data {
+            Some(ref data) => {
+                match & mut process.stdin {
+                    & mut Some(ref mut stdin) => {
+                        let mut writer = BufWriter::new(stdin);
+                        writer.write_all(data)
+                            .map_err(| error | {
+                                error!("Failed to write to GPG process stdin, error=\"{}\"",
+                                       error
+                                );
+                            })
+                            ? ;
+                    },
+                    & mut None => {
+                        error!("GPG process has no stdin");
+                        return Err(())
+                    },
+                };
             },
-            & mut None => {
-                error!("GPG process has no stdin");
-                return Err(())
-            },
+            None => (),
         };
 
         match process.wait_with_output() {
@@ -67,19 +74,26 @@ impl Context {
         }
     }
 
+    fn gpg_command_base(& self) -> Command {
+        let mut cmd = Command::new("gpg2");
+        cmd
+            .arg("--no-tty")
+            .arg("--batch");
+
+        cmd
+    }
 
     pub fn decrypt(& self, ciphertext: & [u8]) -> Result<Vec<u8>, ()> {
 
         let ciphertext_length = ciphertext.len();
+
         let output = self.run_command(
-            Command::new("gpg2")
-                .arg("--no-tty")
-                .arg("--batch")
+            self.gpg_command_base()
                 .arg("--decrypt")
                 .stdin(Stdio::piped())
                 .stderr(Stdio::null())
                 .stdout(Stdio::piped()),
-            ciphertext
+            Some(ciphertext),
         )
             ? ;
 
@@ -95,32 +109,57 @@ impl Context {
             return Err(());
         }
 
-        trace!("Succefully decrypted {} ciphertext bytes into {} bytes",
+        trace!("Succefully decrypted {} ciphertext bytes into {} bytes of plaintext",
                ciphertext_length, output.stdout.len());
 
         Ok(output.stdout)
     }
 
-    pub fn decrypt_into_string(& self, ciphertext: & [u8]) -> Result<String, ()> {
-        let decrypted = self.decrypt(ciphertext)
+    pub fn decrypt_from_file(& self, path_input: & Path)
+                             -> Result<Vec<u8>, ()>
+    {
+
+        let output = self.run_command(
+            self.gpg_command_base()
+                .arg("--decrypt")
+                .arg(path_input.to_str().unwrap())
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .stdout(Stdio::piped()),
+            None,
+        )
             ? ;
-        Ok(String::from_utf8_lossy(& decrypted).into_owned())
+
+        if ! output.status.success() {
+            match output.status.code() {
+                Some(code) => {
+                    error!("GPG decrypt process failed, error_code={}", code);
+                },
+                None => {
+                    error!("GPG decrypt process failed without error");
+                },
+            }
+            return Err(());
+        }
+
+        trace!("Succefully decrypted {} ciphertext bytes from file, path=\"{}\"",
+               output.stdout.len(), path_input.display());
+
+        Ok(output.stdout)
     }
 
     pub fn encrypt(& self, plaintext: & [u8]) -> Result<Vec<u8>, ()> {
 
         let plaintext_length = plaintext.len();
         let output = self.run_command(
-            Command::new("gpg2")
-                .arg("--batch")
-                .arg("--no-tty")
+            self.gpg_command_base()
                 .arg("--encrypt")
                 .arg("-r")
                 .arg(self.fingerprint.clone())
                 .stdin(Stdio::piped())
                 .stderr(Stdio::null())
                 .stdout(Stdio::piped()),
-            plaintext,
+            Some(plaintext),
         )
             ? ;
 
@@ -136,9 +175,46 @@ impl Context {
             return Err(());
         }
 
-        trace!("Succefully encrypted {} bytes of plaintext into {} bytes",
+        trace!("Succefully encrypted {} bytes of plaintext into {} bytes of ciphertext",
                plaintext_length, output.stdout.len());
 
         Ok(output.stdout)
+    }
+
+    pub fn encrypt_to_file(& self, plaintext: & [u8], path_output: & Path)
+                           -> Result<(), ()>
+    {
+
+        let plaintext_length = plaintext.len();
+        let output = self.run_command(
+            self.gpg_command_base()
+                .arg("--encrypt")
+                .arg("-r")
+                .arg(self.fingerprint.clone())
+                .arg("--output")
+                .arg(path_output.to_str().unwrap())
+                .stdin(Stdio::piped())
+                .stderr(Stdio::null())
+                .stdout(Stdio::null()),
+            Some(plaintext),
+        )
+            ? ;
+
+        if ! output.status.success() {
+            match output.status.code() {
+                Some(code) => {
+                    error!("GPG encrypt process failed, error_code={}", code);
+                },
+                None => {
+                    error!("GPG encrypt process failed without error");
+                },
+            }
+            return Err(());
+        }
+
+        trace!("Succefully encrypted {} bytes of plaintext into file, path=\"{}\"",
+               plaintext_length, path_output.display());
+
+        Ok(())
     }
 }
