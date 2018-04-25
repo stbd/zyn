@@ -84,10 +84,10 @@ class zyn_development_environment(
         $packages = [
           'build-essential',
           'libgpgme11-dev',
-          'stress', # Required for automated GPG key generation
+          'haveged',            # Used to generate randomness for security operations
           'python3',
           'python3-pip',
-          'shellcheck', # Static analyser for bash scripts
+          'shellcheck',         # Static analyser for bash scripts
         ]
 
         package { $packages :
@@ -136,7 +136,7 @@ class zyn_development_environment(
                timeout => 600,
                require => [
                  User["$developer_name"],
-                 Package['stress'],
+                 Package['haveged'],
                  Exec['prepare-home'],
                ],
         }

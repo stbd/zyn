@@ -25,11 +25,8 @@ Passphrase: $password
 %echo Test key generated
 EOF
 
-	stress --cpu 10 --io 10 --vm 1 -t 600 &> /dev/null &
-	echo "Started stress process to cause background noise for gpg key generation"
 	gpg --batch --gen-key "$key_settings"
 	echo "Key generation done, killing stress process"
-	killall stress &> /dev/null
     else
 	echo "GPG keys for test user \"$username\" already exists"
     fi
