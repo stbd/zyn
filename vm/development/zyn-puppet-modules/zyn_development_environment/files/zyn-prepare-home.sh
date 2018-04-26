@@ -10,7 +10,7 @@ path_user_home=$2
 
 # Make sure home has all files from skeleton
 for path in /etc/skel/.*; do
-    path_in_home="$path_user_home/$(basename $path)"
+    path_in_home="$path_user_home/$(basename "$path")"
     if [ -f "$path" ] && [ ! -f "$path_in_home" ]; then
         cp "$path" "$path_in_home"
         chown "$username:$username" "$path_in_home"

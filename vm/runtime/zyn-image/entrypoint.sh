@@ -56,4 +56,4 @@ echo "Starting Zyn server"
     --gpg-fingerprint "$(< $path_fingerprint base64 -d)" \
     --path-cert "$path_pem_cert" \
     --path-key "$path_pem_key" \
-    $@
+    "$@"
