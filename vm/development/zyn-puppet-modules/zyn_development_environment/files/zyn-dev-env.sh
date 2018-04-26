@@ -2,7 +2,7 @@ echo -e "
 \tZyn - Development environment
 
 Project repository is mounted to $ZYN_ROOT
-asd
+
 Use user \"vagrant\" to have sudo access to the machine
 su vagrant  # password: vagrant
 
@@ -56,16 +56,70 @@ function zyn-system-tests() {
 }
 
 function zyn-static-analysis() {
-    # todo: iterate over all files in repo and also check .sh files
-    path_project=$HOME/zyn/tests/zyn_util/
+    result=0
+    path_project=$ZYN_ROOT
     pushd "$path_project" &> /dev/null
-    r=0
-    flake8 || r=1
+    for file in $(git ls-files); do
+
+        if [[ "$file" = *".py" ]]; then
+            flake8 "$file" || result=1
+        elif [[ "$file" = *".sh" ]]; then
+            shellcheck "$file" || result=1
+        else
+            # Other file types are currently ignored
+            # echo "Unchecked file: $file"
+            :
+        fi
+    done
     popd &> /dev/null
-    return "$r"
 }
 
-# todo: zyn-all-tests
+function zyn-all-tests() {
+    cmd_static_analysis=zyn-static-analysis
+    cmd_build=zyn-build
+    cmd_unittests=zyn-unittests
+    cmd_system_tests=zyn-system-tests
+
+    "$cmd_build"
+    result_build=$?
+
+    if [ "$result_build" -ne 0 ]; then
+        echo "Build failed, replicate the problem with:"
+        echo "$cmd_build"
+        return 1
+    fi
+
+    "$cmd_static_analysis"
+    result_static_analysis=$?
+
+    "$cmd_unittests"
+    result_unittests=$?
+
+    "$cmd_system_tests"
+    result_system_tests=$?
+
+    if [ "$result_static_analysis" -ne 0 ]; then
+        echo "Code static analysis failed, replicate the problem with:"
+        echo "$cmd_build"
+        return 1
+    fi
+
+    if [ "$result_unittests" -ne 0 ]; then
+        echo "Unittests failed, replicate the problem with:"
+        echo "$cmd_unittests"
+        return 1
+    fi
+
+    if [ "$result_system_tests" -ne 0 ]; then
+        echo "System tests failed, replicate the problem with:"
+        echo "$cmd_system_tests"
+        return 1
+    fi
+
+    echo
+    echo "--------------------------------"
+    echo "All tests completed successfully"
+}
 
 function zyn-run-cli-client() {
     python3 "$ZYN_ROOT"/tests/zyn_util/cli_client.py \
