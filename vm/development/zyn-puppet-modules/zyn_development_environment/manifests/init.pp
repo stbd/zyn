@@ -104,18 +104,42 @@ class zyn_development_environment(
                ]
         }
 
+        file { 'zyn-install-rust-debian-script' :
+        ensure => file,
+               path => "${developer_home}/.zyn-install-rust-debian.sh",
+               source => 'puppet:///modules/zyn_development_environment/zyn-install-rust-debian.sh',
+               group => "$developer_name",
+               owner => "$developer_name",
+               mode => 0776,
+               require => User["$developer_name"],
+        }
+
         exec { 'install-rust' :
-                 command => '/vagrant_data/env/scripts/install-rust-debian.sh',
+                 command => "${developer_home}/.zyn-install-rust-debian.sh",
                provider => shell,
                onlyif => 'test ! -e /usr/local/bin/rustc',
                timeout => 600,
+               require => File["zyn-install-rust-debian-script"],
+        }
+
+        file { 'zyn-install-libressl-debian-script' :
+        ensure => file,
+               path => "${developer_home}/.zyn-install-libressl-debian.sh",
+               source => 'puppet:///modules/zyn_development_environment/zyn-install-libressl-debian.sh',
+               group => "$developer_name",
+               owner => "$developer_name",
+               mode => 0776,
+               require => User["$developer_name"],
         }
 
         exec { 'install-libressl' :
-                 command => '/vagrant_data/env/scripts/install-libressl-debian.sh',
+                 command => "${developer_home}/.zyn-install-libressl-debian.sh",
                provider => shell,
                onlyif => '/usr/bin/test ! -f /usr/lib/libtls.la',
-               require => Package['build-essential'],
+               require => [
+                   File['zyn-install-libressl-debian-script'],
+                   Package['build-essential'],
+               ],
                timeout => 600,
         }
 
