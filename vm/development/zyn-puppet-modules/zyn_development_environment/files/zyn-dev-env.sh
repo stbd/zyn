@@ -11,6 +11,7 @@ zyn-build            # Build server
 zyn-unittests        # Build and run unittest
 zyn-system-tests     # Run system tests (requires server to be build)
 zyn-static-analysis  # Run static analysis for all files in project
+zyn-all-tests        # Runs all tests and analysis, should be run before commit
 
 Other commands:
 zyn-run-cli-client
