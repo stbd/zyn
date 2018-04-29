@@ -81,6 +81,8 @@ function zyn-all-tests() {
     cmd_unittests=zyn-unittests
     cmd_system_tests=zyn-system-tests
 
+    result=0
+
     "$cmd_build"
     result_build=$?
 
@@ -101,25 +103,28 @@ function zyn-all-tests() {
 
     if [ "$result_static_analysis" -ne 0 ]; then
         echo "Code static analysis failed, replicate the problem with:"
-        echo "$cmd_build"
-        return 1
+        echo "$cmd_static_analysis"
+        result=1
     fi
 
     if [ "$result_unittests" -ne 0 ]; then
         echo "Unittests failed, replicate the problem with:"
         echo "$cmd_unittests"
-        return 1
+        result=1
     fi
 
     if [ "$result_system_tests" -ne 0 ]; then
         echo "System tests failed, replicate the problem with:"
         echo "$cmd_system_tests"
-        return 1
+        result=1
     fi
 
-    echo
-    echo "--------------------------------"
-    echo "All tests completed successfully"
+    if [ "$result" -eq 0 ]; then
+        echo
+        echo "--------------------------------"
+        echo "All tests completed successfully"
+    fi
+    return "$result"
 }
 
 function zyn-run-cli-client() {
