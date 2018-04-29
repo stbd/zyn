@@ -1,7 +1,6 @@
 use std::cmp::{ min };
 use std::fmt::{ Display, Formatter, Result as FmtResult } ;
-use std::fs::{ OpenOptions, File, remove_file };
-use std::io::{ Read, Write };
+use std::fs::{ OpenOptions, remove_file };
 use std::option::{ Option };
 use std::path::{ PathBuf, Path, Display as PathDisplay };
 use std::ptr::{ copy };
@@ -780,6 +779,10 @@ impl FileImpl {
 
         self.is_edit_allowed(user) ? ;
 
+        if offset > self.buffer.len() as u64 {
+            return Err(FileError::InvalidOffsets);
+        }
+
         let min_buffer_size = offset as usize + buffer.len();
         if self.buffer.len() < min_buffer_size {
             self.buffer.resize(min_buffer_size, 0);
@@ -813,6 +816,10 @@ impl FileImpl {
         }
 
         self.is_edit_allowed(user) ? ;
+
+        if offset > self.buffer.len() as u64 {
+            return Err(FileError::InvalidOffsets);
+        }
 
         let min_buffer_size = self.buffer.len() + buffer.len();
         if self.buffer.len() < min_buffer_size {
@@ -888,7 +895,9 @@ impl FileImpl {
         self.is_edit_allowed(user) ? ;
 
         let end_offset = offset + size;
-        let end_offset = min(end_offset, self.buffer.len() as u64);
+        if end_offset > self.buffer.len() as u64 {
+            return Err(FileError::InvalidOffsets);
+        }
         let _: Buffer = self.buffer.drain(offset as usize .. end_offset as usize).collect();
 
         self.metadata.revision += 1;

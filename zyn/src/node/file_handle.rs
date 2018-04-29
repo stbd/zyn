@@ -20,6 +20,7 @@ pub enum FileError {
     DeleteIsonlyAllowedForLastPart,
     FileLockedByOtherUser,
     FileNotLocked,
+    InvalidOffsets,
 }
 
 #[derive(Clone, Debug)]

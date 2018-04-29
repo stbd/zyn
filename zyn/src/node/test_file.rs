@@ -125,6 +125,33 @@ fn test_write_delete_insert_read() {
 }
 
 #[test]
+fn test_invalid_edit_delete() {
+    let buffer = vec![1, 2 ,3];
+    let mut state = State::init();
+    let mut access = state.open();
+    let revision = access.write(0, 0, buffer.clone()).unwrap();
+    assert!(access.delete(revision, 0, buffer.len() as u64 + 3).is_err());
+}
+
+#[test]
+fn test_invalid_edit_insert() {
+    let buffer = vec![1, 2 ,3];
+    let mut state = State::init();
+    let mut access = state.open();
+    let revision = access.write(0, 0, buffer.clone()).unwrap();
+    assert!(access.insert(revision, 5, vec![4, 5, 6]).is_err());
+}
+
+#[test]
+fn test_invalid_edit_write() {
+    let buffer = vec![1, 2 ,3];
+    let mut state = State::init();
+    let mut access = state.open();
+    let revision = access.write(0, 0, buffer.clone()).unwrap();
+    assert!(access.write(revision, 5, vec![4, 5, 6]).is_err());
+}
+
+#[test]
 fn test_read_empty_file() {
     let mut state = State::init();
     let mut access = state.open();
@@ -321,15 +348,17 @@ fn test_metadata_size_is_updated() {
     let mut access = state.open();
     let buffer_1: Buffer = vec![4, 5, 6, 7, 8];
     let revision = access.write(0, 0, buffer_1.clone()).unwrap();
-    assert!(state.properties().size == buffer_1.len() as u64);
+    let mut size = buffer_1.len() as u64;
+    assert!(state.properties().size == size);
+
     let revision = access.delete(revision, 0, 2).unwrap();
-    assert!(state.properties().size == (buffer_1.len() as u64 - 2));
+    size -= 2;
+    assert!(state.properties().size == size);
 
     let buffer_2: Buffer = vec![11, 12];
     let _ = access.insert(revision, 0, buffer_2.clone()).unwrap();
-    assert!(
-        state.properties().size == (buffer_1.len() as u64 + buffer_2.len() as u64 - 2)
-    );
+    size += buffer_2.len() as u64;
+    assert!(state.properties().size == size);
 }
 
 #[test]

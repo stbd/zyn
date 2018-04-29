@@ -143,6 +143,7 @@ fn map_file_error_to_uint(result: FileError) -> u64 {
         FileError::DeleteIsonlyAllowedForLastPart => 304,
         FileError::FileLockedByOtherUser => 305,
         FileError::FileNotLocked => 306,
+        FileError::InvalidOffsets => 307,
     }
 }
 
