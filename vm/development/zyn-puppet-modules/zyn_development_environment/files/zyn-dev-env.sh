@@ -72,6 +72,7 @@ function zyn-static-analysis() {
         fi
     done
     popd &> /dev/null
+    return "$result"
 }
 
 function zyn-all-tests() {
