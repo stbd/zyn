@@ -178,6 +178,10 @@ impl Metadata {
         Err(())
     }
 
+    fn offset_to_block_offset(& self, block_index: u32, offset: u64) -> u64 {
+        offset - self.block_descriptions[block_index as usize].offset
+    }
+
     fn drain_pages(& mut self) -> Drain<FileBlock> {
         self.block_descriptions.drain(..)
     }
@@ -665,6 +669,10 @@ impl FileImpl {
 
     fn write_block(& mut self) -> Result<(), ()> {
 
+        if self.buffer.len() > self.metadata.max_block_size {
+            panic!("Trying to write block size larger that max block size");
+        }
+
         let path = FileImpl::path_data(& self.path_basename, self.current_block_index);
         if path.exists() {
             remove_file(& path)
@@ -771,6 +779,7 @@ impl FileImpl {
             self.swap_block(block_number)
                 .map_err(| () | FileError::InternalError)
                 ? ;
+
         }
 
         if revision != self.metadata.revision {
@@ -779,18 +788,20 @@ impl FileImpl {
 
         self.is_edit_allowed(user) ? ;
 
-        if offset > self.buffer.len() as u64 {
+        let offset_block = self.metadata.offset_to_block_offset(self.current_block_index, offset);
+
+        if offset_block > self.buffer.len() as u64 {
             return Err(FileError::InvalidOffsets);
         }
 
-        let min_buffer_size = offset as usize + buffer.len();
+        let min_buffer_size = offset_block as usize + buffer.len();
         if self.buffer.len() < min_buffer_size {
             self.buffer.resize(min_buffer_size, 0);
         }
 
         let p = self.buffer.as_mut_ptr();
         unsafe {
-            copy(buffer.as_ptr(), p.offset(offset as isize), buffer.len());
+            copy(buffer.as_ptr(), p.offset(offset_block as isize), buffer.len());
         }
 
         self.metadata.revision += 1;
@@ -817,7 +828,9 @@ impl FileImpl {
 
         self.is_edit_allowed(user) ? ;
 
-        if offset > self.buffer.len() as u64 {
+        let offset_block = self.metadata.offset_to_block_offset(self.current_block_index, offset);
+
+        if offset_block > self.buffer.len() as u64 {
             return Err(FileError::InvalidOffsets);
         }
 
@@ -829,11 +842,11 @@ impl FileImpl {
         let p = self.buffer.as_mut_ptr();
         unsafe {
             copy(
-                p.offset(offset as isize),
-                p.offset(offset as isize + buffer.len() as isize),
-                self.buffer.len() - buffer.len() - offset as usize
+                p.offset(offset_block as isize),
+                p.offset(offset_block as isize + buffer.len() as isize),
+                self.buffer.len() - buffer.len() - offset_block as usize
             );
-            copy(buffer.as_ptr(), p.offset(offset as isize), buffer.len());
+            copy(buffer.as_ptr(), p.offset(offset_block as isize), buffer.len());
         }
 
         self.metadata.revision += 1;
@@ -843,24 +856,27 @@ impl FileImpl {
 
     pub fn read(& mut self, offset: u64, size: u64)
                 -> Result<(Buffer, FileRevision), FileError> {
+
         if ! self.metadata.is_in_block(self.current_block_index, offset, size) {
-            let file_number = self.metadata.find_block(offset, size)
+            let block_number = self.metadata.find_block(offset, size)
                 .map_err(| () | FileError::OffsetAndSizeDoNotMapToPartOfFile)
                 ? ;
 
-            self.swap_block(file_number)
+            self.swap_block(block_number)
                 .map_err(| () | FileError::InternalError)
                 ? ;
+
         }
 
-        let end_offset = offset + size;
+        let offset_block = self.metadata.offset_to_block_offset(self.current_block_index, offset);
+        let end_offset = offset_block + size;
         let end_offset = min(end_offset, self.buffer.len() as u64);
-        let fixed_sized_to_read = end_offset - offset;
+        let fixed_sized_to_read = end_offset - offset_block;
         let mut buffer: Buffer = vec![0; fixed_sized_to_read as usize];
         let p = buffer.as_mut_ptr();
 
         unsafe {
-            copy(self.buffer.as_ptr().offset(offset as isize), p, buffer.len());
+            copy(self.buffer.as_ptr().offset(offset_block as isize), p, buffer.len());
         }
 
         Ok((buffer, self.metadata.revision))
@@ -894,11 +910,13 @@ impl FileImpl {
 
         self.is_edit_allowed(user) ? ;
 
-        let end_offset = offset + size;
+        let offset_block = self.metadata.offset_to_block_offset(self.current_block_index, offset);
+
+        let end_offset = offset_block + size;
         if end_offset > self.buffer.len() as u64 {
             return Err(FileError::InvalidOffsets);
         }
-        let _: Buffer = self.buffer.drain(offset as usize .. end_offset as usize).collect();
+        let _: Buffer = self.buffer.drain(offset_block as usize .. end_offset as usize).collect();
 
         self.metadata.revision += 1;
         self.update_current_block_size();
