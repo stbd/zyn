@@ -83,7 +83,10 @@ function _handle_register_response(websocket_msg)
 function zyn_init(user_id, callback_for_success, callback_for_error) {
     _user_id = user_id;
 
-    _socket = new WebSocket("ws://localhost:8080/websocket");
+    var url = new URL(window.location.href)
+    var websocket_url = "ws://" + url.hostname + ":" + url.port + "/websocket"
+
+    _socket = new WebSocket(websocket_url);
     _callback_for_success = callback_for_success;
     _callback_for_error = callback_for_error;
     _transaction_ongoing = true;
