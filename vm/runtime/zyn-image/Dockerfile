@@ -59,6 +59,7 @@ run apt-get update \
     && apt-get install \
        libgpgme11-dev \
        expect \
+       haveged \
        -y
 
 run mkdir /zyn-data
