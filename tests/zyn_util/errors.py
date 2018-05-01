@@ -25,6 +25,9 @@ InternalError = 301
 RevisionTooOld = 302
 OffsetAndSizeDoNotMapToPartOfFile = 303
 DeleteIsonlyAllowedForLastPart = 304
+FileLockedByOtherUser = 305
+FileNotLocked = 306
+InvalidOffsets = 307
 
 
 def error_to_string(error):
@@ -82,5 +85,11 @@ def error_to_string(error):
         return "OffsetAndSizeDoNotMapToPartOfFile"
     elif error == 304:
         return "DeleteIsonlyAllowedForLastPart"
+    elif error == 305:
+        return "FileLockedByOtherUser"
+    elif error == 306:
+        return "FileNotLocked"
+    elif error == 307:
+        return "InvalidOffsets"
     else:
         raise RuntimeError("Unknown error")
