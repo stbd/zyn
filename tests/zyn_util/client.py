@@ -3,6 +3,7 @@ import glob
 import hashlib
 import json
 import logging
+import posixpath
 import os.path
 
 import zyn_util.errors
@@ -30,7 +31,7 @@ def check_rsp(rsp):
 
 
 def _split_path(path):  # todo: rename?
-    path_1, path_2 = os.path.split(path)
+    path_1, path_2 = posixpath.split(path)
     if not path_1 or not path_2:
         raise ZynClientException('Path could not be split, path="{}"'.format(path))
     return path_1, path_2
@@ -41,7 +42,7 @@ def _join_paths(path_1, path_2):
 
 
 def _join_paths_(list_of_paths):
-    path = os.path.normpath('/'.join(list_of_paths))
+    path = posixpath.normpath('/'.join(list_of_paths))
     if path.startswith('//'):
         path = path[1:]
     return path
@@ -106,7 +107,7 @@ class LocalFile:
         return _join_paths(path_data_root, self._path_in_remote)
 
     def exists_locally(self, path_data_root):
-        return os.path.exists(self.path_to_local_file(path_data_root))
+        return posixpath.exists(self.path_to_local_file(path_data_root))
 
     def has_changes(self, path_data_root):
         return self._checksum != self._calculate_cheksum_from_file(path_data_root)
@@ -153,35 +154,76 @@ class LocalFile:
 
             self._revision = open_rsp.revision
             differ = difflib.SequenceMatcher(None, remote_data, local_data)
+            remote_index_offset = 0
 
             for type_of_change, i1, i2, j1, j2 in differ.get_opcodes():
 
-                logger.debug('type="{}", (i1={}, i2={}) "{}" - (j1={}, j2={}) "{}"'.format(
-                    type_of_change, i1, i2, remote_data[i1:i2], j1, j2, local_data[j1:j2]))
+                logger.debug(
+                    ('type="{}", remote_index_offset={}, ' +
+                     '(i1={}, i2={}) "{}" - (j1={}, j2={}) "{}"').format(
+                         type_of_change,
+                         remote_index_offset,
+                         i1,
+                         i2,
+                         remote_data[i1:i2],
+                         j1,
+                         j2,
+                         local_data[j1:j2]
+                    ))
 
                 if type_of_change == 'equal':
                     pass
 
                 elif type_of_change == 'delete':
                     delete_size = i2 - i1
-                    rsp = connection.ra_delete(self._node_id, self._revision, i1, delete_size)
+                    remote_index = i1 + remote_index_offset
+                    remote_index_offset -= delete_size
+                    rsp = connection.ra_delete(
+                        self._node_id,
+                        self._revision,
+                        remote_index,
+                        delete_size
+                    )
                     check_rsp(rsp)
                     self._revision = rsp.as_delete_rsp().revision
 
                 elif type_of_change == 'replace':
                     delete_size = i2 - i1
+                    remote_index = i1 + remote_index_offset
                     if delete_size > 0:
-                        rsp = connection.ra_delete(self._node_id, self._revision, i1, delete_size)
+                        rsp = connection.ra_delete(
+                            self._node_id,
+                            self._revision,
+                            remote_index,
+                            delete_size
+                        )
                         check_rsp(rsp)
                         self._revision = rsp.as_delete_rsp().revision
-                    rsp = connection.ra_insert(self._node_id, self._revision, i1, local_data[j1:j2])
+
+                    insert_size = j2 - j1
+                    remote_index_offset += insert_size - delete_size
+                    rsp = connection.ra_insert(
+                        self._node_id,
+                        self._revision,
+                        remote_index,
+                        local_data[j1:j2]
+                    )
                     check_rsp(rsp)
-                    self._revision = rsp.as_write_rsp()
+                    self._revision = rsp.as_write_rsp().revision
 
                 elif type_of_change == 'insert':
-                    rsp = connection.ra_insert(self._node_id, self._revision, i1, local_data[j1:j2])
+                    remote_index = i1 + remote_index_offset
+                    insert_size = j2 - j1
+                    remote_index_offset += insert_size
+                    rsp = connection.ra_insert(
+                        self._node_id,
+                        self._revision,
+                        remote_index,
+                        local_data[j1:j2]
+                    )
                     check_rsp(rsp)
                     self._revision = rsp.as_insert_rsp().revision
+                    insert_size = j2 - j1
 
                 else:
                     raise ZynClientException('Unhandled change type, type="{}"'.format(
@@ -221,7 +263,7 @@ class LocalFile:
     def fetch(self, connection, path_data_root):
 
         path_local = self.path_to_local_file(path_data_root)
-        if os.path.exists(path_local):
+        if posixpath.exists(path_local):
             raise ZynClientException('Local file already exists, path_local="{}"'.format(
                 path_local
             ))
@@ -239,7 +281,7 @@ class LocalFile:
     def sync(self, connection, path_data_root, logger):
 
         path_local = self.path_to_local_file(path_data_root)
-        if not os.path.exists(path_local):
+        if not posixpath.exists(path_local):
             raise ZynClientException('Local file does not exist, path_in_remote="{}"'.format(
                 self._path_in_remote
             ))
@@ -303,7 +345,7 @@ class ServerInfo:
 
 class ZynFilesystemClient:
     def init_state_file(path_file, path_data_directory):
-        if os.path.exists(path_file):
+        if posixpath.exists(path_file):
             raise RuntimeError('Client state file already exists, path={}'.format(path_file))
 
         with open(path_file, 'w') as fp:
@@ -326,7 +368,7 @@ class ZynFilesystemClient:
         self._path_data = None
         self._server_info = ServerInfo()
 
-        if not os.path.exists(path_state):
+        if not posixpath.exists(path_state):
             raise RuntimeError()
         self._load()
 
@@ -429,8 +471,8 @@ class ZynFilesystemClient:
             file = self._local_files[path_in_remote]
             path_local = file.path_to_local_file(self._path_data)
         except KeyError:
-            raise ZynClientException('Local file does not exist, path_local="{}"'.format(
-                path_local
+            raise ZynClientException('Local file does not exist, path_in_remote="{}"'.format(
+                path_in_remote
             ))
 
         if not os.path.exists(path_local):
@@ -505,6 +547,10 @@ class ZynFilesystemClient:
 
     def add(self, path_in_remote):
 
+        file = LocalFile(path_in_remote)
+        if not file.exists_locally(self._path_data):
+            raise ZynClientException('Local file "{}" does not exist'.format(path_in_remote))
+
         rsp = self._connection.query_list(path=path_in_remote)
         if rsp.error_code() == zyn_util.errors.InvalidPath:
             exists = False
@@ -515,7 +561,6 @@ class ZynFilesystemClient:
             raise ZynClientException('File "{}" already exists'.format(path_in_remote))
 
         self.create_random_access_file(path_in_remote)  # todo: parametritize
-        file = LocalFile(path_in_remote)
         file.push(self._connection, self._path_data)
         self._local_files[path_in_remote] = file
 

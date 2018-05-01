@@ -1,10 +1,11 @@
 import argparse
 import cmd
+import datetime
 import getpass
 import logging
 import os.path
+import posixpath
 import sys
-import datetime
 
 import zyn_util.connection
 import zyn_util.client
@@ -15,6 +16,30 @@ PATH_TO_DEFAULT_STATE_FILE = os.path.expanduser("~/.zyn-cli-client")
 
 def _command_completed():
     print('Command completed successfully')
+
+
+def _join_paths(list_of_paths):
+    path = posixpath.normpath('/'.join(list_of_paths))
+    if path.startswith('//'):
+        path = path[1:]
+    return path
+
+
+def _normalise_path(path_original):
+    elements = []
+
+    path = path_original
+    while True:
+        path, e = os.path.split(path)
+        if e != '':
+            elements.append(e)
+        if e == '' or path == '':
+            break
+
+    if path != '':
+        elements.append('/')
+    elements.reverse()
+    return _join_paths(elements)
 
 
 class ZynCliClient(cmd.Cmd):
@@ -44,6 +69,7 @@ class ZynCliClient(cmd.Cmd):
         self.prompt = '{}:{} {}$ '.format("127.0.0.1", "1234", current_folder)
 
     def _to_absolute_remote_path(self, path):
+        path = _normalise_path(path)
         if os.path.isabs(path):
             return path
 
@@ -311,6 +337,8 @@ def main():
 
     path_data = args['init_data_directory_at']
     path_state_file = args['path_to_client_file']
+
+    logging.getLogger(__name__).debug('Using client file from "{}"'.format(path_state_file))
 
     if path_data is not None and os.path.exists(path_state_file):
         raise NotImplementedError()

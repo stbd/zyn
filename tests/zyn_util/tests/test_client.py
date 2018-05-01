@@ -31,6 +31,15 @@ class ClientState:
 
         path_local = _join_paths(self.path_data, path_in_remote)
         assert os.path.exists(path_local)
+        content = open(path_local, 'rb').read()
+        if content != expected_content:
+            print('File content does not match the excepted content')
+            print('Content:')
+            print(content)
+            print('----')
+            print('Expected:')
+            print(expected_content)
+            print('----')
         assert open(path_local, 'rb').read() == expected_content
 
     def write_local_file_text(self, path_in_remote, text_content):
@@ -254,3 +263,19 @@ class TestClient(zyn_util.tests.common.TestCommon):
         self.assertEqual(len(tracked_files), 2)
         self._validate_tracked_file(tracked_files, filename_1, exists_locally=True, tracked=True)
         self._validate_tracked_file(tracked_files, filename_1, exists_locally=True, tracked=True)
+
+    def test_multiple_sequential_edits_to_file(self):
+        client_state_1, client_state_2 = self._start_server_and_create_number_of_clients(2)
+        path_remote = '/file'
+
+        data_1 = '112233446677'
+        data_2 = '113355668877'
+
+        client_state_1.create_local_file(path_remote)
+        client_state_1.write_local_file_text(path_remote, data_1)
+        client_state_1.client.add(path_remote)
+        client_state_1.write_local_file_text(path_remote, data_2)
+        client_state_1.client.sync(path_remote)
+
+        client_state_2.client.fetch(path_remote)
+        client_state_2.validate_text_file_content(path_remote, data_2)
