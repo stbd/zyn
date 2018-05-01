@@ -4,6 +4,7 @@ run apt-get update \
     && apt-get install \
        gpg \
        openssl \
+       haveged \
        -y
 
 run mkdir /gpg-keys
