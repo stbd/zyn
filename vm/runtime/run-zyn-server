@@ -12,7 +12,7 @@ import time
 
 
 PATH_DIR = os.path.dirname(os.path.abspath(__file__))
-PATH_IMAGE = PATH_DIR + '/zyn-image'
+PATH_IMAGE = PATH_DIR + '/zyn'
 PATH_SCRIPT_TO_PACK_ZYN_SRC = PATH_IMAGE + '/create-zyn-src-tar.sh'
 PATH_ZYN_SRC = PATH_IMAGE + '/zyn-src.tar.gz'
 IMAGE_TAG = 'zyn'
