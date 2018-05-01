@@ -10,6 +10,11 @@
  * Rethink were properties should be stored, some cases it would make sense to have them in filesystem instead of description/metadata for faster access
  * Cleanup and remove references to GPGME
  * Replace all encrypt/decrypt operations with encrypt_to_file and decrypt_from_file
+ * Think how commands could be batched together
+
+## Client:
+ * In add, check that local file exists
+ * Windows paths have... issues
 
 ## Check
  * Are files closed when user disconnects, system test case
