@@ -40,6 +40,7 @@ function zyn-unittests() {
 system_test_files=( \
     "test_basic_cases.py" \
     "test_edit_files.py" \
+    "test_client.py" \
 )
 
 function _zyn-system-tests() {
