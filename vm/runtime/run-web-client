@@ -1,0 +1,113 @@
+#!/usr/bin/env python
+
+import argparse
+import os.path
+import sys
+import subprocess
+
+PATH_DIR = os.path.dirname(os.path.abspath(__file__))
+PATH_IMAGE = PATH_DIR + '/web'
+PATH_SCRIPT_TO_PACK_SRC = PATH_IMAGE + '/create-src-tar.sh'
+IMAGE_TAG = 'zyn-web-client'
+
+
+def _pack_src():
+    process = subprocess.Popen(
+        [
+            PATH_SCRIPT_TO_PACK_SRC,
+        ],
+        cwd=PATH_DIR,
+    )
+    process.communicate()
+    if process.returncode != 0:
+        raise RuntimeError('Packing Zyn source failed')
+
+
+def _build_image(image_tag):
+    build_cmd = [
+        'docker',
+        'build',
+        '-t',
+        image_tag,
+        PATH_IMAGE
+    ]
+
+    process = subprocess.Popen(
+        build_cmd,
+        cwd=PATH_DIR,
+    )
+    process.communicate()
+    if process.returncode != 0:
+        raise RuntimeError('Building image failed')
+
+
+
+def _main():
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description='Tools to run Zyn server in Docker container',
+        epilog='''
+Example:
+run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --init --bind-to "localhost:8080" --  --memory 2g --detach --rm
+'''
+    )
+
+    parser.add_argument('web-server-port')
+    parser.add_argument('zyn-server-ip')
+    parser.add_argument('zyn-server-port')
+    parser.add_argument('zyn-server-path-to-key')
+    parser.add_argument('zyn-server-path-to-cert')
+    parser.add_argument('--image-tag', default=IMAGE_TAG)
+    parser.add_argument('--skip-pack-src', action='store_true')
+
+    system_args = sys.argv[1:]
+    docker_args = []
+    if '--' in system_args:
+        docker_args = system_args[system_args.index('--') + 1:]
+        system_args = system_args[:system_args.index('--')]
+
+    args = vars(parser.parse_args(system_args))
+
+    print (args)
+
+    tag = args['image_tag']
+    port = args['web-server-port']
+    server_ip = args['zyn-server-ip']
+    server_port = args['zyn-server-port']
+    path_cert = args['zyn-server-path-to-cert']
+    path_key = args['zyn-server-path-to-key']
+    path_image_cert = '/workdir/cert.pem'
+    path_image_key = '/workdir/key.pem'
+
+    if not args['skip_pack_src']:
+        _pack_src()
+
+    _build_image(tag)
+
+    run_cmd = [
+        'docker',
+        'run',
+        '-p', '{}:8080/tcp'.format(port),
+        '-v', '{}:{}'.format(path_cert, path_image_cert),
+        '-v', '{}:{}'.format(path_key, path_image_key),
+    ]
+
+    run_cmd += docker_args
+
+    run_cmd += [
+        '{}:latest'.format(tag),
+        '8080',
+        server_ip,
+        server_port,
+        path_image_key,
+        path_image_cert,
+    ]
+
+    print (run_cmd)
+    process = subprocess.Popen(
+        run_cmd,
+        cwd=PATH_DIR,
+    )
+
+if __name__ == '__main__':
+    _main()
