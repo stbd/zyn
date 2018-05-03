@@ -2,6 +2,7 @@
 <head>
   <title>Zyn</title>
   <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.3/socket.io.slim.js"></script>
+  <script type="text/javascript" src="https://cdn.rawgit.com/showdownjs/showdown/1.8.6/dist/showdown.min.js"></script>
   <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
   <script type="text/javascript" src="{{ static_url('zyn.js') }}"></script>
 </head>
@@ -60,9 +61,13 @@
        var parent_element = content_element.parentElement;
        parent_element.removeChild(content_element);
 
-       var document_element = document.createElement('p');
-       document_element.appendChild(document.createTextNode(content));
-       parent_element.appendChild(document_element);
+       var converter = new showdown.Converter();
+       var html = converter.makeHtml(content);
+       parent_element.innerHTML = html;
+
+       //var document_element = document.createElement('p');
+       //document_element.appendChild(document.createTextNode(content));
+       //parent_element.appendChild(document_element);
    }
 
    function _handle_folder_content_list_item_clicked(node_id) {
