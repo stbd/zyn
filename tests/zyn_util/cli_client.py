@@ -7,8 +7,9 @@ import os.path
 import posixpath
 import sys
 
-import zyn_util.connection
 import zyn_util.client
+import zyn_util.connection
+import zyn_util.util
 
 
 PATH_TO_DEFAULT_STATE_FILE = os.path.expanduser("~/.zyn-cli-client")
@@ -332,8 +333,8 @@ def main():
 
     logging.basicConfig(
         format='ZynClient %(asctime)-15s %(filename)s:%(lineno)s %(levelname)s: %(message)s',
-        level=args['verbose'],
     )
+    zyn_util.util.verbose_count_to_log_level(args['verbose'])
 
     path_data = args['init_data_directory_at']
     path_state_file = args['path_to_client_file']

@@ -2,6 +2,7 @@ import argparse
 import base64
 import json
 import logging
+import os
 import os.path
 import uuid
 
@@ -10,6 +11,7 @@ import tornado.web
 import tornado.websocket
 
 import zyn_util.connection
+import zyn_util.util
 
 
 PATH_STATIC_FILES = os.path.dirname(os.path.abspath(__file__)) + '/web-static-files'
@@ -116,12 +118,22 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             node_id = msg['content']['node-id']
 
             content = b''
-            rsp = self._connection.zyn_connection().open_file_read(node_id=node_id)
-            if not rsp.is_error():
-                rsp = rsp.as_open_rsp()
-                if rsp.size > 0:
-                    rsp, data = self._connection.zyn_connection().read_file(node_id, 0, rsp.size)
-                    content = str(base64.b64encode(data), 'ascii')
+            open_rsp = None
+            try:
+                rsp = self._connection.zyn_connection().open_file_read(node_id=node_id)
+                if not rsp.is_error():
+                    open_rsp = rsp.as_open_rsp()
+                    if open_rsp.size > 0:
+                        rsp, data = self._connection.zyn_connection().read_file(
+                            node_id,
+                            0,
+                            open_rsp.size
+                        )
+                        if not rsp.is_error():
+                            content = str(base64.b64encode(data), 'ascii')
+            finally:
+                if open_rsp is not None:
+                    rsp = self._connection.zyn_connection().close_file(node_id=node_id)
 
             self.write_message(json.dumps({
                 'type': msg_type + '-rsp',
@@ -264,13 +276,14 @@ def run_tornado():
             (r'/websocket', WebSocket),
             (r'/(.*)', MainHandler),
         ],
-        cookie_secret="__TODO:_GENERATE_YOUR_OWN_RANDOM_VALUE_HERE__",
+        cookie_secret=base64.b64encode(os.urandom(50)).decode('utf8'),
         static_path=PATH_STATIC_FILES,
         template_path=PATH_TEMPLATES,
         debug=True,
     )
 
     tornado.log.enable_pretty_logging()
+    zyn_util.util.verbose_count_to_log_level(args['verbose'])
 
     global connections
     connections = ConnectionContainer()
