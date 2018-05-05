@@ -422,6 +422,7 @@ class ZynConnection:
             message = self.read_message(end_of_message_field, timeout)
             if message.type() == Message.NOTIFICATION:
                 self._notifications.append(message)
+                continue
             return message
 
     def read_message(self, end_of_message_field=None, timeout=None):
