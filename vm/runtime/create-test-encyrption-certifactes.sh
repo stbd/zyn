@@ -15,6 +15,6 @@ if [ "${path_mount:0:1}" != "/" ]; then
 fi
 
 path_script="$(python -c "import os; print(os.path.realpath('$0'))")"
-path_folder="$(dirname $path_script)"
+path_folder="$(dirname "$path_script")"
 docker build -t test-creadentials "$path_folder"/gpg
 docker run --rm -it -v "$path_mount:/gpg-keys" -v /dev/urandom:/dev/urandom test-creadentials:latest

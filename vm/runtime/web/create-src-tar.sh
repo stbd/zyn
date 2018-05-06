@@ -7,8 +7,8 @@ target=$path_dir/zyn-web-src.tar.gz
 
 tar \
     czf "$target" \
-    --exclude *pyc \
-    --exclude *__pycache__* \
-    --exclude *tests* \
+    --exclude ./*pyc \
+    --exclude ./*__pycache__* \
+    --exclude ./*tests* \
     -C "$path_dir"/../../../tests \
     zyn_util setup.py
