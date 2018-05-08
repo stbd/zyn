@@ -130,23 +130,21 @@ class ZynCliClient(cmd.Cmd):
             print(e)
             return
 
-    def do_create_folder(self, args):
-        'Create folder: [String: name]'
+    def _parser_create_directory(self):
+        parser = argparse.ArgumentParser(prog='list')
+        parser.add_argument('name', type=str)
+        return parser
 
-        args = self._parse_args(args)
-        if len(args) != 1:
-            print('Invalid arguments: expected folder name')
-            return
+    def help_create_directory(self):
+        print(self._parser_create_directory().format_help())
 
-        try:
-            path = self._to_absolute_remote_path(args[0])
-            self._log.debug('Creating folder, path={}'.format(path))
+    def do_create_directory(self, args):
+        parser = self._parser_create_directory()
+        args = vars(parser.parse_args(self._parse_args(args)))
 
-            rsp = self._client.create_folder(path)
-            print('"{}" created, Node Id: {}'.format(path, rsp.node_id))
-        except zyn_util.client.ZynClientException as e:
-            print(e)
-            return
+        path = self._to_absolute_remote_path(args['name'])
+        rsp = self._client.create_directory(path)
+        print('Directory "{}" created successfully with NodeId {}'.format(path, rsp.node_id))
 
     def _parser_list(self):
         parser = argparse.ArgumentParser(prog='list')
@@ -217,14 +215,19 @@ class ZynCliClient(cmd.Cmd):
         args = vars(parser.parse_args(self._parse_args(args)))
         file = args['file']
         path_remote = self._to_absolute_remote_path(file)
+
+        # todo: handle directories and blobs
         self._client.add(path_remote)
 
-        file = self._client.file(path_remote)
-        print('File "{}" (Node Id: {}, revision: {}) pushed remote successfully'.format(
-            file.path_remote,
-            file.node_id,
-            file.revision,
-        ))
+        element = self._client.filesystem_element(path_remote)
+        if element.is_file():
+            print('File "{}" (Node Id: {}, revision: {}) pushed remote successfully'.format(
+                file.path_remote,
+                file.node_id,
+                file.revision,
+            ))
+        else:
+            raise NotImplementedError()
 
     def _parser_modify_user(self):
         parser = argparse.ArgumentParser(prog='modify_user')
@@ -266,7 +269,7 @@ class ZynCliClient(cmd.Cmd):
 
     def _parser_fetch(self):
         parser = argparse.ArgumentParser(prog='fetch')
-        parser.add_argument('file', type=str)
+        parser.add_argument('path', type=str)
         return parser
 
     def help_fetch(self):
@@ -276,18 +279,30 @@ class ZynCliClient(cmd.Cmd):
         parser = self._parser_fetch()
         args = vars(parser.parse_args(self._parse_args(args)))
 
-        file = args['file']
-        path_remote = self._to_absolute_remote_path(file)
+        path = args['path']
+        path_remote = self._to_absolute_remote_path(path)
 
-        print('Fetching file, path={}'.format(path_remote))
+        print('Fetching, path={}'.format(path_remote))
+
         self._client.fetch(path_remote)
-        file = self._client.file(path_remote)
-        print('File "{}" (Node Id: {}, revision: {}) fetched to "{}" successfully'.format(
-            file.path_remote,
-            file.node_id,
-            file.revision,
-            file.path_local
-        ))
+
+        element = self._client.filesystem_element(path_remote)
+
+        if element.is_file():
+            print('File "{}" (Node Id: {}, revision: {}) fetched to "{}" successfully'.format(
+                element.path_remote,
+                element.node_id,
+                element.revision,
+                element.path_local
+            ))
+        elif element.is_directory():
+            print('Directory "{}" (Node Id: {}) fetched to "{}" successfully'.format(
+                element.path_remote,
+                element.node_id,
+                element.path_local
+            ))
+        else:
+            raise RuntimeError()
 
     def _parser_sync(self):
         parser = argparse.ArgumentParser(prog='sync')

@@ -1,4 +1,6 @@
+import glob
 import os
+import os.path
 import random
 
 import zyn_util.tests.common
@@ -23,6 +25,15 @@ class ClientState:
         self.path_state_file = path_state_file
         self.path_data = path_data
         self.client = zyn_client
+
+    def validate_directory(self, path_in_remote, expected_child_elements=[]):
+        path_local = _join_paths_([self.path_data, path_in_remote])
+        assert os.path.exists(path_local)
+        local_children = [
+            os.path.basename(p)
+            for p in glob.glob(_join_paths_([path_local, '*']))
+        ]
+        assert sorted(local_children) == sorted(expected_child_elements)
 
     def validate_text_file_content(self, path_in_remote, expected_text_content=None):
         expected_content = bytearray()
@@ -110,26 +121,33 @@ class TestClient(zyn_util.tests.common.TestCommon):
     def test_resume_client(self):
         data_1 = 'data'
         data_2 = 'datazxcc'
-        filename, path_remote = self._name_to_remote_path('file-1')
+        directory_name, path_directory = self._name_to_remote_path('dir')
+        filename, path_file = self._name_to_remote_path('file-1', path_directory)
 
         client_state_1 = self._start_server_and_create_client(1)
-        client_state_1.client.create_random_access_file(path_remote)
-        client_state_1.client.fetch(path_remote)
-        client_state_1.write_local_file_text(path_remote, data_1)
-        client_state_1.client.sync(path_remote)
+        client_state_1.client.create_directory(path_directory)
+        client_state_1.client.create_random_access_file(path_file)
+        client_state_1.client.fetch(path_directory)
+        client_state_1.client.fetch(path_file)
 
-        tracked_files, _ = client_state_1.client.list('/')
-        self.assertEqual(len(tracked_files), 1)
-        self._validate_tracked_file(tracked_files, filename, exists_locally=True, tracked=True)
+        client_state_1.validate_directory(path_directory, [filename])
+        client_state_1.write_local_file_text(path_file, data_1)
+        client_state_1.client.sync(path_file)
+
         client_state_1.client.store()
 
         client_state_2 = self._create_client(1, False)
         tracked_files, _ = client_state_2.client.list('/')
         self.assertEqual(len(tracked_files), 1)
-        self._validate_tracked_file(tracked_files, filename, exists_locally=True, tracked=True)
+        self._validate_tracked_fs_element(
+            tracked_files,
+            directory_name,
+            exists_locally=True,
+            tracked=True
+        )
 
-        client_state_2.write_local_file_text(path_remote, data_2)
-        client_state_2.client.sync(path_remote)
+        client_state_2.write_local_file_text(path_file, data_2)
+        client_state_2.client.sync(path_file)
 
     def test_validating_server(self):
         client_state_1 = self._start_server_and_create_client(1)
@@ -172,14 +190,14 @@ class TestClient(zyn_util.tests.common.TestCommon):
         client_state_1.client.sync(path_in_remote)
         client_state_2.client.sync(path_in_remote)
 
-    def _validate_tracked_file(self, tracked_files, name, exists_locally, tracked):
+    def _validate_tracked_fs_element(self, tracked_files, name, exists_locally, tracked):
         for f in tracked_files:
             if f.remote_file.name != name:
                 continue
             self.assertEqual(f.local_file.tracked, tracked)
             self.assertEqual(f.local_file.exists_locally, exists_locally)
             return
-        self.assertFalse('tracked file not found')
+        self.assertFalse('Tracked filesystem element not found, name=\"{}\"'.format(name))
 
     def _name_to_remote_path(self, filename, path_parent='/'):
         path = _join_paths_([path_parent, filename])
@@ -191,6 +209,7 @@ class TestClient(zyn_util.tests.common.TestCommon):
         remote_tracked_2, path_remote_tracked_2 = self._name_to_remote_path('tracked_file-2')
         remote_tracked_3, path_remote_tracked_3 = self._name_to_remote_path('tracked_file-3')
         remote_untracked_1, path_remote_untracked_1 = self._name_to_remote_path('untracked_file-1')
+        remote_dir, path_remote_dir = self._name_to_remote_path('dir')
 
         client_state_1.client.create_random_access_file(path_remote_tracked_1)
         client_state_1.client.fetch(path_remote_tracked_1)
@@ -200,16 +219,21 @@ class TestClient(zyn_util.tests.common.TestCommon):
 
         client_state_1.client.create_random_access_file(path_remote_tracked_3)
 
+        client_state_1.client.create_directory(path_remote_dir)
+        client_state_1.client.fetch(path_remote_dir)
+
         client_state_1.create_local_file(path_remote_untracked_1)
 
         tracked_files, untracked_files = client_state_1.client.list('/')
-        self.assertEqual(len(tracked_files), 3)
-        self._validate_tracked_file(
+        self.assertEqual(len(tracked_files), 4)
+        self._validate_tracked_fs_element(
             tracked_files, remote_tracked_1, exists_locally=True, tracked=True)
-        self._validate_tracked_file(
+        self._validate_tracked_fs_element(
             tracked_files, remote_tracked_2, exists_locally=True, tracked=False)
-        self._validate_tracked_file(
+        self._validate_tracked_fs_element(
             tracked_files, remote_tracked_3, exists_locally=False, tracked=False)
+        self._validate_tracked_fs_element(
+            tracked_files, remote_dir, exists_locally=True, tracked=True)
         self.assertEqual(len(untracked_files), 1)
         self.assertTrue(path_remote_untracked_1 in untracked_files)
 
@@ -242,8 +266,10 @@ class TestClient(zyn_util.tests.common.TestCommon):
 
         tracked_files, _ = client_state.client.list('/')
         self.assertEqual(len(tracked_files), 2)
-        self._validate_tracked_file(tracked_files, filename_1, exists_locally=True, tracked=True)
-        self._validate_tracked_file(tracked_files, filename_1, exists_locally=True, tracked=True)
+        self._validate_tracked_fs_element(
+            tracked_files, filename_1, exists_locally=True, tracked=True)
+        self._validate_tracked_fs_element(
+            tracked_files, filename_1, exists_locally=True, tracked=True)
 
     def test_reconnecting_to_server(self):
         client_state = self._start_server_and_create_client(1)
@@ -261,8 +287,10 @@ class TestClient(zyn_util.tests.common.TestCommon):
 
         tracked_files, _ = client_state.client.list('/')
         self.assertEqual(len(tracked_files), 2)
-        self._validate_tracked_file(tracked_files, filename_1, exists_locally=True, tracked=True)
-        self._validate_tracked_file(tracked_files, filename_1, exists_locally=True, tracked=True)
+        self._validate_tracked_fs_element(
+            tracked_files, filename_1, exists_locally=True, tracked=True)
+        self._validate_tracked_fs_element(
+            tracked_files, filename_1, exists_locally=True, tracked=True)
 
     def test_multiple_sequential_edits_to_file(self):
         client_state_1, client_state_2 = self._start_server_and_create_number_of_clients(2)
@@ -279,3 +307,10 @@ class TestClient(zyn_util.tests.common.TestCommon):
 
         client_state_2.client.fetch(path_remote)
         client_state_2.validate_text_file_content(path_remote, data_2)
+
+    def test_fetch_empty_directory(self):
+        client_state, = self._start_server_and_create_number_of_clients(1)
+        path_remote = '/directory'
+        client_state.client.create_directory(path_remote)
+        client_state.client.fetch(path_remote)
+        client_state.validate_directory(path_remote)

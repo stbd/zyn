@@ -95,22 +95,31 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
             path = msg['content']['path']
 
-            files = []
+            elements = []
             rsp = self._connection.zyn_connection().query_list(path=path)
 
             if not rsp.is_error():
                 rsp = rsp.as_query_list_rsp()
                 for element in rsp.elements:
-                    files.append({
+
+                    if element.is_file():
+                        element_type = 'file'
+                    elif element.is_directory():
+                        element_type = 'dir'
+                    else:
+                        raise RuntimeError()
+
+                    elements.append({
                         'name': element.name,
                         'node-id': element.node_id,
+                        'element-type': element_type,
                     })
 
             self.write_message(json.dumps({
                 'type': msg_type + '-rsp',
                 'user-id': user_id,
                 'tab-id': self._tab_id,
-                'files': files,
+                'elements': elements,
             }))
 
         elif msg_type == 'load-file':

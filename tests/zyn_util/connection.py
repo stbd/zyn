@@ -893,6 +893,12 @@ class QueryListResponse:
 
 
 class QueryFilesystemElementResponse:
+    def is_file(self):
+        return self.type_of_element == FILE_TYPE_FILE
+
+    def is_directory(self):
+        return self.type_of_element == FILE_TYPE_FOLDER
+
     def __init__(self, response):
         if response.number_of_fields() != 1:
             _malfomed_message()

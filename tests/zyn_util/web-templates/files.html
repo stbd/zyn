@@ -70,25 +70,38 @@
        //parent_element.appendChild(document_element);
    }
 
-   function _handle_folder_content_list_item_clicked(node_id) {
-       zyn_load_file(node_id, _handle_load_file_rsp)
+   function _handle_folder_content_list_item_clicked(element_type, node_id) {
+       if (element_type === 'dir') {
+           alert('dir');
+       } else if (element_type === 'file') {
+           zyn_load_file(node_id, _handle_load_file_rsp);
+       }
    }
 
    function _create_folder_list_element(element_data) {
        var element = document.createElement('a');
        element.setAttribute('class', 'w3-bar-item w3-button')
-       element.addEventListener('click', function() { _handle_folder_content_list_item_clicked(element_data['node-id']); });
+       element.addEventListener('click', function() { _handle_folder_content_list_item_clicked(
+           element_data['element-type'],
+           element_data['node-id']);
+       });
 
-       element.appendChild(document.createTextNode(element_data['name']));
+       if (element_data['element-type'] === 'file') {
+           name = 'f ' + element_data['name']
+       } else {
+           name = 'd ' + element_data['name']
+       }
+
+       element.appendChild(document.createTextNode(name));
        return element;
    }
 
    function _handle_load_folder_content_response(rsp) {
        var file_list = document.getElementById("file-list");
-       var files = rsp['files'];
+       var elements = rsp['elements'];
 
-       for (let file of files) {
-           file_list.appendChild(_create_folder_list_element(file));
+       for (let element of elements) {
+           file_list.appendChild(_create_folder_list_element(element));
        }
    }
 
