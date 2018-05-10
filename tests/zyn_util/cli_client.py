@@ -95,22 +95,12 @@ class ZynCliClient(cmd.Cmd):
             print('Invalid arguments')
             return
 
-        path = self._to_absolute_remote_path(args[0])
-        try:
-            desc = self._client.query_filesystem(path)
-            if desc['type'] == zyn_util.connection.FILE_TYPE_FOLDER:
-                self._pwd = path
-            else:
-                print('Path must be folder')
-        except zyn_util.client.ZynServerException as e:
-            if e.zyn_error_code == zyn_util.errors.InvalidPath:
-                print('Invalid path')
-            else:
-                print(e)
-                return
-        except zyn_util.client.ZynClientException as e:
-            print(e)
-            return
+        path_remote = self._to_absolute_remote_path(args[0])
+        element = self._client.filesystem_element(path_remote)
+        if not element.is_directory():
+            raise zyn_util.client.ZynClientException('Not a folder, path="{}"'.format(path_remote))
+        self._pwd = path_remote
+        self._set_prompt(self._pwd)
 
     def do_create_random_access_file(self, args):
         'Create file: [String: filename]'
@@ -221,10 +211,15 @@ class ZynCliClient(cmd.Cmd):
 
         element = self._client.filesystem_element(path_remote)
         if element.is_file():
-            print('File "{}" (Node Id: {}, revision: {}) pushed remote successfully'.format(
-                file.path_remote,
-                file.node_id,
-                file.revision,
+            print('File "{}" (Node Id: {}, revision: {}) pushed to remote successfully'.format(
+                element.path_remote,
+                element.node_id,
+                element.revision,
+            ))
+        elif element.is_directory():
+            print('Directory "{}" (Node Id: {}) pushed to remote successfully'.format(
+                element.path_remote,
+                element.node_id,
             ))
         else:
             raise NotImplementedError()
@@ -306,7 +301,7 @@ class ZynCliClient(cmd.Cmd):
 
     def _parser_sync(self):
         parser = argparse.ArgumentParser(prog='sync')
-        parser.add_argument('file', type=str)
+        parser.add_argument('path', type=str)
         return parser
 
     def help_sync(self):
@@ -315,13 +310,12 @@ class ZynCliClient(cmd.Cmd):
     def do_sync(self, args):
         parser = self._parser_sync()
         args = vars(parser.parse_args(self._parse_args(args)))
+        path_remote = self._to_absolute_remote_path(args['path'])
 
-        path_remote = self._to_absolute_remote_path(args['file'])
         self._log.debug('Synchronizing, path={}'.format(path_remote))
-
         self._client.sync(path_remote)
-        file = self._client.file(path_remote)
-        print('File {} synchronized to revision {}'.format(path_remote, file.revision))
+        element = self._client.filesystem_element(path_remote)
+        print('File {} synchronized to revision {}'.format(path_remote, element.revision))
 
     def do_exit(self, _):
         'Close connection and exit client'

@@ -6,6 +6,7 @@ import random
 import zyn_util.tests.common
 import zyn_util.errors
 import zyn_util.client
+import zyn_util.cli_client
 
 
 def _join_paths(path_1, path_2):
@@ -63,9 +64,11 @@ class ClientState:
         path_local = _join_paths(self.path_data, path_remote)
         os.makedirs(path_local)
 
-    def create_local_file(self, path_remote):
+    def create_local_file(self, path_remote, content=None):
         path_local = _join_paths_([self.path_data, path_remote])
-        open(path_local, 'w')
+        open(path_local, 'w').close()
+        if content is not None:
+            self.write_local_file_text(path_remote, content)
 
 
 class TestClient(zyn_util.tests.common.TestCommon):
@@ -314,3 +317,43 @@ class TestClient(zyn_util.tests.common.TestCommon):
         client_state.client.create_directory(path_remote)
         client_state.client.fetch(path_remote)
         client_state.validate_directory(path_remote)
+
+
+class TestCliClient(TestClient):
+    def _cli_client(self):
+        client_state, = self._start_server_and_create_number_of_clients(1)
+        return client_state, zyn_util.cli_client.ZynCliClient(client_state.client)
+
+    def test_cli_add_file(self):
+        path = '/file'
+        client_state, cli = self._cli_client()
+        client_state.create_local_file(path, 'content')
+        cli.do_add(path)
+
+    def test_cli_add_folder(self):
+        path = '/dir'
+        client_state, cli = self._cli_client()
+        client_state.create_directory(path)
+        cli.do_add(path)
+
+    def test_cli_sync_file(self):
+        path = '/file'
+        client_state, cli = self._cli_client()
+        client_state.create_local_file(path, 'content')
+        cli.do_add(path)
+        client_state.write_local_file_text(path, 'content more')
+        cli.do_sync(path)
+
+    def test_cli_fetch_file(self):
+        path = '/file'
+        client_state, cli = self._cli_client()
+        cli.do_create_random_access_file(path)
+        cli.do_fetch(path)
+        client_state.validate_directory('/', [os.path.basename(path)])
+
+    def test_cli_fetch_directory(self):
+        path = '/dir'
+        client_state, cli = self._cli_client()
+        cli.do_create_directory(path)
+        cli.do_fetch(path)
+        client_state.validate_directory('/', [os.path.basename(path)])

@@ -479,7 +479,11 @@ class ZynFilesystemClient:
         return self._server_info
 
     def filesystem_element(self, path_in_remote):
-        element = self._local_files[path_in_remote]
+        try:
+            element = self._local_files[path_in_remote]
+        except KeyError:
+            raise ZynClientException('Unknown filesystem element, path="{}"'.format(path_in_remote))
+
         if element.is_file():
             return FileState(self._local_files[path_in_remote], self._path_data)
         elif element.is_directory():
@@ -589,25 +593,32 @@ class ZynFilesystemClient:
     def sync(self, path_in_remote):
 
         try:
-            file = self._local_files[path_in_remote]
-            path_local = file.path_to_local_file(self._path_data)
+            element = self._local_files[path_in_remote]
         except KeyError:
-            raise ZynClientException('Local file does not exist, path_in_remote="{}"'.format(
-                path_in_remote
-            ))
+            raise ZynClientException(
+                'Local filesystem elements does not exist, path_in_remote="{}"'.format(
+                    path_in_remote
+                ))
 
+        if not element.is_file():
+            raise ZynClientException(
+                'Synchronizing directories it not supported, path_local="{}"'.format(
+                    path_in_remote
+                ))
+
+        path_local = element.path_to_local_file(self._path_data)
         if not os.path.exists(path_local):
             raise ZynClientException('Local file does not exist, path_local="{}"'.format(
                 path_local
             ))
 
-        local_file_changed = file.has_changes(self._path_data)
+        local_file_changed = element.has_changes(self._path_data)
         self._log.debug('Synchronizing: path_local={}, local_file_changed={}'.format(
             path_local,
             local_file_changed
         ))
 
-        file.sync(self._connection, self._path_data, self._log)
+        element.sync(self._connection, self._path_data, self._log)
 
     def list(self, path_parent):
 
@@ -668,12 +679,12 @@ class ZynFilesystemClient:
 
     def add(self, path_in_remote):
 
-        file = LocalFile(path_in_remote)
-        if not file.exists_locally(self._path_data):
-            raise ZynClientException('Local file "{}" does not exist'.format(path_in_remote))
+        element = LocalFile(path_in_remote)
+        if not element.exists_locally(self._path_data):
+            raise ZynClientException('"{}" does not exist'.format(path_in_remote))
 
         rsp = self._connection.query_list(path=path_in_remote)
-        if not rsp.is_error() or rsp.error_code() == zyn_util.errors.InvalidPath:
+        if rsp.error_code() == zyn_util.errors.InvalidPath:
             exists = False
         else:
             exists = True
@@ -681,11 +692,20 @@ class ZynFilesystemClient:
         if exists:
             raise ZynClientException('File "{}" already exists'.format(path_in_remote))
 
-        self.create_random_access_file(path_in_remote)  # todo: parametritize
-        rsp = self._query_filesystem(path_in_remote)
-        file = LocalFile.from_filesystem_query(path_in_remote, rsp)
-        file.push(self._connection, self._path_data)
-        self._local_files[path_in_remote] = file
+        path_local = element.path_to_local_file(self._path_data)
+        if os.path.isfile(path_local):
+            self.create_random_access_file(path_in_remote)  # todo: parametritize
+            rsp = self._query_filesystem(path_in_remote)
+            file = LocalFile.from_filesystem_query(path_in_remote, rsp)
+            file.push(self._connection, self._path_data)
+            self._local_files[path_in_remote] = file
+        elif os.path.isdir(path_local):
+            self.create_directory(path_in_remote)  # todo: parametritize
+            rsp = self._query_filesystem(path_in_remote)
+            dir = LocalDirectory.from_filesystem_query(path_in_remote, rsp)
+            self._local_files[path_in_remote] = dir
+        else:
+            raise RuntimeError()
 
     def add_tracked_files_to_remote(self):
         for path_remote, file in self._local_files.items():
