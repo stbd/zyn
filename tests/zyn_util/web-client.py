@@ -91,7 +91,23 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
             self._log.info("Registered, tab_id=%d" % self._tab_id)
 
-        elif msg_type == 'list-files':
+        elif msg_type == 'test-path-exists-and-is-directory':
+
+            path = msg['content']['path']
+            rsp = self._connection.zyn_connection().query_filesystem(path=path)
+            exists = True
+            if rsp.is_error():
+                exists = False
+
+            self.write_message(json.dumps({
+                'type': msg_type + '-rsp',
+                'user-id': user_id,
+                'tab-id': self._tab_id,
+                'path': path,
+                'exists': exists,
+            }))
+
+        elif msg_type == 'list-directory-content':
 
             path = msg['content']['path']
 

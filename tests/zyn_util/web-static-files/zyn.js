@@ -5,9 +5,66 @@ var _socket = null;
 var _callback_for_success = null;
 var _callback_for_error = null;
 var _transaction_ongoing = false;
+var _current_path = [];
+
 
 var ZYN_ERROR_CODE_TRANSACTION_ALREADY_IN_PROGRESS = 1;
 
+
+function zyn_current_directory_path()
+{
+    if (_current_path.length == 0) {
+        return '/'
+    }
+    return '/' + _current_path.join('/');
+}
+
+function zyn_current_directory_parent_path()
+{
+    if (_current_path.length == 0) {
+        return '/';
+    }
+
+    var parent = _current_path.slice();
+    parent.pop();
+    if (parent.length == 0) {
+        return '/';
+    }
+    return '/' + parent.join('/');
+}
+
+function _handle_change_current_directory_response(websocket_msg)
+{
+    var msg = JSON.parse(websocket_msg.data);
+    var path = String(msg['path']);
+    var exists = Boolean(msg['exists']);
+    _transaction_ongoing = false;
+    _callback_for_success(path, exists);
+    if (exists) {
+        var elements = path.split('/').filter(element => element.length > 0);
+        _current_path = elements;
+    }
+}
+
+function zyn_change_current_directory(path, callback_for_success, callback_for_error)
+{
+    if (_transaction_ongoing) {
+        callback_for_error(ZYN_ERROR_CODE_TRANSACTION_ALREADY_IN_PROGRESS);
+        return ;
+    }
+
+    // console.log('changing to ' +  path)
+    _callback_for_error = callback_for_error;
+    _transaction_ongoing = true;
+    _callback_for_success = callback_for_success;
+    _socket.onmessage = _handle_change_current_directory_response
+    _socket.send(_to_json_message(
+        'test-path-exists-and-is-directory',
+        {
+            'path': path,
+        }
+    ));
+}
 
 function _handle_load_file_response(websocket_msg)
 {
@@ -57,7 +114,7 @@ function zyn_load_folder_contents(path, callback_for_success, callback_for_error
     _callback_for_error = callback_for_error;
     _socket.onmessage = _parse_response_and_forward;
     _socket.send(_to_json_message(
-        'list-files',
+        'list-directory-content',
         {
             'path': path,
         }

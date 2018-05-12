@@ -35,25 +35,46 @@
 
   <div id="tab-files" class="zyn-tabs" style="display:none">
 
-    <p>Files</p>
+      <p>Directory</p>
+      <a id="zyn-button-parent-directory" href="#" class="w3-bar-item w3-button" >Up</a>
 
-    <div id="file-list" class="w3-sidebar w3-bar-block w3-green" style="width:200px;">
-    </div>
+      <input id="zyn-current-path" type="text" class="w3-bar-item w3-input" disabled></input>
 
-    <div style="margin-left:200px">
-        <div id="zyn-document-content" class="w3-blue">
-            <h1>Content</h1>
-        </div>
-    </div>
+      <div id="file-list" class="w3-sidebar w3-bar-block w3-green" style="width:200px;">
+      </div>
+
+      <div style="margin-left:200px">
+          <div id="zyn-document-content" class="w3-blue">
+              <h1>Content</h1>
+          </div>
+      </div>
   </div>
 
   <div id="tab-settings" class="zyn-tabs" style="display:none">
-    <h2>Settings</h2>
+      <h2>Settings</h2>
   </div>
 
   <script>
    function _handle_zyn_error(error_description) {
        alert("Zyn error");
+   }
+
+   function _handle_parent_direcotry_clicked()
+   {
+       var path_current = zyn_current_directory_path();
+       var path_parent = zyn_current_directory_parent_path();
+       // console.log('Moving to parent ' + path_current + ' ' + path_parent);
+       if (path_current === path_parent) {
+           return ;
+       }
+       zyn_change_current_directory(path_parent, _handle_change_current_directory_rsp, _handle_zyn_error);
+   }
+
+   function _set_current_directory(path) {
+       var path_element = document.getElementById('zyn-current-path');
+       // console.log('---', path_element, path)
+       path_element.value = path;
+
    }
 
    function _handle_load_file_rsp(msg, content) {
@@ -64,15 +85,21 @@
        var converter = new showdown.Converter();
        var html = converter.makeHtml(content);
        parent_element.innerHTML = html;
-
-       //var document_element = document.createElement('p');
-       //document_element.appendChild(document.createTextNode(content));
-       //parent_element.appendChild(document_element);
    }
 
-   function _handle_folder_content_list_item_clicked(element_type, node_id) {
+   function _handle_change_current_directory_rsp(path, exists) {
+       // console.log('cd done ' + path + exists);
+       _set_current_directory(path);
+       _fetch_and_set_folder_content(path);
+   }
+
+   function _handle_folder_content_list_item_clicked(element_type, name, node_id) {
+
        if (element_type === 'dir') {
-           alert('dir');
+           var path_current = zyn_current_directory_path();
+           var path_next = [path_current, name].join('/');
+           // console.log('Changing path to ' + path_next);
+           zyn_change_current_directory(path_next, _handle_change_current_directory_rsp, _handle_zyn_error);
        } else if (element_type === 'file') {
            zyn_load_file(node_id, _handle_load_file_rsp);
        }
@@ -83,6 +110,7 @@
        element.setAttribute('class', 'w3-bar-item w3-button')
        element.addEventListener('click', function() { _handle_folder_content_list_item_clicked(
            element_data['element-type'],
+           element_data['name'],
            element_data['node-id']);
        });
 
@@ -96,15 +124,6 @@
        return element;
    }
 
-   function _handle_load_folder_content_response(rsp) {
-       var file_list = document.getElementById("file-list");
-       var elements = rsp['elements'];
-
-       for (let element of elements) {
-           file_list.appendChild(_create_folder_list_element(element));
-       }
-   }
-
    var tab_name_files = "tab-files";
    var tab_name_settings = "tab-settings";
    function _set_vissible_tab(tab_name) {
@@ -115,12 +134,28 @@
        document.getElementById(tab_name).style.display = "block";
    }
 
+   function _handle_load_folder_content_response(rsp) {
+       var file_list = document.getElementById("file-list");
+       var elements = rsp['elements'];
+
+       while (file_list.firstChild) {
+           file_list.removeChild(file_list.firstChild);
+       }
+
+       for (let element of elements) {
+           file_list.appendChild(_create_folder_list_element(element));
+       }
+   }
+
    function _fetch_and_set_folder_content(path) {
+
        zyn_load_folder_contents(path, _handle_load_folder_content_response, _handle_zyn_error);
    }
 
    function _handle_socket_initialized(rsp) {
-       _fetch_and_set_folder_content('/');
+       var path = zyn_current_directory_path();
+       _set_current_directory(path);
+       _fetch_and_set_folder_content(path);
    }
 
   </script>
@@ -129,6 +164,11 @@
 
    // Initialization
    _set_vissible_tab(tab_name_files);
+   var parent_button = document.getElementById('zyn-button-parent-directory');
+   parent_button.addEventListener(
+       'click',
+       _handle_parent_direcotry_clicked,
+   );
 
    {% if is_logged_in == 0 %}
 
