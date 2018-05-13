@@ -30,6 +30,8 @@ class ZynConnection:
         self._context.load_verify_locations(certifi.where())
 
     def connect(self, remote_address, remote_port, remote_hostname=None):
+        self._log.debug("Connecting to {}:{}".format(remote_address, remote_port))
+
         self._socket_ = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._socket_.connect((remote_address, remote_port))
         self._socket = self._context.wrap_socket(
