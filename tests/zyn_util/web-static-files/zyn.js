@@ -70,14 +70,18 @@ function _handle_load_file_response(websocket_msg)
 {
     _transaction_ongoing = false;
     var msg = JSON.parse(websocket_msg.data);
-    content = atob(String(msg['content']))
+    var content = atob(String(msg['content']));
+    var node_id = Number(msg['node-id']);
+    var filename = String(msg['filename']);
+
+    // console.log('loading file, l ' + content.length, _callback_for_success);
 
     if (_callback_for_success != null) {
-        _callback_for_success(msg, content);
+        _callback_for_success(node_id, filename, content);
     }
 }
 
-function zyn_load_file(node_id, callback_for_success)
+function zyn_load_file(node_id, filename, callback_for_success)
 {
     if (_socket == null) {
         return ;
@@ -95,6 +99,7 @@ function zyn_load_file(node_id, callback_for_success)
         'load-file',
         {
             'node-id': node_id,
+            'filename': filename,
         }
     ));
 }

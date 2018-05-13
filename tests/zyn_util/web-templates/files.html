@@ -5,8 +5,10 @@
   <script type="text/javascript" src="https://cdn.rawgit.com/showdownjs/showdown/1.8.6/dist/showdown.min.js"></script>
   <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
   <script type="text/javascript" src="{{ static_url('zyn.js') }}"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
 <body>
+
 
   <div id="login-modal" class="w3-modal" style="display: none;">
     <div class="w3-modal-content">
@@ -59,7 +61,7 @@
        alert("Zyn error");
    }
 
-   function _handle_parent_direcotry_clicked()
+   function _handle_parent_directory_clicked()
    {
        var path_current = zyn_current_directory_path();
        var path_parent = zyn_current_directory_parent_path();
@@ -77,14 +79,15 @@
 
    }
 
-   function _handle_load_file_rsp(msg, content) {
+   function _handle_load_file_rsp(node_id, filename, content) {
        var content_element = document.getElementById('zyn-document-content');
-       var parent_element = content_element.parentElement;
-       parent_element.removeChild(content_element);
-
-       var converter = new showdown.Converter();
-       var html = converter.makeHtml(content);
-       parent_element.innerHTML = html;
+       if (filename.endsWith('.md')) {
+           var converter = new showdown.Converter();
+           var html = converter.makeHtml(content);
+           content_element.innerHTML = html;
+       } else {
+           content_element.innerHTML = '<pre>' + content + '</pre>';
+       }
    }
 
    function _handle_change_current_directory_rsp(path, exists) {
@@ -101,7 +104,7 @@
            // console.log('Changing path to ' + path_next);
            zyn_change_current_directory(path_next, _handle_change_current_directory_rsp, _handle_zyn_error);
        } else if (element_type === 'file') {
-           zyn_load_file(node_id, _handle_load_file_rsp);
+           zyn_load_file(node_id, name, _handle_load_file_rsp);
        }
    }
 
@@ -167,7 +170,7 @@
    var parent_button = document.getElementById('zyn-button-parent-directory');
    parent_button.addEventListener(
        'click',
-       _handle_parent_direcotry_clicked,
+       _handle_parent_directory_clicked,
    );
 
    {% if is_logged_in == 0 %}
