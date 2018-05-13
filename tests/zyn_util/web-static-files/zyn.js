@@ -70,7 +70,7 @@ function _handle_load_file_response(websocket_msg)
 {
     _transaction_ongoing = false;
     var msg = JSON.parse(websocket_msg.data);
-    var content = atob(String(msg['content']));
+    var content = atob(msg['content']);
     var node_id = Number(msg['node-id']);
     var filename = String(msg['filename']);
 

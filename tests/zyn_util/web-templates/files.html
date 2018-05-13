@@ -5,6 +5,7 @@
   <script type="text/javascript" src="https://cdn.rawgit.com/showdownjs/showdown/1.8.6/dist/showdown.min.js"></script>
   <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
   <script type="text/javascript" src="{{ static_url('zyn.js') }}"></script>
+  <script type="text/javascript" src="{{ static_url('utf8.js') }}"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
 <body>
@@ -80,10 +81,12 @@
    }
 
    function _handle_load_file_rsp(node_id, filename, content) {
+
        var content_element = document.getElementById('zyn-document-content');
        if (filename.endsWith('.md')) {
            var converter = new showdown.Converter();
-           var html = converter.makeHtml(content);
+           var decoded = utf8.decode(content);
+           var html = converter.makeHtml(decoded);
            content_element.innerHTML = html;
        } else {
            content_element.innerHTML = '<pre>' + content + '</pre>';
