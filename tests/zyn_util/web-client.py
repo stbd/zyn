@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import os.path
+import ssl
 import uuid
 
 import tornado.log
@@ -246,14 +247,12 @@ class MainHandler(tornado.web.RequestHandler):
 class ZynConnectionFactory:
     def __init__(
             self,
-            path_key,
             path_cert,
             server_ip,
             server_port,
             remote_hostname=None,
             debug_protocol=False,
     ):
-        self._path_key = path_key
         self._path_cert = path_cert
         self._server_ip = server_ip
         self._server_port = server_port
@@ -265,6 +264,10 @@ class ZynConnectionFactory:
             self._path_cert,
             self._debug_protocol
         )
+
+        if self._path_cert is None:
+            connection.load_default_certificate_bundle()
+
         connection.connect(
             self._server_ip,
             self._server_port,
@@ -278,19 +281,31 @@ def run_tornado():
     parser.add_argument('local-port', type=int, default=8080, help='')
     parser.add_argument('zyn-server-ip', help='')
     parser.add_argument('zyn-server-port', help='', type=int)
-    parser.add_argument('zyn-server-path-to-key', help='')
-    parser.add_argument('zyn-server-path-to-cert', help='')
 
+    parser.add_argument('--ssl-path-to-cert', help='')
+    parser.add_argument('--ssl-path-to-key', help='')
+    parser.add_argument('--zyn-server-path-to-cert', help='', default=None)
     parser.add_argument('--debug-protocol', action='store_true', help='')
     parser.add_argument('--verbose', '-v', action='count', default=0)
     parser.add_argument('--remote-hostname', default=None)
 
     args = vars(parser.parse_args())
 
+    ssl_path_cert = args['ssl_path_to_cert']
+    ssl_path_key = args['ssl_path_to_key']
+    ssl_context = None
+
+    if ssl_path_cert is not None or ssl_path_key is not None:
+        if ssl_path_cert is None or ssl_path_key is None:
+            print('When using SSL, both key and certificate need to be passed')
+            return
+
+        ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ssl_context.load_cert_chain(ssl_path_cert, ssl_path_key)
+
     global connection_factory
     connection_factory = ZynConnectionFactory(
-        args['zyn-server-path-to-key'],
-        args['zyn-server-path-to-cert'],
+        args['zyn_server_path_to_cert'],
         args['zyn-server-ip'],
         args['zyn-server-port'],
         args['remote_hostname'],
@@ -324,7 +339,7 @@ def run_tornado():
     global connections
     connections = ConnectionContainer()
 
-    app.listen(args['local-port'])
+    app.listen(args['local-port'], ssl_options=ssl_context)
     tornado.ioloop.IOLoop.current().start()
 
 

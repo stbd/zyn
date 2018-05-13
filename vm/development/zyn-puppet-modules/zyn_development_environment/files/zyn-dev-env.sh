@@ -146,9 +146,10 @@ function zyn-run-web-client() {
             8080 \
             127.0.0.1 \
             4433 \
-            "$HOME"/.zyn-certificates/key.pem \
-            "$HOME"/.zyn-certificates/cert.pem \
+            --zyn-server-path-to-cert "$HOME"/.zyn-certificates/cert.pem \
             --remote-hostname zyn \
+            --debug-protocol \
+            -vv \
             "$@"
 }
 

@@ -146,7 +146,11 @@ function zyn_init(user_id, callback_for_success, callback_for_error) {
     _user_id = user_id;
 
     var url = new URL(window.location.href)
-    var websocket_url = "ws://" + url.hostname + ":" + url.port + "/websocket"
+    var protocol = "ws";
+    if (location.protocol === 'https:') {
+        protocol = "wss";
+    }
+    var websocket_url = protocol + '://' + url.hostname + ":" + url.port + "/websocket";
 
     _socket = new WebSocket(websocket_url);
     _callback_for_success = callback_for_success;
