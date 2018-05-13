@@ -80,6 +80,9 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             self._close_socket()
 
         if msg_type == 'register':
+
+            self._log.debug('Register, user_id={}'.format(user_id))
+
             self._connection = connections.find_connection(user_id)
             self._tab_id = self._connection.add_web_socket(self)
 
@@ -94,6 +97,7 @@ class WebSocket(tornado.websocket.WebSocketHandler):
         elif msg_type == 'test-path-exists-and-is-directory':
 
             path = msg['content']['path']
+            self._log.debug('{}: path={}'.format(msg_type, path))
             rsp = self._connection.zyn_connection().query_filesystem(path=path)
             exists = True
             if rsp.is_error():
@@ -110,6 +114,7 @@ class WebSocket(tornado.websocket.WebSocketHandler):
         elif msg_type == 'list-directory-content':
 
             path = msg['content']['path']
+            self._log.debug('{}: path={}'.format(msg_type, path))
 
             elements = []
             rsp = self._connection.zyn_connection().query_list(path=path)
@@ -140,7 +145,9 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
         elif msg_type == 'load-file':
 
-            node_id = msg['content']['node-id']
+            node_id = msg['content']['node-id'];
+            filename = msg['content']['filename'];
+            self._log.debug('{}: node_id={}, filename="{}"'.format(msg_type, node_id, filename))
 
             content = b''
             open_rsp = None
@@ -160,10 +167,14 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 if open_rsp is not None:
                     rsp = self._connection.zyn_connection().close_file(node_id=node_id)
 
+            self._log.debug('{}: loaded {} bytes, node_id={}'.format(msg_type, len(content), node_id))
+
             self.write_message(json.dumps({
                 'type': msg_type + '-rsp',
                 'user-id': user_id,
                 'tab-id': self._tab_id,
+                'node-id': node_id,
+                'filename': filename,
                 'content': content,
             }))
 
