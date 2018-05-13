@@ -146,8 +146,8 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
         elif msg_type == 'load-file':
 
-            node_id = msg['content']['node-id'];
-            filename = msg['content']['filename'];
+            node_id = msg['content']['node-id']
+            filename = msg['content']['filename']
             self._log.debug('{}: node_id={}, filename="{}"'.format(msg_type, node_id, filename))
 
             content = b''
@@ -168,7 +168,8 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 if open_rsp is not None:
                     rsp = self._connection.zyn_connection().close_file(node_id=node_id)
 
-            self._log.debug('{}: loaded {} bytes, node_id={}'.format(msg_type, len(content), node_id))
+            self._log.debug('{}: loaded {} bytes, node_id={}'.format(
+                msg_type, len(content), node_id))
 
             self.write_message(json.dumps({
                 'type': msg_type + '-rsp',
