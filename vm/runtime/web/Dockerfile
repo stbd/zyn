@@ -11,8 +11,9 @@ run apt-get update && apt-get install \
 
 workdir /workdir
 
-run touch /workdir/cert.pem
-run touch /workdir/key.pem
+run touch /workdir/server-cert.pem
+run touch /workdir/web-cert.pem
+run touch /workdir/key-cert.pem
 
 copy zyn-web-src.tar.gz /workdir/
 run /bin/bash -euc " \

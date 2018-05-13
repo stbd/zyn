@@ -55,8 +55,9 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
     parser.add_argument('web-server-port')
     parser.add_argument('zyn-server-ip')
     parser.add_argument('zyn-server-port')
-    parser.add_argument('zyn-server-path-to-key')
-    parser.add_argument('zyn-server-path-to-cert')
+    parser.add_argument('--ssl-path-to-cert')
+    parser.add_argument('--ssl-path-to-key')
+    parser.add_argument('--zyn-server-path-to-cert')
     parser.add_argument('--image-tag', default=IMAGE_TAG)
     parser.add_argument('--skip-pack-src', action='store_true')
 
@@ -74,10 +75,14 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
     port = args['web-server-port']
     server_ip = args['zyn-server-ip']
     server_port = args['zyn-server-port']
-    path_cert = args['zyn-server-path-to-cert']
-    path_key = args['zyn-server-path-to-key']
-    path_image_cert = '/workdir/cert.pem'
-    path_image_key = '/workdir/key.pem'
+
+    path_zyn_server_cert = args['zyn_server_path_to_cert']
+    path_image_server_cert = '/workdir/server-cert.pem'
+
+    path_ssl_cert = args['ssl_path_to_cert']
+    path_ssl_key = args['ssl_path_to_key']
+    path_image_web_cert = '/workdir/web-cert.pem'
+    path_image_web_key = '/workdir/web-key.pem'
 
     if not args['skip_pack_src']:
         _pack_src()
@@ -88,9 +93,14 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
         'docker',
         'run',
         '-p', '{}:8080/tcp'.format(port),
-        '-v', '{}:{}'.format(path_cert, path_image_cert),
-        '-v', '{}:{}'.format(path_key, path_image_key),
     ]
+
+    if path_zyn_server_cert is not None:
+        run_cmd += ['-v', '{}:{}'.format(path_zyn_server_cert, path_image_server_cert)]
+
+    if path_ssl_cert is not None:
+        run_cmd += ['-v', '{}:{}'.format(path_ssl_cert, path_image_web_cert)]
+        run_cmd += ['-v', '{}:{}'.format(path_ssl_key, path_image_web_key)]
 
     run_cmd += docker_args
 
@@ -99,11 +109,17 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
         '8080',
         server_ip,
         server_port,
-        path_image_key,
-        path_image_cert,
     ]
 
+    if path_zyn_server_cert:
+        run_cmd += ['--zyn-server-path-to-cert', path_image_server_cert]
+
+    if path_ssl_cert is not None:
+        run_cmd += ['--ssl-path-to-cert', path_image_web_cert]
+        run_cmd += ['--ssl-path-to-key', path_image_web_key]
+
     print (run_cmd)
+
     process = subprocess.Popen(
         run_cmd,
         cwd=PATH_DIR,
