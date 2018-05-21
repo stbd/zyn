@@ -146,6 +146,7 @@ class LocalFile(LocalFileSystemElement):
         super().__init__(path_in_remote)
         self._node_id = None
         self._checksum = None
+        self._file_type = None
         self._revision = 0
 
     def is_file(self):
@@ -156,6 +157,9 @@ class LocalFile(LocalFileSystemElement):
 
     def is_initialized(self):
         return self._node_id is not None
+
+    def file_type(self):
+        return self._file_type
 
     def to_json(self):
         return {
@@ -186,7 +190,7 @@ class LocalFile(LocalFileSystemElement):
             raise ValueError()
         dir = LocalFile(path_in_remote)
         dir._node_id = rsp.node_id
-        dir._file_type = rsp.type_of_element
+        dir._file_type = rsp.type_of_file
         # dir._revision = rsp.revision todo: add revision to query
         return dir
 
@@ -332,12 +336,18 @@ class LocalFile(LocalFileSystemElement):
             check_rsp(open_rsp)
             open_rsp = open_rsp.as_open_rsp()
 
-            if open_rsp.size > 0:
-                raise ZynClientException('Remote file was not empty')
-
             local_data = open(path_local, 'rb').read()
             if len(local_data) > 0:
-                rsp = connection.ra_insert(self._node_id, self._revision, 0, local_data)
+                if self._file_type == zyn_util.connection.FILE_TYPE_RANDOM_ACCESS:
+                    if open_rsp.size > 0:
+                        raise ZynClientException('Remote file was not empty')
+                    rsp = connection.ra_insert(self._node_id, self._revision, 0, local_data)
+                elif self._file_type == zyn_util.connection.FILE_TYPE_BLOB:
+                    # todo: use block size
+                    rsp = connection.blob_write(self._node_id, self._revision, local_data)
+                else:
+                    raise RuntimeError()
+
                 check_rsp(rsp)
                 self._revision = rsp.as_insert_rsp().revision
 
@@ -386,9 +396,13 @@ class LocalFile(LocalFileSystemElement):
             # If local file is at same level as remote and has changes,
             # push changes to remote
             if self._file_type == zyn_util.connection.FILE_TYPE_RANDOM_ACCESS:
+                logger.debug('Synchronizing random access file')
                 self._sync_local_random_access_changes_to_remote(connection, path_local, logger)
+            elif self._file_type == zyn_util.connection.FILE_TYPE_BLOB:
+                logger.debug('Synchronizing blob file')
+                self.push(connection, path_data_root)
             else:
-                raise NotImplementedError()
+                raise RuntimeError()
 
         elif open_rsp.revision > self._revision and not has_changes:
             # If remote file is newer and file has no local changes,
@@ -538,12 +552,21 @@ class ZynFilesystemClient:
             }, fp)
 
     def create_random_access_file(self, path_in_remote):
+        return self.create_file(path_in_remote, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
+
+    def create_blob_file(self, path_in_remote):
+        return self.create_file(path_in_remote, zyn_util.connection.FILE_TYPE_BLOB)
+
+    def create_file(self, path_in_remote, type_of_file):
         dirname, filename = _split_path(path_in_remote)
 
-        self._log.debug('Creating random access file: parent="{}", file="{}"'.format(
-            dirname, filename))
+        self._log.debug('Creating file: type_of_file={}, parent="{}", file="{}"'.format(
+            type_of_file, dirname, filename))
 
-        rsp = self._connection.create_file_random_access(filename, parent_path=dirname)
+        if type_of_file == zyn_util.connection.FILE_TYPE_RANDOM_ACCESS:
+            rsp = self._connection.create_file_random_access(filename, parent_path=dirname)
+        elif type_of_file == zyn_util.connection.FILE_TYPE_BLOB:
+            rsp = self._connection.create_file_blob(filename, parent_path=dirname)
         check_rsp(rsp)
         return rsp.as_create_rsp()
 
@@ -580,10 +603,12 @@ class ZynFilesystemClient:
                 raise ZynClientException('Local file already exists, path="{}"'.format(
                     path_in_remote
                 ))
-            self._log.debug('Fetching file: path_in_remote={}, path_data={}'.format(
-                path_in_remote,
-                self._path_data
-            ))
+            self._log.debug(
+                'Fetching file: path_in_remote={}, path_data={}, type_of_file={}'.format(
+                    path_in_remote,
+                    self._path_data,
+                    rsp.type_of_file,
+                ))
 
             file.fetch(self._connection, self._path_data)
             self._local_files[path_in_remote] = file
@@ -677,36 +702,55 @@ class ZynFilesystemClient:
                 for f in local_files
             ]
 
-    def add(self, path_in_remote):
-
-        element = LocalFile(path_in_remote)
+    def _add(self, element):
         if not element.exists_locally(self._path_data):
-            raise ZynClientException('"{}" does not exist'.format(path_in_remote))
+            raise ZynClientException('"{}" does not exist'.format(element.path_remote()))
 
-        rsp = self._connection.query_list(path=path_in_remote)
+        rsp = self._connection.query_list(path=element.path_remote())
         if rsp.error_code() == zyn_util.errors.InvalidPath:
             exists = False
         else:
             exists = True
 
         if exists:
-            raise ZynClientException('File "{}" already exists'.format(path_in_remote))
+            raise ZynClientException(
+                'Filesystem element "{}" already exists'.format(element.path_remote())
+            )
 
+    def add_directory(self, path_in_remote):
+        element = LocalDirectory(path_in_remote)
+        self._add(element)
         path_local = element.path_to_local_file(self._path_data)
-        if os.path.isfile(path_local):
-            self.create_random_access_file(path_in_remote)  # todo: parametritize
-            rsp = self._query_filesystem(path_in_remote)
-            file = LocalFile.from_filesystem_query(path_in_remote, rsp)
-            file.push(self._connection, self._path_data)
-            self._local_files[path_in_remote] = file
-        elif os.path.isdir(path_local):
-            self.create_directory(path_in_remote)  # todo: parametritize
-            rsp = self._query_filesystem(path_in_remote)
-            dir = LocalDirectory.from_filesystem_query(path_in_remote, rsp)
-            self._local_files[path_in_remote] = dir
-        else:
-            raise RuntimeError()
+        if not os.path.isdir(path_local):
+            raise ZynClientException('"{}" must be directory'.format(element.path_remote()))
+
+        self.create_directory(path_in_remote)
+        rsp = self._query_filesystem(path_in_remote)
+        dir = LocalDirectory.from_filesystem_query(path_in_remote, rsp)
+        self._local_files[path_in_remote] = dir
+
+    def add_file(self, path_in_remote, type_of_file):
+
+        element = LocalFile(path_in_remote)
+        self._add(element)
+        path_local = element.path_to_local_file(self._path_data)
+        if not os.path.isfile(path_local):
+            raise ZynClientException('"{}" must be file'.format(element.path_remote()))
+
+        self.create_file(path_in_remote, type_of_file)
+        rsp = self._query_filesystem(path_in_remote)
+        file = LocalFile.from_filesystem_query(path_in_remote, rsp)
+        file.push(self._connection, self._path_data)
+        self._local_files[path_in_remote] = file
 
     def add_tracked_files_to_remote(self):
-        for path_remote, file in self._local_files.items():
-            self.add(path_remote)
+        for path_remote, element in self._local_files.items():
+            if element.is_directory():
+                self.add_directory(path_remote)
+            elif element.is_file():
+                self.add_file(path_remote, element.file_type())
+            else:
+                raise RuntimeError()
+
+    def remove_local_files(self):
+        self._local_files = {}

@@ -102,23 +102,33 @@ class ZynCliClient(cmd.Cmd):
         self._pwd = path_remote
         self._set_prompt(self._pwd)
 
-    def do_create_random_access_file(self, args):
-        'Create file: [String: filename]'
+    def _parser_create_file(self):
+        parser = argparse.ArgumentParser(prog='create_file')
+        parser.add_argument('path', type=str)
+        group = parser.add_mutually_exclusive_group(required=True)
+        group.add_argument('-ra', '--random-access', action='store_true')
+        group.add_argument('-b', '--blob', action='store_true')
+        return parser
 
-        args = self._parse_args(args)
-        if len(args) != 1:
-            print('Invalid arguments: expected filename')
-            return
+    def help_create_file(self):
+        print(self._parser_create_file().format_help())
 
-        path = self._to_absolute_remote_path(args[0])
-        self._log.debug('Creating random access file, path="{}"'.format(path))
+    def do_create_file(self, args):
+        parser = self._parser_create_file()
+        args = vars(parser.parse_args(self._parse_args(args)))
 
-        try:
-            rsp = self._client.create_random_access_file(path)
-            print('"{}" created, Node Id: {}'.format(path, rsp.node_id))
-        except zyn_util.client.ZynClientException as e:
-            print(e)
-            return
+        path = self._to_absolute_remote_path(args['path'])
+        if args['random_access']:
+            file_type = zyn_util.connection.FILE_TYPE_RANDOM_ACCESS
+        elif args['blob']:
+            file_type = zyn_util.connection.FILE_TYPE_BLOB
+        else:
+            raise RuntimeError()
+
+        print('Creating file, path="{}", file_type={}'.format(path, file_type))
+
+        rsp = self._client.create_file(path, file_type)
+        print('File "{}" created, Node Id: {}'.format(path, rsp.node_id))
 
     def _parser_create_directory(self):
         parser = argparse.ArgumentParser(prog='list')
@@ -194,7 +204,10 @@ class ZynCliClient(cmd.Cmd):
 
     def _parser_add(self):
         parser = argparse.ArgumentParser(prog='add')
-        parser.add_argument('file', type=str)
+        parser.add_argument('path', type=str)
+        group = parser.add_mutually_exclusive_group(required=False)
+        group.add_argument('-ra', '--random-access', action='store_true')
+        group.add_argument('-b', '--blob', action='store_true')
         return parser
 
     def help_add(self):
@@ -203,11 +216,34 @@ class ZynCliClient(cmd.Cmd):
     def do_add(self, args):
         parser = self._parser_add()
         args = vars(parser.parse_args(self._parse_args(args)))
-        file = args['file']
-        path_remote = self._to_absolute_remote_path(file)
+        path = args['path']
+        path_remote = self._to_absolute_remote_path(path)
+        path_local = _join_paths([self._client._path_data, path_remote])
 
-        # todo: handle directories and blobs
-        self._client.add(path_remote)
+        if os.path.isfile(path_local):
+            if args['random_access']:
+                file_type = zyn_util.connection.FILE_TYPE_RANDOM_ACCESS
+            elif args['blob']:
+                file_type = zyn_util.connection.FILE_TYPE_BLOB
+            else:
+                raise zyn_util.client.ZynClientException(
+                    'Must specify either file type, either random access or blob'
+                )
+            print('Adding file {}'.format(path_remote))
+            self._client.add_file(path_remote, file_type)
+
+        elif os.path.isdir(path_local):
+            if args['random_access'] or args['blob']:
+                raise zyn_util.client.ZynClientException(
+                    'Must not specify either random access or blob for direcotry'
+                )
+
+            print('Adding directory {}'.format(path_remote))
+            self._client.add_directory(path_remote)
+        else:
+            raise zyn_util.client.ZynClientException(
+                '"{}" does not exist'.format(path_remote)
+            )
 
         element = self._client.filesystem_element(path_remote)
         if element.is_file():
@@ -428,6 +464,8 @@ def main():
             answer = input('yes/no? ')
             if answer.strip().lower() == 'yes':
                 client.add_tracked_files_to_remote()
+            else:
+                client.remove_local_files()
 
     cli = ZynCliClient(client)
     while True:

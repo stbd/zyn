@@ -1627,7 +1627,7 @@ fn handle_query_fs_req(client: & mut Client) -> Result<(), ()>
                     let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
                     match desc {
                         FilesystemElement::File { properties, authority, node_id } => {
-                            try_in_receive_loop!(client, buffer.write_list_start(7), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_list_start(8), Status::FailedToWriteToSendBuffer);
                             try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "type", FILE as u64), Status::FailedToWriteToSendBuffer);
                             try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "node-id", node_id as u64), Status::FailedToWriteToSendBuffer);
                             try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "created",  properties.created_at as u64), Status::FailedToWriteToSendBuffer);
@@ -1635,6 +1635,14 @@ fn handle_query_fs_req(client: & mut Client) -> Result<(), ()>
                             try_in_receive_loop!(client, write_le_kv_ss(& mut buffer, "read-access",  authority.read), Status::FailedToWriteToSendBuffer);
                             try_in_receive_loop!(client, write_le_kv_ss(& mut buffer, "write-access",  authority.write), Status::FailedToWriteToSendBuffer);
                             try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "block-size",  properties.page_size), Status::FailedToWriteToSendBuffer);
+                            match properties.file_type {
+                                FileType::RandomAccess => {
+                                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "file-type",  FILE_TYPE_RANDOM_ACCESS as u64), Status::FailedToWriteToSendBuffer);
+                                },
+                                FileType::Blob => {
+                                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "file-type",  FILE_TYPE_BLOB as u64), Status::FailedToWriteToSendBuffer);
+                                },
+                            };
                             try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
 
                         },

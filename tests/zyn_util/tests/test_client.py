@@ -193,6 +193,20 @@ class TestClient(zyn_util.tests.common.TestCommon):
         client_state_1.client.sync(path_in_remote)
         client_state_2.client.sync(path_in_remote)
 
+    def test_edit_fetch_blob_file(self):
+        client_state_1, client_state_2 = self._start_server_and_create_number_of_clients(2)
+        path_in_remote = '/test_file'
+        data = 'data'
+
+        client_state_1.client.create_blob_file(path_in_remote)
+        client_state_1.client.fetch(path_in_remote)
+        client_state_1.validate_text_file_content(path_in_remote, None)
+        client_state_1.write_local_file_text(path_in_remote, data)
+        client_state_1.client.sync(path_in_remote)
+
+        client_state_2.client.fetch(path_in_remote)
+        client_state_2.validate_text_file_content(path_in_remote, data)
+
     def _validate_tracked_fs_element(self, tracked_files, name, exists_locally, tracked):
         for f in tracked_files:
             if f.remote_file.name != name:
@@ -240,17 +254,17 @@ class TestClient(zyn_util.tests.common.TestCommon):
         self.assertEqual(len(untracked_files), 1)
         self.assertTrue(path_remote_untracked_1 in untracked_files)
 
-    def test_add(self):
+    def test_add_random_access_file(self):
         client_state = self._start_server_and_create_client(1)
         path_remote_1 = '/file-1'
         path_remote_2 = '/file-2'
 
         client_state.create_local_file(path_remote_1)
-        client_state.client.add(path_remote_1)
+        client_state.client.add_file(path_remote_1, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
 
         client_state.create_local_file(path_remote_2)
         client_state.write_local_file_text(path_remote_2, 'Hello')
-        client_state.client.add(path_remote_2)
+        client_state.client.add_file(path_remote_2, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
 
     def test_add_tracked_files_to_remote_after_restart(self):
         client_state = self._start_server_and_create_client(1)
@@ -261,8 +275,8 @@ class TestClient(zyn_util.tests.common.TestCommon):
         client_state.write_local_file_text(path_remote_1, 'data-1')
         client_state.create_local_file(path_remote_2)
         client_state.write_local_file_text(path_remote_2, 'data-2')
-        client_state.client.add(path_remote_1)
-        client_state.client.add(path_remote_2)
+        client_state.client.add_file(path_remote_1, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
+        client_state.client.add_file(path_remote_2, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
 
         self._restart_server_and_replace_connection(client_state)
         client_state.client.add_tracked_files_to_remote()
@@ -283,8 +297,8 @@ class TestClient(zyn_util.tests.common.TestCommon):
         client_state.write_local_file_text(path_remote_1, 'data-1')
         client_state.create_local_file(path_remote_2)
         client_state.write_local_file_text(path_remote_2, 'data-2')
-        client_state.client.add(path_remote_1)
-        client_state.client.add(path_remote_2)
+        client_state.client.add_file(path_remote_1, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
+        client_state.client.add_file(path_remote_2, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
 
         client_state.client.set_connection(self._connect_to_node_and_handle_auth())
 
@@ -304,7 +318,7 @@ class TestClient(zyn_util.tests.common.TestCommon):
 
         client_state_1.create_local_file(path_remote)
         client_state_1.write_local_file_text(path_remote, data_1)
-        client_state_1.client.add(path_remote)
+        client_state_1.client.add_file(path_remote, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
         client_state_1.write_local_file_text(path_remote, data_2)
         client_state_1.client.sync(path_remote)
 
@@ -318,8 +332,6 @@ class TestClient(zyn_util.tests.common.TestCommon):
         client_state.client.fetch(path_remote)
         client_state.validate_directory(path_remote)
 
-
-class TestCliClient(TestClient):
     def _cli_client(self):
         client_state, = self._start_server_and_create_number_of_clients(1)
         return client_state, zyn_util.cli_client.ZynCliClient(client_state.client)
@@ -328,7 +340,7 @@ class TestCliClient(TestClient):
         path = '/file'
         client_state, cli = self._cli_client()
         client_state.create_local_file(path, 'content')
-        cli.do_add(path)
+        cli.do_add(path + ' -ra')
 
     def test_cli_add_folder(self):
         path = '/dir'
@@ -340,14 +352,14 @@ class TestCliClient(TestClient):
         path = '/file'
         client_state, cli = self._cli_client()
         client_state.create_local_file(path, 'content')
-        cli.do_add(path)
+        cli.do_add(path + ' -ra')
         client_state.write_local_file_text(path, 'content more')
         cli.do_sync(path)
 
     def test_cli_fetch_file(self):
         path = '/file'
         client_state, cli = self._cli_client()
-        cli.do_create_random_access_file(path)
+        cli.do_create_file(path + ' -ra')
         cli.do_fetch(path)
         client_state.validate_directory('/', [os.path.basename(path)])
 

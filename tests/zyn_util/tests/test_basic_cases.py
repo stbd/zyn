@@ -153,7 +153,7 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
             zyn_util.connection.FILE_TYPE_FOLDER
         )
 
-    def test_query_filesystem_file(self):
+    def test_query_filesystem_random_access_file(self):
         c = self._start_and_connect_to_node_and_handle_auth()
         create_rsp = c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
         rsp = c.query_filesystem(node_id=create_rsp.node_id)
@@ -162,6 +162,17 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         self.assertEqual(query_rsp.type_of_element, zyn_util.connection.FILE_TYPE_FILE)
         self.assertEqual(query_rsp.node_id, create_rsp.node_id)
         self.assertNotEqual(query_rsp.block_size, 0)
+        self.assertTrue(query_rsp.is_random_access_file())
+        self.assertFalse(query_rsp.is_blob_file())
+
+    def test_query_filesystem_blob_file(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        create_rsp = c.create_file_blob('file-1', parent_path='/').as_create_rsp()
+        rsp = c.query_filesystem(node_id=create_rsp.node_id)
+        self._validate_response(rsp, c)
+        query_rsp = rsp.as_query_filesystem_rsp()
+        self.assertFalse(query_rsp.is_random_access_file())
+        self.assertTrue(query_rsp.is_blob_file())
 
     def test_query_filesystem_folder(self):
         c = self._start_and_connect_to_node_and_handle_auth()

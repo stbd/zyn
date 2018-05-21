@@ -777,6 +777,11 @@ def _validate_file_system_element_type(type_of_element):
         _malfomed_message()
 
 
+def _validate_file_type(type_of_file):
+    if type_of_file not in [FILE_TYPE_RANDOM_ACCESS, FILE_TYPE_BLOB]:
+        _malfomed_message()
+
+
 class Message:
     NOTIFICATION = 1
     RESPONSE = 2
@@ -901,6 +906,16 @@ class QueryFilesystemElementResponse:
     def is_directory(self):
         return self.type_of_element == FILE_TYPE_FOLDER
 
+    def is_random_access_file(self):
+        if self.type_of_element != FILE_TYPE_FILE:
+            raise RuntimeError('Element is not file')
+        return self.type_of_file == FILE_TYPE_RANDOM_ACCESS
+
+    def is_blob_file(self):
+        if self.type_of_element != FILE_TYPE_FILE:
+            raise RuntimeError('Element is not file')
+        return self.type_of_file == FILE_TYPE_BLOB
+
     def __init__(self, response):
         if response.number_of_fields() != 1:
             _malfomed_message()
@@ -909,8 +924,10 @@ class QueryFilesystemElementResponse:
         self.type_of_element = desc['type'].as_uint()
         _validate_file_system_element_type(self.type_of_element)
 
-        if self.type_of_element == FILE_TYPE_FILE and len(desc) == 7:
+        if self.type_of_element == FILE_TYPE_FILE and len(desc) == 8:
             self.block_size = desc['block-size'].as_uint()
+            self.type_of_file = desc['file-type'].as_uint()
+            _validate_file_type(self.type_of_file)
         elif self.type_of_element == FILE_TYPE_FOLDER and len(desc) == 6:
             pass
         else:
