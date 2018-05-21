@@ -1,9 +1,10 @@
 <!doctype html>
 <head>
   <title>Zyn</title>
+  <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
   <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.3/socket.io.slim.js"></script>
   <script type="text/javascript" src="https://cdn.rawgit.com/showdownjs/showdown/1.8.6/dist/showdown.min.js"></script>
-  <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.0.489/pdf.js"></script>
   <script type="text/javascript" src="{{ static_url('zyn.js') }}"></script>
   <script type="text/javascript" src="{{ static_url('utf8.js') }}"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -88,6 +89,44 @@
            var decoded = utf8.decode(content);
            var html = converter.makeHtml(decoded);
            content_element.innerHTML = html;
+       } else if (filename.endsWith('.pdf')) {
+
+           var root = document.createElement('div');
+           // console.log('Loading pdf');
+
+           var loadingTask = pdfjsLib.getDocument({data: content});
+           loadingTask.promise.then(function(pdf) {
+               // console.log('PDF loaded');
+
+               var pageNumber = 1;
+               for (var pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+                   pdf.getPage(pageNumber).then(function(page) {
+                       // console.log('Page loaded');
+
+                       var scale = 1.5;
+                       var viewport = page.getViewport(scale);
+
+                       var canvas = document.createElement('canvas');
+                       root.appendChild(canvas);
+                       var context = canvas.getContext('2d');
+                       canvas.height = viewport.height;
+                       canvas.width = viewport.width;
+                       var renderContext = {
+                           canvasContext: context,
+                           viewport: viewport
+                       };
+                       var renderTask = page.render(renderContext);
+                       renderTask.then(function () {
+                           // console.log('Page rendered');
+                       });
+                   });
+               }
+           }, function (reason) {
+               // PDF loading error
+               console.error(reason);
+           });
+           content_element.appendChild(root);
+
        } else {
            content_element.innerHTML = '<pre>' + content + '</pre>';
        }
