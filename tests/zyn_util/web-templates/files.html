@@ -40,7 +40,10 @@
   <div id="tab-files" class="zyn-tabs" style="display:none">
 
       <p>Directory</p>
+
       <a id="zyn-button-parent-directory" href="#" class="w3-bar-item w3-button" >Up</a>
+      <button class="w3-bar-item w3-button" onclick="_handle_edit_clicked()">Edit</button>
+      <button class="w3-bar-item w3-button" onclick="_handle_save_edit_clicked()">Save</button>
 
       <input id="zyn-current-path" type="text" class="w3-bar-item w3-input" disabled></input>
 
@@ -59,8 +62,51 @@
   </div>
 
   <script>
+   var _current_file_content = null;
+   var _current_file_name = null;
+   var _current_file_node_id = null;
+   var _current_file_revision = null;
+
    function _handle_zyn_error(error_description) {
        alert("Zyn error");
+   }
+
+   function _handle_save_edit_rsp()
+   {
+       console.log('edit done!')
+   }
+
+   function _handle_save_edit_clicked()
+   {
+       console.log('save clicked');
+       var content_element = document.getElementById('zyn-edit-content');
+
+       console.log('zxczxczxc')
+       edited_content = content_element.innerText;
+       console.log(edited_content)
+       zyn_edit_file(
+           _current_file_node_id,
+           _current_file_revision,
+           _current_file_content,
+           utf8.encode(edited_content),
+           utf8.encode(_handle_save_edit_rsp),
+       );
+   }
+
+   function _handle_edit_clicked()
+   {
+       console.log('edit clicked');
+       if (_current_file_content === null) {
+           alert('no file');
+           return ;
+       }
+
+       var content_element = document.getElementById('zyn-document-content');
+       content_element.innerHTML =
+           '<pre id="zyn-edit-content" contenteditable="true">'
+           + _current_file_content
+           + '</pre>'
+       ;
    }
 
    function _handle_parent_directory_clicked()
@@ -81,7 +127,12 @@
 
    }
 
-   function _handle_load_file_rsp(node_id, filename, content) {
+   function _handle_load_file_rsp(node_id, filename, revision, content) {
+
+       _current_file_content = content;
+       _current_file_name = filename;
+       _current_file_node_id = node_id;
+       _current_file_revision = revision;
 
        var content_element = document.getElementById('zyn-document-content');
        if (filename.endsWith('.md')) {

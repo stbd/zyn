@@ -350,6 +350,7 @@ class LocalFile(LocalFileSystemElement):
 
                 check_rsp(rsp)
                 self._revision = rsp.as_insert_rsp().revision
+                self._checksum = self._calculate_checksum(local_data)
 
         finally:
             if open_rsp is not None:

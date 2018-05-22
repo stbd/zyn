@@ -66,18 +66,49 @@ function zyn_change_current_directory(path, callback_for_success, callback_for_e
     ));
 }
 
+function zyn_edit_file(
+    node_id,
+    revision,
+    content_original,
+    content_edited,
+    callback_for_success,
+) {
+    if (_socket == null) {
+        return ;
+    }
+
+    if (_transaction_ongoing) {
+        callback_for_error(ZYN_ERROR_CODE_TRANSACTION_ALREADY_IN_PROGRESS);
+        return ;
+    }
+
+    _transaction_ongoing = true;
+    _callback_for_success = callback_for_success;
+    _socket.onmessage = _parse_response_and_forward;
+    _socket.send(_to_json_message(
+        'edit-file',
+        {
+            'node-id': node_id,
+            'revision': revision,
+            'content-original': btoa(content_original),
+            'content-edited': btoa(content_edited),
+        }
+    ));
+}
+
 function _handle_load_file_response(websocket_msg)
 {
     _transaction_ongoing = false;
     var msg = JSON.parse(websocket_msg.data);
     var content = atob(msg['content']);
     var node_id = Number(msg['node-id']);
+    var revision = Number(msg['revision']);
     var filename = String(msg['filename']);
 
     // console.log('loading file, l ' + content.length, _callback_for_success);
 
     if (_callback_for_success != null) {
-        _callback_for_success(node_id, filename, content);
+        _callback_for_success(node_id, filename, revision, content);
     }
 }
 

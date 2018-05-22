@@ -176,12 +176,49 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 'user-id': user_id,
                 'tab-id': self._tab_id,
                 'node-id': node_id,
+                'revision': open_rsp.revision,
                 'filename': filename,
                 'content': content,
             }))
 
+        elif msg_type == 'edit-file':
+
+            node_id = msg['content']['node-id']
+            content_original = msg['content']['content-original']
+            content_edited = msg['content']['content-edited']
+            node_id = msg['content']['node-id']
+            revision = msg['content']['revision']
+
+            self._log.debug('{}: node_id={}, revision={}'.format(msg_type, node_id, revision))
+
+            open_rsp = None
+            try:
+                rsp = self._connection.zyn_connection().open_file_write(
+                    node_id=node_id
+                )
+                if rsp.is_error():
+                    raise RuntimeError('Error opening file')
+
+                open_rsp = rsp.as_open_rsp()
+
+                # todo: check revision
+                # todo: check filetype
+
+                zyn_util.util.edit_random_access_file(
+                    self._connection.zyn_connection(),
+                    node_id,
+                    revision,
+                    base64.b64decode(content_original),
+                    base64.b64decode(content_edited),
+                    self._log
+                )
+
+            finally:
+                if open_rsp is not None:
+                    self._connection.zyn_connection().close_file(node_id=node_id)
+
         else:
-            self._log.error("Closing socket: unexpected message")
+            self._log.error("Closing socket: unexpected message: {}".format(msg_type))
             self._close_socket()
 
     def _close_socket(self):
