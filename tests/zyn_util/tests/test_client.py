@@ -71,7 +71,7 @@ class ClientState:
             self.write_local_file_text(path_remote, content)
 
 
-class TestClient(zyn_util.tests.common.TestCommon):
+class TestClients(zyn_util.tests.common.TestCommon):
     def _path_clients_data(self):
         return '{}/clients'.format(self._work_dir.name)
 
@@ -121,6 +121,8 @@ class TestClient(zyn_util.tests.common.TestCommon):
         clients = [self._create_client(i) for i in range(2, number_of_clients + 1)]
         return [client_1] + clients
 
+
+class TestClient(TestClients):
     def test_resume_client(self):
         data_1 = 'data'
         data_2 = 'datazxcc'
@@ -332,6 +334,8 @@ class TestClient(zyn_util.tests.common.TestCommon):
         client_state.client.fetch(path_remote)
         client_state.validate_directory(path_remote)
 
+
+class TestCli(TestClients):
     def _cli_client(self):
         client_state, = self._start_server_and_create_number_of_clients(1)
         return client_state, zyn_util.cli_client.ZynCliClient(client_state.client)

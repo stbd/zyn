@@ -314,7 +314,7 @@ class ZynConnectionFactory:
         return connection
 
 
-def run_tornado():
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('local-port', type=int, default=8080, help='')
     parser.add_argument('zyn-server-ip', help='')
@@ -324,6 +324,7 @@ def run_tornado():
     parser.add_argument('--ssl-path-to-key', help='')
     parser.add_argument('--zyn-server-path-to-cert', help='', default=None)
     parser.add_argument('--debug-protocol', action='store_true', help='')
+    parser.add_argument('--debug-tornado', action='store_true', help='')
     parser.add_argument('--verbose', '-v', action='count', default=0)
     parser.add_argument('--remote-hostname', default=None)
 
@@ -368,7 +369,7 @@ def run_tornado():
         cookie_secret=base64.b64encode(os.urandom(50)).decode('utf8'),
         static_path=PATH_STATIC_FILES,
         template_path=PATH_TEMPLATES,
-        debug=True,
+        debug=args['debug_tornado'],
     )
 
     tornado.log.enable_pretty_logging()
@@ -382,4 +383,4 @@ def run_tornado():
 
 
 if __name__ == '__main__':
-    run_tornado()
+    main()

@@ -1,7 +1,9 @@
-import logging
 import difflib
+import logging
+import posixpath
 
 import zyn_util.errors
+import zyn_util.exception
 
 
 def verbose_count_to_log_level(verbose_count):
@@ -11,15 +13,22 @@ def verbose_count_to_log_level(verbose_count):
         level = logging.INFO
     elif verbose_count == 2:
         level = logging.DEBUG
-    else:
+    elif level > 2:
         logger.warn('Maximum number of verbose flags is 2, greater value is ignored')
     logger.setLevel(level)
 
 
-def check_rsp(rsp):
+def check_server_response(rsp):
     if rsp.is_error():
         desc = zyn_util.errors.error_to_string(rsp.error_code())
-        raise ZynServerException(rsp.error_code(), desc)
+        raise zyn_util.exception.ZynServerException(rsp.error_code(), desc)
+
+
+def join_paths(list_of_paths):
+    path = posixpath.normpath('/'.join(list_of_paths))
+    if path.startswith('//'):
+        path = path[1:]
+    return path
 
 
 def edit_random_access_file(
@@ -62,7 +71,7 @@ def edit_random_access_file(
                 remote_index,
                 delete_size
             )
-            check_rsp(rsp)
+            check_server_response(rsp)
             revision = rsp.as_delete_rsp().revision
 
         elif type_of_change == 'replace':
@@ -75,7 +84,7 @@ def edit_random_access_file(
                     remote_index,
                     delete_size
                 )
-                check_rsp(rsp)
+                check_server_response(rsp)
                 revision = rsp.as_delete_rsp().revision
 
             insert_size = j2 - j1
@@ -86,7 +95,7 @@ def edit_random_access_file(
                 remote_index,
                 content_edited[j1:j2]
             )
-            check_rsp(rsp)
+            check_server_response(rsp)
             revision = rsp.as_write_rsp().revision
 
         elif type_of_change == 'insert':
@@ -99,12 +108,12 @@ def edit_random_access_file(
                 remote_index,
                 content_edited[j1:j2]
             )
-            check_rsp(rsp)
+            check_server_response(rsp)
             revision = rsp.as_insert_rsp().revision
             insert_size = j2 - j1
 
         else:
-            raise ZynClientException('Unhandled change type, type="{}"'.format(
+            raise RuntimeError('Unhandled change type, type="{}"'.format(
                 type_of_change
             ))
 

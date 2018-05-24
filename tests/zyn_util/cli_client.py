@@ -10,6 +10,7 @@ import sys
 import zyn_util.client
 import zyn_util.connection
 import zyn_util.util
+import zyn_util.exception
 
 
 PATH_TO_DEFAULT_STATE_FILE = os.path.expanduser("~/.zyn-cli-client")
@@ -295,7 +296,7 @@ class ZynCliClient(cmd.Cmd):
             expiration=expiration,
             password=password
         )
-        zyn_util.client.check_rsp(rsp)
+        zyn_util.util.check_server_response(rsp)
         _command_completed()
 
     def _parser_fetch(self):
@@ -436,7 +437,7 @@ def main():
 
     try:
         rsp = client.connection().authenticate(args['username'], password)
-        zyn_util.client.check_rsp(rsp)
+        zyn_util.util.check_server_response(rsp)
     except zyn_util.client.ZynClientException as e:
         print(e)
         sys.exit(1)
@@ -471,7 +472,8 @@ def main():
     while True:
         try:
             cli.cmdloop()
-        except zyn_util.client.ZynException as e:
+        except zyn_util.exception.ZynException as e:
+            print()
             print('Exception while processing command')
             print(e)
         except KeyboardInterrupt:

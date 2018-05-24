@@ -16,6 +16,7 @@ setup(
     entry_points={
         'console_scripts': [
             'zyn-cli=zyn_util.cli_client:main',
+            'zyn-web-server=zyn_util.web_client:main',
         ]
     }
 )

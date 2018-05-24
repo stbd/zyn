@@ -130,7 +130,7 @@ function zyn-all-tests() {
 }
 
 function zyn-run-cli-client() {
-    python3 "$ZYN_ROOT"/tests/zyn_util/cli_client.py \
+    zyn-cli \
             admin \
             127.0.0.1 \
             4433 \
@@ -138,17 +138,19 @@ function zyn-run-cli-client() {
             -p admin \
             --debug-protocol \
             --remote-hostname zyn \
+            -vv
             "$@"
 }
 
 function zyn-run-web-client() {
-    python3 "$ZYN_ROOT"/tests/zyn_util/web-client.py \
+    zyn-web-server \
             8080 \
             127.0.0.1 \
             4433 \
             --zyn-server-path-to-cert "$HOME"/.zyn-certificates/cert.pem \
             --remote-hostname zyn \
             --debug-protocol \
+            --debug-tornado \
             -vv \
             "$@"
 }
