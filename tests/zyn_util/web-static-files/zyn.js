@@ -194,6 +194,23 @@ function zyn_init(user_id, callback_for_success, callback_for_error) {
     };
 }
 
+function zyn_log_on_server(message, level='debug')
+{
+    var supported_levels = ['debug', 'info']
+    if (supported_levels.indexOf(level) == -1) {
+        console.log('Invalid log level: ' + level);
+        return
+    }
+
+    _socket.send(_to_json_message(
+        'log',
+        {
+            'level': level,
+            'message': message,
+        }
+    ));
+}
+
 function _handle_unrecoverable_error()
 {
     _socket.close();

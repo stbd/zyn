@@ -80,7 +80,20 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             self._log.error("Closing socket: tab_ids do not match")
             self._close_socket()
 
-        if msg_type == 'register':
+        if msg_type == 'log':
+
+            level = msg['content']['level']
+            msg = msg['content']['message']
+            msg = 'Browser, user_id={}: {}'.format(user_id, msg)
+
+            if level == 'debug':
+                self._log.debug(msg)
+            elif level == 'info':
+                self._log.info(msg)
+            else:
+                raise RuntimeError()
+
+        elif msg_type == 'register':
 
             self._log.debug('Register, user_id={}'.format(user_id))
 
@@ -235,6 +248,9 @@ class MainHandler(tornado.web.RequestHandler):
         username = self.get_body_argument("username")
         password = self.get_body_argument("password")
 
+        if len(path_file) == 0:
+            path_file = '/'
+
         log = logging.getLogger(__name__)
         log.info('Login, username="%s", path_file="%s"' % (username, path_file))
 
@@ -242,19 +258,14 @@ class MainHandler(tornado.web.RequestHandler):
         zyn_connection = connection_factory.create_connection_and_connect()
         rsp = zyn_connection.authenticate(username, password)
 
-        if rsp.is_error():
-            log.info('Failed to login, username="%s", error="%d"' % (username, rsp.error_code()))
-            return
-
-        user_id = connections.add_connection(Connection(zyn_connection))
-
-        log.info('Login successful, username="%s"' % username)
-
-        self.set_secure_cookie(COOKIE_NAME, str(user_id))
-        if len(path_file) > 0:
-            self.redirect(path_file)
+        if not rsp.is_error():
+            user_id = connections.add_connection(Connection(zyn_connection))
+            log.info('Login successful, username="%s"' % username)
+            self.set_secure_cookie(COOKIE_NAME, str(user_id))
         else:
-            self.redirect('/')
+            log.info('Failed to login, username="%s", error="%d"' % (username, rsp.error_code()))
+
+        self.redirect(path_file)
 
     def get(self, path_file):
         global connections
