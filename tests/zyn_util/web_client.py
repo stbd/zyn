@@ -37,8 +37,10 @@ class ConnectionContainer:
 
 
 class Connection:
-    def __init__(self, zyn_connection):
+    def __init__(self, zyn_connection, username, password):
         self._zyn_connection = zyn_connection
+        self._username = username
+        self._password = password
         self._web_sockets = {}
         self._ids = 0
 
@@ -59,6 +61,13 @@ class Connection:
     def zyn_connection(self):
         return self._zyn_connection
 
+    def reconnect(self):
+        global connection_factory
+        self._zyn_connection = connection_factory.create_connection_and_connect()
+        rsp = self._zyn_connection.authenticate(self._username, self._password)
+        if rsp.is_error():
+            raise ValueError('Failed to login as {}'.format(self._username))
+
 
 class WebSocket(tornado.websocket.WebSocketHandler):
     def open(self):
@@ -66,6 +75,14 @@ class WebSocket(tornado.websocket.WebSocketHandler):
         self._tab_id = 0
         self._log = logging.getLogger(__name__)
         self._log.info("New websocket connected")
+
+    def _close_socket(self):
+        self._log.info("Closing: tab_id=%i" % self._tab_id)
+        self._connection.remote_web_socket(self._tab_id)
+        self.close()
+
+    def on_close(self):
+        self._close_socket()
 
     def on_message(self, message):
         msg = json.loads(message)
@@ -80,10 +97,22 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             self._log.error("Closing socket: tab_ids do not match")
             self._close_socket()
 
+        max_number_of_trials = 2
+        trial = 1
+        while trial < max_number_of_trials:
+            try:
+                return self._handle_message(msg_type, user_id, msg.get('content', None))
+            except TimeoutError:
+                self._log.info('Connection to Zyn server lost, trying to reconnect')
+                self._connection.reconnect()
+            trial += 1
+
+    def _handle_message(self, msg_type, user_id, content):
+
         if msg_type == 'log':
 
-            level = msg['content']['level']
-            msg = msg['content']['message']
+            level = content['level']
+            msg = content['message']
             msg = 'Browser, user_id={}: {}'.format(user_id, msg)
 
             if level == 'debug':
@@ -110,7 +139,7 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
         elif msg_type == 'test-path-exists-and-is-directory':
 
-            path = msg['content']['path']
+            path = content['path']
             self._log.debug('{}: path={}'.format(msg_type, path))
             rsp = self._connection.zyn_connection().query_filesystem(path=path)
             exists = True
@@ -127,7 +156,7 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
         elif msg_type == 'list-directory-content':
 
-            path = msg['content']['path']
+            path = content['path']
             self._log.debug('{}: path={}'.format(msg_type, path))
 
             elements = []
@@ -159,8 +188,8 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
         elif msg_type == 'load-file':
 
-            node_id = msg['content']['node-id']
-            filename = msg['content']['filename']
+            node_id = content['node-id']
+            filename = content['filename']
             self._log.debug('{}: node_id={}, filename="{}"'.format(msg_type, node_id, filename))
 
             content = b''
@@ -196,11 +225,11 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
         elif msg_type == 'edit-file':
 
-            node_id = msg['content']['node-id']
-            content_original = msg['content']['content-original']
-            content_edited = msg['content']['content-edited']
-            node_id = msg['content']['node-id']
-            revision = msg['content']['revision']
+            node_id = content['node-id']
+            content_original = content['content-original']
+            content_edited = content['content-edited']
+            node_id = content['node-id']
+            revision = content['revision']
 
             self._log.debug('{}: node_id={}, revision={}'.format(msg_type, node_id, revision))
 
@@ -234,14 +263,6 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             self._log.error("Closing socket: unexpected message: {}".format(msg_type))
             self._close_socket()
 
-    def _close_socket(self):
-        self._log.info("Closing: tab_id=%i" % self._tab_id)
-        self._connection.remote_web_socket(self._tab_id)
-        self.close()
-
-    def on_close(self):
-        self._close_socket()
-
 
 class MainHandler(tornado.web.RequestHandler):
     def post(self, path_file):
@@ -259,7 +280,7 @@ class MainHandler(tornado.web.RequestHandler):
         rsp = zyn_connection.authenticate(username, password)
 
         if not rsp.is_error():
-            user_id = connections.add_connection(Connection(zyn_connection))
+            user_id = connections.add_connection(Connection(zyn_connection, username, password))
             log.info('Login successful, username="%s"' % username)
             self.set_secure_cookie(COOKIE_NAME, str(user_id))
         else:
