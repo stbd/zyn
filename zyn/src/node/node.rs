@@ -210,7 +210,12 @@ impl Node {
             .map_err(| () | error!("Failed to store user authority"))
             ? ;
 
-        let fs = Filesystem::new(crypto, path_workdir);
+        let path_data_dir = Node::path_data(path_workdir);
+        create_dir(& path_data_dir)
+            .map_err(| error | error!("failed to create data dir, error=\"{}\"", error))
+            ? ;
+
+        let fs = Filesystem::new(crypto, & path_data_dir);
         fs.store(& Node::path_filesystem(path_workdir))
             .map_err(| () | error!("Failed to store filesystem"))
             ? ;
@@ -277,11 +282,6 @@ impl Node {
             ? ;
 
         let path_data_dir = Node::path_data(path_workdir);
-        create_dir(& path_data_dir)
-            .map_err(| error | error!("failed to create data dir, error=\"{}\"", error))
-            ? ;
-
-
         let fs = Filesystem::load(crypto.clone(), & path_data_dir, & Node::path_filesystem(path_workdir))
             .map_err(| () | error!("Failed to load filesystem"))
             ? ;
