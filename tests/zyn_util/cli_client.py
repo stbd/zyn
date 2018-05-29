@@ -264,7 +264,9 @@ class ZynCliClient(cmd.Cmd):
     def _parser_modify_user(self):
         parser = argparse.ArgumentParser(prog='modify_user')
         parser.add_argument('username', type=str)
-        parser.add_argument('--expiration', type=str)
+        group = parser.add_mutually_exclusive_group(required=False)
+        group.add_argument('--expiration', type=str)
+        group.add_argument('-de', '--disable-expiration', action='store_true')
         parser.add_argument('--expiration-format', type=str, default='%d.%m.%Y')
         return parser
 
@@ -279,9 +281,13 @@ class ZynCliClient(cmd.Cmd):
 
         password = None  # todo: implement
         expiration = args['expiration']
+        disable_expiration = args['disable_expiration']
         username = args['username']
 
-        if password is None and expiration is None:
+        if password is None \
+           and expiration is None \
+           and not disable_expiration\
+           :
             print('Please specify modified value')
             return
 
@@ -290,6 +296,9 @@ class ZynCliClient(cmd.Cmd):
                 expiration,
                 args['expiration_format'],
             ).timestamp())
+
+        if disable_expiration:
+            expiration = zyn_util.connection.EXPIRATION_NEVER_EXPIRE
 
         rsp = self._client.connection().modify_user(
             username=username,
