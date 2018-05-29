@@ -7,6 +7,7 @@ var _callback_for_error = null;
 var _transaction_ongoing = false;
 var _current_path = [];
 
+var _current_transaction = null;
 
 var ZYN_ERROR_CODE_TRANSACTION_ALREADY_IN_PROGRESS = 1;
 
@@ -135,7 +136,7 @@ function zyn_load_file(node_id, filename, callback_for_success)
     ));
 }
 
-function zyn_load_folder_contents(path, callback_for_success, callback_for_error) {
+function _zyn_load_folder_contents(path, callback_for_success, callback_for_error) {
     if (_socket == null) {
         return ;
     }
@@ -157,9 +158,43 @@ function zyn_load_folder_contents(path, callback_for_success, callback_for_error
     ));
 }
 
+
+function _start_transaction(transaction)
+{
+    if (_socket == null) {
+        transaction.on_error(); // todo
+        return false;
+    }
+
+    if (_current_transaction != null) {
+        transaction.on_error(ZYN_ERROR_CODE_TRANSACTION_ALREADY_IN_PROGRESS);
+        return false;
+    }
+
+    _current_transaction = transaction;
+    return true;
+}
+
+
+function zyn_load_folder_contents(path, transaction)
+{
+    if (_start_transaction(transaction) === false) {
+        return ;
+    }
+
+    _socket.onmessage = _parse_response_and_forward;
+    _socket.send(_to_json_message(
+        'list-directory-content',
+        {
+            'path': path,
+        }
+    ));
+}
+
+
 function _handle_register_response(websocket_msg)
 {
-    _transaction_ongoing = false;
+    var transaction = _reset_current_transaction();
     var msg = JSON.parse(websocket_msg.data);
 
     if (msg['type'] != 'register-rsp') {
@@ -168,13 +203,13 @@ function _handle_register_response(websocket_msg)
     }
 
     _tab_id = msg['tab-id'];
-    if (_callback_for_success != null) {
-        _callback_for_success(msg);
-    }
+    transaction.on_success(msg);
 }
 
-function zyn_init(user_id, callback_for_success, callback_for_error) {
+function zyn_init(user_id, transaction)
+{
     _user_id = user_id;
+    _current_transaction = transaction;
 
     var url = new URL(window.location.href)
     var protocol = "ws";
@@ -184,11 +219,7 @@ function zyn_init(user_id, callback_for_success, callback_for_error) {
     var websocket_url = protocol + '://' + url.hostname + ":" + url.port + "/websocket";
 
     _socket = new WebSocket(websocket_url);
-    _callback_for_success = callback_for_success;
-    _callback_for_error = callback_for_error;
-    _transaction_ongoing = true;
     _socket.onmessage = _handle_register_response;
-
     _socket.onopen = function () {
         _socket.send(_to_json_message('register', null));
     };
@@ -233,11 +264,16 @@ function _to_json_message(msg_type, content)
     return JSON.stringify(msg);
 }
 
+function _reset_current_transaction()
+{
+    var transaction = _current_transaction;
+    _current_transaction = null;
+    return transaction;
+}
+
 function _parse_response_and_forward(websocket_msg)
 {
-    _transaction_ongoing = false;
+    transaction = _reset_current_transaction();
     var msg = JSON.parse(websocket_msg.data);
-    if (_callback_for_success != null) {
-        _callback_for_success(msg);
-    }
+    transaction.on_success(msg);
 }

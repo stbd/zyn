@@ -1,60 +1,105 @@
 <!doctype html>
 <head>
-  <title>Zyn</title>
-  <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
-  <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.3/socket.io.slim.js"></script>
-  <script type="text/javascript" src="https://cdn.rawgit.com/showdownjs/showdown/1.8.6/dist/showdown.min.js"></script>
-  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.0.489/pdf.js"></script>
-  <script type="text/javascript" src="{{ static_url('zyn.js') }}"></script>
-  <script type="text/javascript" src="{{ static_url('utf8.js') }}"></script>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Zyn - Fileserver</title>
+    <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
+    <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.3/socket.io.slim.js"></script>
+    <script type="text/javascript" src="https://cdn.rawgit.com/showdownjs/showdown/1.8.6/dist/showdown.min.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.0.489/pdf.js"></script>
+    <script type="text/javascript" src="{{ static_url('zyn.js') }}"></script>
+    <script type="text/javascript" src="{{ static_url('utf8.js') }}"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
+
 <body>
+    <div id="zyn-login-modal" class="w3-modal" style="display: none;">
+        <div class="w3-modal-content">
 
+            <div class="w3-container">
+                <h2 class="w3-center">Zyn - Login</h2>
+                <form class="w3-container" method="post">
+                    <label>Username</label>
+                    <input class="w3-input w3-border w3-light-grey" type="text" name="username" autofocus>
 
-  <div id="login-modal" class="w3-modal" style="display: none;">
-    <div class="w3-modal-content">
-      <div class="w3-container">
-        <p>Login</p>
+                    <label>Password</label>
+                    <input class="w3-input w3-border w3-light-grey" type="password" name="password">
+                    <br />
+                    <input class="w3-button w3-blue-grey" type="submit" value="{{ _("login") }}">
 
-        <form class="w3-container" method="post">
-          <label>Username</label>
-          <input class="w3-input" type="text" name="username">
+                </form>
 
-          <label>Password</label>
-          <input class="w3-input" type="text" name="password">
-
-          <input type="submit" value="{{ _("login") }}">
-
-        </form>
-
-      </div>
+            </div>
+        </div>
     </div>
-  </div>
 
-  <div class="w3-bar w3-black">
-    <button class="w3-bar-item w3-button" onclick="_set_vissible_tab(tab_name_files)">Files</button>
-    <button class="w3-bar-item w3-button" onclick="_set_vissible_tab(tab_name_settings)">Settings</button>
-  </div>
+    <div id="zyn-error-modal" class="w3-modal" style="display: none;">
+        <div class="w3-modal-content">
+            <div class="w3-container w3-center">
+                <h2>Error</h2>
+                <p id="zyn-error-description">null</p>
+                <button class="w3-button w3-border" onclick='(function() { document.getElementById("zyn-error-modal").style.display="none"; })()'>Ok</button>
+            </div>
+        </div>
+    </div>
 
-  <div id="tab-files" class="zyn-tabs" style="display:none">
+    <div class="w3-container w3-bar w3-black">
+        <button class="w3-bar-item w3-button" onclick="_set_vissible_tab(tab_name_files)">Filesystem</button>
+        <button class="w3-bar-item w3-button" onclick="_set_vissible_tab(tab_name_settings)">Settings</button>
+    </div>
 
-      <p>Directory</p>
+    <div id="tab-files" class="zyn-tabs" style="display:none">
 
-      <a id="zyn-button-parent-directory" href="#" class="w3-bar-item w3-button" >Up</a>
-      <button class="w3-bar-item w3-button" onclick="_handle_edit_clicked()">Edit</button>
-      <button class="w3-bar-item w3-button" onclick="_handle_save_edit_clicked()">Save</button>
+        <div class="w3-container w3-margin-top w3-border">
+            <div class="w3-half">
+                <fieldset>
+                    <legend>Current Directory</legend>
+                    <div>
+                        <input id="zyn-current-path" type="text" class="w3-input" disabled style="width:50%"></input>
+                    </div>
+                    <button id="zyn-button-parent-directory" href="#" class="w3-button w3-border" onclick="_handle_parent_directory_clicked">Up</button>
+                </fieldset>
+            </div>
 
-      <input id="zyn-current-path" type="text" class="w3-bar-item w3-input" disabled></input>
+            <div class="w3-half">
+                <fieldset >
+                    <legend>Current File</legend>
+                    <ul class="w3-ul w3-border-bottom">
+                        <li class="w3-padding-small"><span>Name: </span><span id="zyn-current-file-name">null</span></li>
+                        <li class="w3-padding-small"><span>Node Id: </span><span id="zyn-current-file-node-id">null</span></li>
+                        <li class="w3-padding-small"><span>Type: </span><span id="zyn-current-file-type">null</span></li>
+                    </ul>
+                    <button id="zyn-current-file-button-edit" class="w3-bar-item w3-button w3-disabled w3-border" onclick="_handle_edit_clicked()">Edit</button>
+                    <button id="zyn-current-file-button-save" class="w3-bar-item w3-button w3-disabled w3-border" onclick="_handle_save_edit_clicked()">Save</button>
+                </fieldset>
+            </div>
 
-      <div id="file-list" class="w3-sidebar w3-bar-block w3-green" style="width:200px;">
+
       </div>
+            <div class="w3-border">
+                <p class="w3-center">Notifications</p>
+                <table id="zyn-notifications" class="w3-table">
+                    <tr>
+                        <th>Source</th>
+                        <th>Description</th>
+                    </tr>
+                </table>
+                <div class="w3-center">
+                    <button id="zyn-button-show-or-hide-notifications" data-state="show" class="w3-button w3-border" onclick="_handle_show_hide_notifications_clicked()">Show</button>
+                </div>
+            </div>
 
-      <div style="margin-left:200px">
-          <div id="zyn-document-content" class="w3-blue">
-              <h1>Content</h1>
+      <div class="w3-container w3-margin-top">
+          Content
+          <div class="w3-sidebar w3-bar-block w3-border" style="width:25%">
+              <div id="file-list"></div>
+          </div>
+
+          <div style="margin-left:200px">
+              <div id="zyn-document-content">
+                  <h1 class="w3-center w3-opacity"><b>Content</b></h1>
+              </div>
           </div>
       </div>
+
   </div>
 
   <div id="tab-settings" class="zyn-tabs" style="display:none">
@@ -62,12 +107,124 @@
   </div>
 
   <script>
+   var current_file = class {
+       constructor() {
+           this._name = null
+           this._content = null
+           this._node_id = null
+           this._revision = null
+           this._type_of_file = null
+       }
+   };
+
+   var _editable_files = ['md', 'txt'];
+
    var _current_file_content = null;
    var _current_file_name = null;
    var _current_file_node_id = null;
    var _current_file_revision = null;
 
-   function _handle_zyn_error(error_description) {
+   function _set_current_file(node_id, name, type)
+   {
+       _clear_current_file();
+       document.getElementById('zyn-current-file-name').innerText = name;
+       document.getElementById('zyn-current-file-node-id').innerText = node_id;
+       if (type === 'random-access') {
+           document.getElementById('zyn-current-file-type').innerText = "Random Access";
+           document.getElementById('zyn-current-file-button-edit').disabled = false;
+           document.getElementById('zyn-current-file-button-save').disabled = false;
+       } else if (type === 'blob') {
+           document.getElementById('zyn-current-file-type').innerText = "Blob";
+       } else {
+           alert('todo');
+       }
+   }
+
+   function _clear_current_file()
+   {
+       document.getElementById('zyn-current-file-name').innerText = "";
+       document.getElementById('zyn-current-file-node-id').innerText = "";
+       document.getElementById('zyn-current-file-type').innerText = "";
+       document.getElementById('zyn-current-file-button-edit').disabled = true;
+       document.getElementById('zyn-current-file-button-save').disabled = true;
+   }
+
+   function _show_error(description)
+   {
+       document.getElementById("zyn-error-modal").style.display = "block";
+       document.getElementById("zyn-error-description").innerText = description;
+   }
+
+   function _add_notification(source, description)
+   {
+       var notifications = document.getElementById("zyn-notifications");
+       console.log(notifications)
+       var size = notifications.rows.length;
+       if (size > 5) {
+           notifications.deleteRow(size - 1);
+       }
+       var row = notifications.insertRow(1);
+       row.insertCell().innerText = source;
+       row.insertCell().innerText = description;
+   }
+
+   function _change_notifications_display(display_style)
+   {
+       var notifications = document.getElementById("zyn-notifications");
+       var size = notifications.rows.length;
+       if (size < 2) {
+           return ;
+       }
+
+       for (i = 2; i < size; i++) {
+           notifications.rows[i].style.display = display_style
+       }
+   }
+
+   function _handle_show_hide_notifications_clicked()
+   {
+       var notifications = document.getElementById('zyn-button-show-or-hide-notifications');
+
+       if (notifications.dataset.state === 'show') {
+           notifications.dataset.state = 'hide';
+           notifications.innerText = 'Hide';
+           _change_notifications_display('');
+       } else if (notifications.dataset.state === 'hide') {
+           notifications.dataset.state = 'show';
+           notifications.innerText = 'Show';
+           _change_notifications_display('none');
+       } else {
+           alert('todo');
+       }
+   }
+
+   class Transaction {
+       constructor(on_success) {
+           this._on_success = on_success;
+
+       }
+
+       on_success(msg) {
+           this._on_success(msg);
+       }
+
+       on_error() {
+           alert('error');
+       }
+
+       on_notification() {
+           alert('notification');
+
+       }
+   }
+
+
+
+
+
+
+   function _handle_zyn_error(error_description)
+   {
        alert("Zyn error");
    }
 
@@ -124,6 +281,7 @@
        var path_element = document.getElementById('zyn-current-path');
        // console.log('---', path_element, path)
        path_element.value = path;
+       // path_element.innerText = path;
 
    }
 
@@ -230,29 +388,20 @@
        document.getElementById(tab_name).style.display = "block";
    }
 
-   function _handle_load_folder_content_response(rsp) {
-       var file_list = document.getElementById("file-list");
-       var elements = rsp['elements'];
+   function _fetch_and_set_folder_content(path)
+   {
+       zyn_load_folder_contents(path, new Transaction(function (rsp) {
+           var file_list = document.getElementById("file-list");
+           var elements = rsp['elements'];
 
-       while (file_list.firstChild) {
-           file_list.removeChild(file_list.firstChild);
-       }
+           while (file_list.firstChild) {
+               file_list.removeChild(file_list.firstChild);
+           }
 
-       for (let element of elements) {
-           file_list.appendChild(_create_folder_list_element(element));
-       }
-   }
-
-   function _fetch_and_set_folder_content(path) {
-
-       zyn_load_folder_contents(path, _handle_load_folder_content_response, _handle_zyn_error);
-   }
-
-   function _handle_socket_initialized(rsp) {
-       var path = zyn_current_directory_path();
-       _set_current_directory(path);
-       _fetch_and_set_folder_content(path);
-       zyn_log_on_server('Client ready');
+           for (let element of elements) {
+               file_list.appendChild(_create_folder_list_element(element));
+           }
+       }));
    }
 
   </script>
@@ -261,19 +410,21 @@
 
    // Initialization
    _set_vissible_tab(tab_name_files);
-   var parent_button = document.getElementById('zyn-button-parent-directory');
-   parent_button.addEventListener(
-       'click',
-       _handle_parent_directory_clicked,
-   );
+   _clear_current_file();
+   _change_notifications_display('none');
 
    {% if is_logged_in == 0 %}
 
-   document.getElementById("login-modal").style.display="block"
+   document.getElementById("zyn-login-modal").style.display = "block"
 
    {% elif is_logged_in == 1 %}
 
-   zyn_init("{{ user_id }}", _handle_socket_initialized, _handle_zyn_error);
+   zyn_init("{{ user_id }}", new Transaction(function () {
+       var path = zyn_current_directory_path();
+       _set_current_directory(path);
+       _fetch_and_set_folder_content(path);
+       zyn_log_on_server('Client ready');
+   }));
 
    {% end %}
 
