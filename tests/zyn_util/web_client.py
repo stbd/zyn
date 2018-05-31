@@ -47,6 +47,9 @@ class Connection:
         self._ids = 0
 
     def add_web_socket(self, socket):
+        if self._zyn_connection is None:
+            self.reconnect()
+
         self._ids += 1
         id = self._ids
         if id in self._web_sockets:
@@ -59,6 +62,9 @@ class Connection:
             del self._web_sockets[id]
         except KeyError:
             pass
+
+        if len(self._web_sockets) == 0:
+            self._zyn_connection = None
 
     def zyn_connection(self):
         return self._zyn_connection
@@ -228,7 +234,7 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                             open_rsp.size
                         )
                         if not rsp.is_error():
-                            file_content = str(base64.b64encode(data), 'ascii')
+                            file_content = data
             finally:
                 if open_rsp is not None:
                     rsp = self._connection.zyn_connection().close_file(node_id=node_id)
@@ -245,7 +251,7 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                     'revision': open_rsp.revision,
                     'filename': filename,
                     'file-type': file_type,
-                    'bytes': file_content,
+                    'bytes': str(base64.b64encode(file_content), 'ascii'),
                 },
             }))
 
@@ -282,7 +288,11 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                         self._log
                     )
                 elif file_type == FILE_TYPE_BLOB:
-                    rsp = connection.blob_write(node_id, revision, content_edited)
+                    rsp = self._connection.zyn_connection().blob_write(
+                        node_id,
+                        revision,
+                        base64.b64decode(content_edited),
+                    )
                     if not rsp.is_error():
                         revision = rsp.as_insert_rsp().revision
                 else:
