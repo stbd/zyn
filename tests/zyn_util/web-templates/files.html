@@ -66,6 +66,7 @@
                         <li class="w3-padding-small"><span>Name: </span><span id="zyn-current-file-name">null</span></li>
                         <li class="w3-padding-small"><span>Node Id: </span><span id="zyn-current-file-node-id">null</span></li>
                         <li class="w3-padding-small"><span>Type: </span><span id="zyn-current-file-type">null</span></li>
+                        <li class="w3-padding-small"><span>Revision: </span><span id="zyn-current-file-revision">null</span></li>
                     </ul>
                     <button id="zyn-current-file-button-edit" class="w3-bar-item w3-button w3-border" onclick="_handle_edit_clicked()">Edit</button>
                     <button id="zyn-current-file-button-cancel" class="w3-bar-item w3-button w3-border" onclick="_handle_cancel_clicked()">Cancel</button>
@@ -161,6 +162,7 @@
            this._revision = revision;
            this._type_of_file = type_of_file;
            this._bytes = bytes;
+           this._mode = CurrentFile.mode_view;
 
            this._extension = null;
            var split_name = this._name.split('.');
@@ -220,6 +222,7 @@
        _clear_current_file();
        document.getElementById('zyn-current-file-name').innerText = current_file.name();
        document.getElementById('zyn-current-file-node-id').innerText = current_file.node_id();
+       document.getElementById('zyn-current-file-revision').innerText = current_file.revision();
        if (current_file.type_of_file() === CurrentFile.file_type_random_access) {
            document.getElementById('zyn-current-file-type').innerText = "Random Access";
        } else if (current_file.type_of_file() === CurrentFile.file_type_blob) {
@@ -229,8 +232,15 @@
        }
 
        if (current_file.is_editable()) {
-           _set_button_activity('zyn-current-file-button-edit', true);
-           _set_button_activity('zyn-current-file-button-save', true);
+           if (current_file.mode() === CurrentFile.mode_view) {
+               _set_button_activity('zyn-current-file-button-edit', true);
+               _set_button_activity('zyn-current-file-button-save', true);
+               _set_button_activity('zyn-current-file-button-cancel', false);
+           } else if (current_file.mode() === CurrentFile.mode_edit) {
+               _set_button_activity('zyn-current-file-button-edit', false);
+               _set_button_activity('zyn-current-file-button-save', true);
+               _set_button_activity('zyn-current-file-button-cancel', true);
+           }
        }
    }
 
@@ -239,6 +249,7 @@
        document.getElementById('zyn-current-file-name').innerText = "";
        document.getElementById('zyn-current-file-node-id').innerText = "";
        document.getElementById('zyn-current-file-type').innerText = "";
+       document.getElementById('zyn-current-file-revision').innerText = "";
        _set_button_activity('zyn-current-file-button-edit', false);
        _set_button_activity('zyn-current-file-button-save', false);
        _set_button_activity('zyn-current-file-button-cancel', false);
@@ -318,6 +329,7 @@
            edited_content,
            new Transaction(function (rsp) {
                _current_file.update_revision(rsp['content']['revision']);
+               _set_current_file(_current_file);
            })
        );
    }
@@ -354,8 +366,8 @@
            + '</pre>'
        ;
 
-       _set_button_activity('zyn-current-file-button-cancel', true);
        _current_file.set_mode(CurrentFile.mode_edit);
+       _set_current_file(_current_file)
    }
 
    function _set_current_workdir(path) {
@@ -458,6 +470,10 @@
    function _set_current_file_content() {
 
        var content_element = document.getElementById('zyn-document-content');
+       while (content_element.firstChild) {
+           content_element.removeChild(content_element.firstChild);
+       }
+
        if (_current_file.file_type() == 'md') {
            var converter = new showdown.Converter();
            var decoded = utf8.decode(_current_file.bytes());
