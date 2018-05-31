@@ -22,4 +22,4 @@ tar -xf zyn-web-src.tar.gz && \
 pip3 install -e . && \
 popd \
 "
-entrypoint ["python3", "zyn_util/web-client.py"]
+entrypoint ["zyn-web-server"]
