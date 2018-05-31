@@ -855,14 +855,14 @@ class OpenResponse:
         self.revision = response.field(1).as_uint()
         self.size = response.field(2).as_uint()
         self.block_size = response.field(3).as_uint()
-        self.type_of_element = response.field(4).as_uint()
-        _validate_file_system_element_type(self.type_of_element)
+        self.type_of_file = response.field(4).as_uint()
+        _validate_file_type(self.type_of_file)
 
-    def is_file(self):
-        return self.type == FILE_TYPE_FILE
+    def is_random_access(self):
+        return self.type_of_file == FILE_TYPE_RANDOM_ACCESS
 
-    def is_folder(self):
-        return self.type == FILE_TYPE_FOLDER
+    def is_blob(self):
+        return self.type_of_file == FILE_TYPE_BLOB
 
 
 class QueryElement:

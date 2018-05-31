@@ -55,7 +55,7 @@
                     <div>
                         <input id="zyn-current-path" type="text" class="w3-input" disabled style="width:50%"></input>
                     </div>
-                    <button id="zyn-button-parent-directory" href="#" class="w3-button w3-border" onclick="_handle_parent_directory_clicked">Up</button>
+                    <button id="zyn-button-parent-directory" href="#" class="w3-button w3-border" onclick="_handle_parent_directory_clicked()">Up</button>
                 </fieldset>
             </div>
 
@@ -67,38 +67,39 @@
                         <li class="w3-padding-small"><span>Node Id: </span><span id="zyn-current-file-node-id">null</span></li>
                         <li class="w3-padding-small"><span>Type: </span><span id="zyn-current-file-type">null</span></li>
                     </ul>
-                    <button id="zyn-current-file-button-edit" class="w3-bar-item w3-button w3-disabled w3-border" onclick="_handle_edit_clicked()">Edit</button>
-                    <button id="zyn-current-file-button-save" class="w3-bar-item w3-button w3-disabled w3-border" onclick="_handle_save_edit_clicked()">Save</button>
+                    <button id="zyn-current-file-button-edit" class="w3-bar-item w3-button w3-border" onclick="_handle_edit_clicked()">Edit</button>
+                    <button id="zyn-current-file-button-cancel" class="w3-bar-item w3-button w3-border" onclick="_handle_cancel_clicked()">Cancel</button>
+                    <button id="zyn-current-file-button-save" class="w3-bar-item w3-button w3-border" onclick="_handle_save_edit_clicked()">Save</button>
                 </fieldset>
             </div>
 
+        </div>
 
-      </div>
-            <div class="w3-border">
-                <p class="w3-center">Notifications</p>
-                <table id="zyn-notifications" class="w3-table">
-                    <tr>
-                        <th>Source</th>
-                        <th>Description</th>
-                    </tr>
-                </table>
-                <div class="w3-center">
-                    <button id="zyn-button-show-or-hide-notifications" data-state="show" class="w3-button w3-border" onclick="_handle_show_hide_notifications_clicked()">Show</button>
-                </div>
+        <div class="w3-border">
+            <p class="w3-center">Notifications</p>
+             <table id="zyn-notifications" class="w3-table">
+                 <tr>
+                     <th>Source</th>
+                     <th>Description</th>
+                 </tr>
+             </table>
+             <div class="w3-center">
+                 <button id="zyn-button-show-or-hide-notifications" data-state="show" class="w3-button w3-border" onclick="_handle_show_hide_notifications_clicked()">Show</button>
+             </div>
+        </div>
+
+        <div class="w3-container w3-margin-top">
+            Content
+            <div class="w3-sidebar w3-bar-block w3-border" style="width:25%">
+                <div id="file-list"></div>
             </div>
 
-      <div class="w3-container w3-margin-top">
-          Content
-          <div class="w3-sidebar w3-bar-block w3-border" style="width:25%">
-              <div id="file-list"></div>
-          </div>
-
-          <div style="margin-left:200px">
-              <div id="zyn-document-content">
-                  <h1 class="w3-center w3-opacity"><b>Content</b></h1>
-              </div>
-          </div>
-      </div>
+            <div class="w3-border" style="margin-left:27%">
+                <div id="zyn-document-content">
+                    <h1 class="w3-center w3-opacity"><b>Content</b></h1>
+                </div>
+            </div>
+        </div>
 
   </div>
 
@@ -107,36 +108,129 @@
   </div>
 
   <script>
-   var current_file = class {
-       constructor() {
-           this._name = null
-           this._content = null
-           this._node_id = null
-           this._revision = null
-           this._type_of_file = null
+   class Transaction {
+       constructor(on_success, state=null) {
+           this._on_success = on_success;
+           this._state = state;
        }
+
+       state() {
+           return this._state;
+       }
+
+       on_success(msg) {
+           this._on_success(msg, this);
+       }
+
+       on_error() {
+           alert('error');
+       }
+
+       on_notification() {
+           alert('notification');
+
+       }
+   }
+
+   class CurrentFile {
+       constructor() {
+           this._name = null;
+           this._content = null;
+           this._node_id = null;
+           this._revision = null;
+           this._type_of_file = null;
+           this._extension = null;
+           this._mode = null;
+       }
+
+       is_set() {
+           if (this._name === null) {
+               return false;
+           }
+           return true;
+       }
+
+       change_to(name, node_id, revision, type_of_file, bytes) {
+           if (CurrentFile.file_types.indexOf(type_of_file) === -1) {
+               alert('unkdnown file type');
+               return ;
+           }
+
+           this._name = name;
+           this._node_id = node_id;
+           this._revision = revision;
+           this._type_of_file = type_of_file;
+           this._bytes = bytes;
+
+           this._extension = null;
+           var split_name = this._name.split('.');
+           if (split_name.length != 1) {
+               this._extension = split_name[split_name.length - 1];
+           }
+       }
+
+       is_editable() {
+           if (['md', 'txt'].indexOf(this._extension) === -1) {
+               return false;
+           }
+           return true;
+       }
+
+       set_mode(mode) {
+           if (CurrentFile.modes.indexOf(mode) === -1) {
+               alert('1');
+               return ;
+           }
+           this._mode = mode;
+       }
+
+       update_revision(revision) {
+           this._revision = revision;
+       }
+
+       mode() { return this._mode; }
+       file_type() { return this._extension; }
+       name() { return this._name; }
+       node_id() { return this._node_id; }
+       revision() { return this._revision; }
+       type_of_file() { return this._type_of_file; }
+       bytes() { return this._bytes; }
    };
+   CurrentFile.mode_view = 'view';
+   CurrentFile.mode_edit = 'edit';
+   CurrentFile.modes = [CurrentFile.mode_view, CurrentFile.mode_edit];
+   CurrentFile.file_type_random_access = 'random-access';
+   CurrentFile.file_type_blob = 'blob';
+   CurrentFile.file_types = [CurrentFile.file_type_random_access, CurrentFile.file_type_blob];
 
-   var _editable_files = ['md', 'txt'];
+   var _current_file = new CurrentFile();
+   var _current_workdir = new Path();
 
-   var _current_file_content = null;
-   var _current_file_name = null;
-   var _current_file_node_id = null;
-   var _current_file_revision = null;
+   function _set_button_activity(name, active) {
+       var button = document.getElementById(name);
+       if (active) {
+           button.classList.remove("w3-disabled");
+       } else {
+           button.classList.add("w3-disabled");
+       }
+   }
 
-   function _set_current_file(node_id, name, type)
+   function _set_current_file(current_file)
    {
        _clear_current_file();
-       document.getElementById('zyn-current-file-name').innerText = name;
-       document.getElementById('zyn-current-file-node-id').innerText = node_id;
-       if (type === 'random-access') {
+       document.getElementById('zyn-current-file-name').innerText = current_file.name();
+       document.getElementById('zyn-current-file-node-id').innerText = current_file.node_id();
+       if (current_file.type_of_file() === CurrentFile.file_type_random_access) {
            document.getElementById('zyn-current-file-type').innerText = "Random Access";
-           document.getElementById('zyn-current-file-button-edit').disabled = false;
-           document.getElementById('zyn-current-file-button-save').disabled = false;
-       } else if (type === 'blob') {
+       } else if (current_file.type_of_file() === CurrentFile.file_type_blob) {
            document.getElementById('zyn-current-file-type').innerText = "Blob";
        } else {
            alert('todo');
+       }
+
+       if (current_file.is_editable()) {
+           _set_button_activity('zyn-current-file-button-edit', true);
+           _set_button_activity('zyn-current-file-button-save', true);
        }
    }
 
@@ -145,8 +239,9 @@
        document.getElementById('zyn-current-file-name').innerText = "";
        document.getElementById('zyn-current-file-node-id').innerText = "";
        document.getElementById('zyn-current-file-type').innerText = "";
-       document.getElementById('zyn-current-file-button-edit').disabled = true;
-       document.getElementById('zyn-current-file-button-save').disabled = true;
+       _set_button_activity('zyn-current-file-button-edit', false);
+       _set_button_activity('zyn-current-file-button-save', false);
+       _set_button_activity('zyn-current-file-button-cancel', false);
    }
 
    function _show_error(description)
@@ -198,112 +293,182 @@
        }
    }
 
-   class Transaction {
-       constructor(on_success) {
-           this._on_success = on_success;
-
-       }
-
-       on_success(msg) {
-           this._on_success(msg);
-       }
-
-       on_error() {
-           alert('error');
-       }
-
-       on_notification() {
-           alert('notification');
-
-       }
-   }
-
-
-
-
-
-
-   function _handle_zyn_error(error_description)
-   {
-       alert("Zyn error");
-   }
-
-   function _handle_save_edit_rsp()
-   {
-       console.log('edit done!')
-   }
-
    function _handle_save_edit_clicked()
    {
-       console.log('save clicked');
-       var content_element = document.getElementById('zyn-edit-content');
+       if (! _current_file.is_set()) {
+           return
+       }
 
-       console.log('zxczxczxc')
+       if (_current_file.mode() !== CurrentFile.mode_edit) {
+           return ;
+       }
+
+       var content_element = document.getElementById('zyn-edit-content');
        edited_content = content_element.innerText;
-       console.log(edited_content)
+
+       if (['md'].indexOf(_current_file.file_type) !== -1) {
+           edited_content = utf8.encode(edited_content);
+       }
+
        zyn_edit_file(
-           _current_file_node_id,
-           _current_file_revision,
-           _current_file_content,
-           utf8.encode(edited_content),
-           utf8.encode(_handle_save_edit_rsp),
+           _current_file.node_id(),
+           _current_file.revision(),
+           _current_file.type_of_file(),
+           _current_file.bytes(),
+           edited_content,
+           new Transaction(function (rsp) {
+               _current_file.update_revision(rsp['content']['revision']);
+           })
        );
+   }
+
+   function _handle_cancel_clicked()
+   {
+       if (! _current_file.is_set()) {
+           return
+       }
+
+       if (_current_file.mode() !== CurrentFile.mode_edit) {
+           return ;
+       }
+
+       _set_current_file_content();
+       _current_file.set_mode(CurrentFile.mode_view);
+       _set_current_file(_current_file);
    }
 
    function _handle_edit_clicked()
    {
-       console.log('edit clicked');
-       if (_current_file_content === null) {
-           alert('no file');
+       if (! _current_file.is_set()) {
+           return
+       }
+
+       if (_current_file.mode() === CurrentFile.mode_edit) {
            return ;
        }
 
        var content_element = document.getElementById('zyn-document-content');
        content_element.innerHTML =
            '<pre id="zyn-edit-content" contenteditable="true">'
-           + _current_file_content
+           + _current_file.bytes()
            + '</pre>'
        ;
+
+       _set_button_activity('zyn-current-file-button-cancel', true);
+       _current_file.set_mode(CurrentFile.mode_edit);
+   }
+
+   function _set_current_workdir(path) {
+       var path_element = document.getElementById('zyn-current-path');
+       path_element.value = path;
+   }
+
+   function _handle_change_current_workdir_rsp(rsp, transaction) {
+       if (rsp['description']['type-of-element'] === 'directory') {
+           var path = transaction.state()['path'];
+           _set_current_workdir(path.to_str());
+           _fetch_and_set_folder_content(path);
+           _current_workdir = path;
+       } else {
+           alert('zxc');
+       }
    }
 
    function _handle_parent_directory_clicked()
    {
-       var path_current = zyn_current_directory_path();
-       var path_parent = zyn_current_directory_parent_path();
-       // console.log('Moving to parent ' + path_current + ' ' + path_parent);
-       if (path_current === path_parent) {
+       var path = _current_workdir.clone();
+       path.parent();
+
+       if (_current_workdir.is_equal(path)) {
+           console.log('nochange');
            return ;
        }
-       zyn_change_current_directory(path_parent, _handle_change_current_directory_rsp, _handle_zyn_error);
+
+       zyn_query_filesystem_element(path, new Transaction(
+           _handle_change_current_workdir_rsp,
+           state={'path': path}
+       ));
    }
 
-   function _set_current_directory(path) {
-       var path_element = document.getElementById('zyn-current-path');
-       // console.log('---', path_element, path)
-       path_element.value = path;
-       // path_element.innerText = path;
+   function _handle_folder_content_list_item_clicked(element_type, name, node_id) {
 
+       if (element_type === 'dir') {
+           var path = _current_workdir.clone();
+           path.append(name);
+
+           zyn_query_filesystem_element(path, new Transaction(
+               _handle_change_current_workdir_rsp,
+               state={'path': path}
+           ));
+
+       } else if (element_type === 'file') {
+           zyn_load_file(node_id, name, new Transaction(_handle_load_file_rsp));
+       }
    }
 
-   function _handle_load_file_rsp(node_id, filename, revision, content) {
+   function _create_folder_list_element(element_data) {
+       var element = document.createElement('a');
+       element.setAttribute('class', 'w3-bar-item w3-button')
+       element.addEventListener('click', function() { _handle_folder_content_list_item_clicked(
+           element_data['element-type'],
+           element_data['name'],
+           element_data['node-id']);
+       });
 
-       _current_file_content = content;
-       _current_file_name = filename;
-       _current_file_node_id = node_id;
-       _current_file_revision = revision;
+       if (element_data['element-type'] === 'file') {
+           name = 'f ' + element_data['name']
+       } else {
+           name = 'd ' + element_data['name']
+       }
+
+       element.appendChild(document.createTextNode(name));
+       return element;
+   }
+
+   function _fetch_and_set_folder_content(path)
+   {
+       zyn_load_folder_contents(path, new Transaction(function (rsp, _) {
+           var file_list = document.getElementById("file-list");
+           var elements = rsp['elements'];
+
+           while (file_list.firstChild) {
+               file_list.removeChild(file_list.firstChild);
+           }
+
+           for (let element of elements) {
+               file_list.appendChild(_create_folder_list_element(element));
+           }
+       }));
+   }
+
+   function _handle_load_file_rsp(msg)
+   {
+       _current_file.change_to(
+           msg['content']['filename'],
+           msg['content']['node-id'],
+           msg['content']['revision'],
+           msg['content']['file-type'],
+           atob(msg['content']['bytes'])
+       );
+
+       _set_current_file(_current_file);
+       _set_current_file_content();
+   }
+
+   function _set_current_file_content() {
 
        var content_element = document.getElementById('zyn-document-content');
-       if (filename.endsWith('.md')) {
+       if (_current_file.file_type() == 'md') {
            var converter = new showdown.Converter();
-           var decoded = utf8.decode(content);
+           var decoded = utf8.decode(_current_file.bytes());
            var html = converter.makeHtml(decoded);
            content_element.innerHTML = html;
-       } else if (filename.endsWith('.pdf')) {
+       } else if (_current_file.file_type() == 'pdf') {
 
            var root = document.createElement('div');
            // console.log('Loading pdf');
 
-           var loadingTask = pdfjsLib.getDocument({data: content});
+           var loadingTask = pdfjsLib.getDocument({data: _current_file.bytes()});
            loadingTask.promise.then(function(pdf) {
                // console.log('PDF loaded');
 
@@ -337,47 +502,13 @@
            content_element.appendChild(root);
 
        } else {
-           content_element.innerHTML = '<pre>' + content + '</pre>';
+           content_element.innerHTML = '<pre>' + _current_file.bytes() + '</pre>';
        }
    }
 
-   function _handle_change_current_directory_rsp(path, exists) {
-       // console.log('cd done ' + path + exists);
-       _set_current_directory(path);
-       _fetch_and_set_folder_content(path);
-   }
+  </script>
 
-   function _handle_folder_content_list_item_clicked(element_type, name, node_id) {
-
-       if (element_type === 'dir') {
-           var path_current = zyn_current_directory_path();
-           var path_next = [path_current, name].join('/');
-           // console.log('Changing path to ' + path_next);
-           zyn_change_current_directory(path_next, _handle_change_current_directory_rsp, _handle_zyn_error);
-       } else if (element_type === 'file') {
-           zyn_load_file(node_id, name, _handle_load_file_rsp);
-       }
-   }
-
-   function _create_folder_list_element(element_data) {
-       var element = document.createElement('a');
-       element.setAttribute('class', 'w3-bar-item w3-button')
-       element.addEventListener('click', function() { _handle_folder_content_list_item_clicked(
-           element_data['element-type'],
-           element_data['name'],
-           element_data['node-id']);
-       });
-
-       if (element_data['element-type'] === 'file') {
-           name = 'f ' + element_data['name']
-       } else {
-           name = 'd ' + element_data['name']
-       }
-
-       element.appendChild(document.createTextNode(name));
-       return element;
-   }
-
+  <script>
    var tab_name_files = "tab-files";
    var tab_name_settings = "tab-settings";
    function _set_vissible_tab(tab_name) {
@@ -386,22 +517,6 @@
            tab.style.display = "none";
        }
        document.getElementById(tab_name).style.display = "block";
-   }
-
-   function _fetch_and_set_folder_content(path)
-   {
-       zyn_load_folder_contents(path, new Transaction(function (rsp) {
-           var file_list = document.getElementById("file-list");
-           var elements = rsp['elements'];
-
-           while (file_list.firstChild) {
-               file_list.removeChild(file_list.firstChild);
-           }
-
-           for (let element of elements) {
-               file_list.appendChild(_create_folder_list_element(element));
-           }
-       }));
    }
 
   </script>
@@ -419,9 +534,9 @@
 
    {% elif is_logged_in == 1 %}
 
-   zyn_init("{{ user_id }}", new Transaction(function () {
-       var path = zyn_current_directory_path();
-       _set_current_directory(path);
+   zyn_init("{{ user_id }}", new Transaction(function (_, _) {
+       var path = _current_workdir.clone();
+       _set_current_workdir(path.to_str());
        _fetch_and_set_folder_content(path);
        zyn_log_on_server('Client ready');
    }));

@@ -18,6 +18,8 @@ import zyn_util.util
 PATH_STATIC_FILES = os.path.dirname(os.path.abspath(__file__)) + '/web-static-files'
 PATH_TEMPLATES = os.path.dirname(os.path.abspath(__file__)) + '/web-templates'
 COOKIE_NAME = 'zyn-cookie'
+FILE_TYPE_RANDOM_ACCESS = 'random-access'
+FILE_TYPE_BLOB = 'blob'
 
 
 class ConnectionContainer:
@@ -137,21 +139,34 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
             self._log.info("Registered, tab_id=%d" % self._tab_id)
 
-        elif msg_type == 'test-path-exists-and-is-directory':
+        elif msg_type == 'query-filesystem-element':
 
             path = content['path']
             self._log.debug('{}: path={}'.format(msg_type, path))
             rsp = self._connection.zyn_connection().query_filesystem(path=path)
-            exists = True
-            if rsp.is_error():
-                exists = False
+
+            desc = {}
+            if not rsp.is_error():
+                rsp = rsp.as_query_filesystem_rsp()
+                desc['node-id'] = rsp.node_id
+                desc['write-access'] = rsp.write_access
+                desc['read-access'] = rsp.read_access
+                desc['created'] = rsp.created
+                desc['modified'] = rsp.modified
+                if rsp.is_file():
+                    desc['type-of-element'] = 'file'
+                elif rsp.is_directory():
+                    desc['type-of-element'] = 'directory'
+                else:
+                    raise RuntimeError()
+
 
             self.write_message(json.dumps({
                 'type': msg_type + '-rsp',
                 'user-id': user_id,
                 'tab-id': self._tab_id,
                 'path': path,
-                'exists': exists,
+                'description': desc
             }))
 
         elif msg_type == 'list-directory-content':
@@ -192,12 +207,20 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             filename = content['filename']
             self._log.debug('{}: node_id={}, filename="{}"'.format(msg_type, node_id, filename))
 
-            content = b''
+            file_content = b''
+            file_type = ''
             open_rsp = None
             try:
                 rsp = self._connection.zyn_connection().open_file_read(node_id=node_id)
                 if not rsp.is_error():
                     open_rsp = rsp.as_open_rsp()
+                    if open_rsp.is_random_access():
+                        file_type = FILE_TYPE_RANDOM_ACCESS
+                    elif open_rsp.is_blob():
+                        file_type = FILE_TYPE_BLOB
+                    else:
+                        raise RuntimeError()
+
                     if open_rsp.size > 0:
                         rsp, data = self._connection.zyn_connection().read_file(
                             node_id,
@@ -205,22 +228,25 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                             open_rsp.size
                         )
                         if not rsp.is_error():
-                            content = str(base64.b64encode(data), 'ascii')
+                            file_content = str(base64.b64encode(data), 'ascii')
             finally:
                 if open_rsp is not None:
                     rsp = self._connection.zyn_connection().close_file(node_id=node_id)
 
             self._log.debug('{}: loaded {} bytes, node_id={}'.format(
-                msg_type, len(content), node_id))
+                msg_type, len(file_content), node_id))
 
             self.write_message(json.dumps({
                 'type': msg_type + '-rsp',
                 'user-id': user_id,
                 'tab-id': self._tab_id,
-                'node-id': node_id,
-                'revision': open_rsp.revision,
-                'filename': filename,
-                'content': content,
+                'content': {
+                    'node-id': node_id,
+                    'revision': open_rsp.revision,
+                    'filename': filename,
+                    'file-type': file_type,
+                    'bytes': file_content,
+                },
             }))
 
         elif msg_type == 'edit-file':
@@ -229,6 +255,7 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             content_original = content['content-original']
             content_edited = content['content-edited']
             node_id = content['node-id']
+            file_type = content['type-of-file']
             revision = content['revision']
 
             self._log.debug('{}: node_id={}, revision={}'.format(msg_type, node_id, revision))
@@ -244,16 +271,32 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 open_rsp = rsp.as_open_rsp()
 
                 # todo: check revision
-                # todo: check filetype
 
-                zyn_util.util.edit_random_access_file(
-                    self._connection.zyn_connection(),
-                    node_id,
-                    revision,
-                    base64.b64decode(content_original),
-                    base64.b64decode(content_edited),
-                    self._log
-                )
+                if file_type == FILE_TYPE_RANDOM_ACCESS:
+                    revision = zyn_util.util.edit_random_access_file(
+                        self._connection.zyn_connection(),
+                        node_id,
+                        revision,
+                        base64.b64decode(content_original),
+                        base64.b64decode(content_edited),
+                        self._log
+                    )
+                elif file_type == FILE_TYPE_BLOB:
+                    rsp = connection.blob_write(node_id, revision, content_edited)
+                    if not rsp.is_error():
+                        revision = rsp.as_insert_rsp().revision
+                else:
+                    raise RuntimeError()
+
+                self.write_message(json.dumps({
+                    'type': msg_type + '-rsp',
+                    'user-id': user_id,
+                    'tab-id': self._tab_id,
+                    'content': {
+                        'node-id': node_id,
+                        'revision': revision,
+                    },
+                }))
 
             finally:
                 if open_rsp is not None:
