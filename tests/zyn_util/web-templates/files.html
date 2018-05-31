@@ -48,7 +48,16 @@
 
     <div id="tab-files" class="zyn-tabs" style="display:none">
 
-        <div class="w3-container w3-margin-top w3-border">
+        <div id="zyn-sidebar" class="w3-sidebar w3-bar-block w3-border" style="width: 25%;">
+            <h3 class="w3-bar-item">Content</h3>
+            <div id="file-list" style="min-width: 200px;"></div>
+        </div>
+
+        <div id="zyn-content" class="w3-container w3-margin-top w3-border">
+
+            <button type="button" class="w3-button w3-border" onclick="_set_sidebar_size('min')">Min</button>
+            <button type="button" class="w3-button w3-border" onclick="_set_sidebar_size('normal')">Normal</button>
+
             <div class="w3-half">
                 <fieldset>
                     <legend>Current Directory</legend>
@@ -74,36 +83,24 @@
                 </fieldset>
             </div>
 
-        </div>
-
-        <div class="w3-border">
-            <p class="w3-center">Notifications</p>
-             <table id="zyn-notifications" class="w3-table">
-                 <tr>
-                     <th>Source</th>
-                     <th>Description</th>
-                 </tr>
-             </table>
-             <div class="w3-center">
-                 <button id="zyn-button-show-or-hide-notifications" data-state="show" class="w3-button w3-border" onclick="_handle_show_hide_notifications_clicked()">Show</button>
-             </div>
-        </div>
-
-        <div class="w3-container w3-margin-top">
-            Content
-            <button class="w3-bar-item w3-button w3-border" onclick="_set_sidebar_size('min')">Min</button>
-            <button class="w3-bar-item w3-button w3-border" onclick="_set_sidebar_size('normal')">Normal</button>
-            <div id="zyn-sidebar" class="w3-sidebar w3-bar-block w3-border" style="width:25%">
-                <div id="file-list" style="width:200px"></div>
-            </div>
-
-            <div id="zyn-content" class="w3-border" style="margin-left:27%">
-                <div id="zyn-document-content">
-                    <h1 class="w3-center w3-opacity"><b>Content</b></h1>
+            <div class="w3-border">
+                <p class="w3-center">Notifications</p>
+                <table id="zyn-notifications" class="w3-table">
+                    <tr>
+                        <th>Source</th>
+                        <th>Description</th>
+                    </tr>
+                </table>
+                <div class="w3-center">
+                    <button id="zyn-button-show-or-hide-notifications" data-state="show" class="w3-button w3-border" onclick="_handle_show_hide_notifications_clicked()">Show</button>
                 </div>
             </div>
-        </div>
 
+            <div id="zyn-document-content" class="w3-border ">
+                <h1 class="w3-center w3-opacity"><b>Content</b></h1>
+            </div>
+
+        </div>
   </div>
 
   <div id="tab-settings" class="zyn-tabs" style="display:none">
