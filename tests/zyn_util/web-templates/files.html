@@ -91,11 +91,13 @@
 
         <div class="w3-container w3-margin-top">
             Content
-            <div class="w3-sidebar w3-bar-block w3-border" style="width:25%">
-                <div id="file-list"></div>
+            <button class="w3-bar-item w3-button w3-border" onclick="_set_sidebar_size('min')">Min</button>
+            <button class="w3-bar-item w3-button w3-border" onclick="_set_sidebar_size('normal')">Normal</button>
+            <div id="zyn-sidebar" class="w3-sidebar w3-bar-block w3-border" style="width:25%">
+                <div id="file-list" style="width:200px"></div>
             </div>
 
-            <div class="w3-border" style="margin-left:27%">
+            <div id="zyn-content" class="w3-border" style="margin-left:27%">
                 <div id="zyn-document-content">
                     <h1 class="w3-center w3-opacity"><b>Content</b></h1>
                 </div>
@@ -214,6 +216,18 @@
            button.classList.remove("w3-disabled");
        } else {
            button.classList.add("w3-disabled");
+       }
+   }
+
+   function _set_sidebar_size(size) {
+       if (size === 'min') {
+           document.getElementById('zyn-sidebar').style.width = '5%'
+           document.getElementById('zyn-content').style.marginLeft = '7%'
+       } else if (size === 'normal') {
+           document.getElementById('zyn-sidebar').style.width = '25%'
+           document.getElementById('zyn-content').style.marginLeft = '27%'
+       } else {
+           alert('unknown size');
        }
    }
 
@@ -543,6 +557,7 @@
    _set_vissible_tab(tab_name_files);
    _clear_current_file();
    _change_notifications_display('none');
+   _set_sidebar_size('normal');
 
    {% if is_logged_in == 0 %}
 
