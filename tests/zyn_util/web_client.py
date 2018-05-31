@@ -68,7 +68,7 @@ class Connection:
         self._zyn_connection = connection_factory.create_connection_and_connect()
         rsp = self._zyn_connection.authenticate(self._username, self._password)
         if rsp.is_error():
-            raise ValueError('Failed to login as {}'.format(self._username))
+            raise ValueError('Failed to login after reconnect as {}'.format(self._username))
 
 
 class WebSocket(tornado.websocket.WebSocketHandler):
