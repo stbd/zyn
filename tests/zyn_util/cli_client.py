@@ -285,10 +285,11 @@ class ZynCliClient(cmd.Cmd):
         disable_expiration = args['disable_expiration']
         username = args['username']
 
-        if password is None \
-           and expiration is None \
-           and not disable_expiration\
-           :
+        if (
+                password is None
+                and expiration is None
+                and not disable_expiration
+        ):
             print('Please specify modified value')
             return
 

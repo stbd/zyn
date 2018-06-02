@@ -252,7 +252,7 @@ class TestBasicEditFile(zyn_util.tests.common.TestCommon):
         c = self._start_and_connect_to_node_and_handle_auth()
         create_rsp = c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
         open_rsp = c.open_file_write(node_id=create_rsp.node_id).as_open_rsp()
-        self.assertEqual(open_rsp.type_of_element, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
+        self.assertEqual(open_rsp.type_of_file, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
 
         rsp = self._ra_write(c, create_rsp.node_id, open_rsp.revision, 0, 'data')
         self._read(c, create_rsp.node_id, 0, 10, rsp.revision, 'data')
@@ -271,7 +271,7 @@ class TestBasicEditFile(zyn_util.tests.common.TestCommon):
         create_rsp = c.create_file_blob('file-1', parent_path='/').as_create_rsp()
 
         open_rsp = c.open_file_write(node_id=create_rsp.node_id).as_open_rsp()
-        self.assertEqual(open_rsp.type_of_element, zyn_util.connection.FILE_TYPE_BLOB)
+        self.assertEqual(open_rsp.type_of_file, zyn_util.connection.FILE_TYPE_BLOB)
 
         rsp = self._blob_write(c, create_rsp.node_id, open_rsp.revision, 'data')
         self._read(c, create_rsp.node_id, 0, 10, rsp.revision, 'data')
