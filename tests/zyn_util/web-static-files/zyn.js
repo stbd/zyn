@@ -49,7 +49,31 @@ class Path {
     }
 }
 
-function zyn_edit_file(
+function zyn_edit_file_blob(
+    node_id,
+    revision,
+    type_of_file,
+    content_edited,
+    transaction,
+) {
+    if (_start_transaction(transaction) === false) {
+        return ;
+    }
+
+    _socket.onmessage = _parse_response_and_forward;
+    _socket.send(_to_json_message(
+        'edit-file',
+        {
+            'node-id': node_id,
+            'revision': revision,
+            'type-of-file': type_of_file,
+            'content-original': null,
+            'content-edited': btoa(content_edited),
+        }
+    ));
+}
+
+function zyn_edit_file_random_access(
     node_id,
     revision,
     type_of_file,

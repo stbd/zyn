@@ -332,17 +332,32 @@
            edited_content = utf8.encode(edited_content);
        }
 
-       zyn_edit_file(
-           _current_file.node_id(),
-           _current_file.revision(),
-           _current_file.type_of_file(),
-           _current_file.bytes(),
-           edited_content,
-           new Transaction(function (rsp) {
-               _current_file.update_revision(rsp['content']['revision']);
-               _set_current_file(_current_file);
-           })
-       );
+       if (_current_file.type_of_file() === CurrentFile.file_type_random_access) {
+           zyn_edit_file_random_access(
+               _current_file.node_id(),
+               _current_file.revision(),
+               _current_file.type_of_file(),
+               _current_file.bytes(),
+               edited_content,
+               new Transaction(function (rsp) {
+                   _current_file.update_revision(rsp['content']['revision']);
+                   _set_current_file(_current_file);
+               })
+           );
+       } else if (_current_file.type_of_file() === CurrentFile.file_type_blob) {
+           zyn_edit_file_blob(
+               _current_file.node_id(),
+               _current_file.revision(),
+               _current_file.type_of_file(),
+               edited_content,
+               new Transaction(function (rsp) {
+                   _current_file.update_revision(rsp['content']['revision']);
+                   _set_current_file(_current_file);
+               })
+           );
+       } else {
+           alert('Unhandled');
+       }
    }
 
    function _handle_cancel_clicked()

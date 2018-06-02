@@ -166,7 +166,6 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 else:
                     raise RuntimeError()
 
-
             self.write_message(json.dumps({
                 'type': msg_type + '-rsp',
                 'user-id': user_id,
@@ -276,7 +275,8 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
                 open_rsp = rsp.as_open_rsp()
 
-                # todo: check revision
+                if open_rsp.revision != revision:
+                    raise RuntimeError()
 
                 if file_type == FILE_TYPE_RANDOM_ACCESS:
                     revision = zyn_util.util.edit_random_access_file(
