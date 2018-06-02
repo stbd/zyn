@@ -95,6 +95,21 @@ impl Connection {
     }
 }
 
+impl Drop for Connection {
+    fn drop(& mut self) {
+        debug!("Closing TLS connection");
+        unsafe {
+            match tls_sys::tls_close(self.context) {
+                0 => (),
+                _ => {
+                    error!("Error closing TLS connection, error={}", _get_tls_error(self.context));
+                },
+            };
+            tls_sys::tls_free(self.context);
+        }
+    }
+}
+
 pub struct Server {
     socket: TcpListener,
     context: tls_sys::Tls,
