@@ -168,6 +168,9 @@ class LocalFile(LocalFileSystemElement):
         # dir._revision = rsp.revision todo: add revision to query
         return dir
 
+    def remove(self, path_data):
+        os.remove(self.path_to_local_file(path_data))
+
     def _calculate_checksum(self, content):
         return hashlib.md5(content).hexdigest()
 
@@ -657,6 +660,20 @@ class ZynFilesystemClient:
                 self.add_file(path_remote, element.file_type())
             else:
                 raise RuntimeError()
+
+    def remove(self, path_remote, remove_local_file):
+
+        if path_remote not in self._local_files:
+            raise ZynClientException('File "{}" is not tracked locally'.format(path_remote))
+
+        element = self._local_files[path_remote]
+        if not element.is_file():
+            raise NotImplementedError('Removing directory')
+
+        if remove_local_file:
+            element.remove(self._path_data)
+
+        del self._local_files[path_remote]
 
     def remove_local_files(self):
         self._local_files = {}

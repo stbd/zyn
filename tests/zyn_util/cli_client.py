@@ -365,6 +365,32 @@ class ZynCliClient(cmd.Cmd):
         element = self._client.filesystem_element(path_remote)
         print('File {} synchronized to revision {}'.format(path_remote, element.revision))
 
+    def _parser_remove(self):
+        parser = argparse.ArgumentParser(prog='remove')
+        parser.add_argument('path', type=str)
+        parser.add_argument('-dl', '--delete-local-file', action="store_true")
+        return parser
+
+    def help_remove(self):
+        print(self._parser_remove().format_help())
+
+    def do_remove(self, args):
+        parser = self._parser_remove()
+        args = vars(parser.parse_args(self._parse_args(args)))
+        path_remote = self._to_absolute_remote_path(args['path'])
+        delete_local_file = False
+
+        print (args)
+
+        if args['delete_local_file']:
+            answer = input('Delete local file from file system? yes/no')
+            if answer.strip().lower() == 'yes':
+                delete_local_file = True
+            else:
+                print('Skipping deletion')
+
+        self._client.remove(path_remote, delete_local_file)
+
     def do_exit(self, _):
         'Close connection and exit client'
         self._client.disconnect()

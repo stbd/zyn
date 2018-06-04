@@ -36,6 +36,13 @@ class ClientState:
         ]
         assert sorted(local_children) == sorted(expected_child_elements)
 
+    def validate_file_exists(self, path_in_remote, expect_not_to_exists=False):
+        path_local = _join_paths(self.path_data, path_in_remote)
+        if expect_not_to_exists:
+            assert not os.path.exists(path_local)
+        else:
+            assert os.path.exists(path_local)
+
     def validate_text_file_content(self, path_in_remote, expected_text_content=None):
         expected_content = bytearray()
         if expected_text_content is not None:
@@ -333,6 +340,26 @@ class TestClient(TestClients):
         client_state.client.create_directory(path_remote)
         client_state.client.fetch(path_remote)
         client_state.validate_directory(path_remote)
+
+    def test_remove_file_without_deleting_local_file(self):
+        client_state, = self._start_server_and_create_number_of_clients(1)
+        path_remote = '/file'
+        client_state.create_local_file(path_remote)
+        client_state.client.add_file(path_remote, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
+        client_state.client.remove(path_remote, False)
+        client_state.validate_file_exists(path_remote)
+        with self.assertRaises(zyn_util.client.ZynClientException):
+            client_state.client.filesystem_element(path_remote)
+
+    def test_remove_file_and_delete_local_file(self):
+        client_state, = self._start_server_and_create_number_of_clients(1)
+        path_remote = '/file'
+        client_state.create_local_file(path_remote)
+        client_state.client.add_file(path_remote, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
+        client_state.client.remove(path_remote, True)
+        client_state.validate_file_exists(path_remote, expect_not_to_exists=True)
+        with self.assertRaises(zyn_util.client.ZynClientException):
+            client_state.client.filesystem_element(path_remote)
 
 
 class TestCli(TestClients):
