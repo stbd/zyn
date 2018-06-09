@@ -156,11 +156,16 @@ function _handle_register_response(websocket_msg)
     }
 
     _tab_id = msg['tab-id'];
-    transaction.on_success(msg);
+    transaction.on_success(msg['content']);
 }
 
 function zyn_init(user_id, transaction)
 {
+    if (_user_id === null) {
+        transaction.on_error(); // todo
+        return ;
+    }
+
     _user_id = user_id;
     _current_transaction = transaction;
 
@@ -237,5 +242,5 @@ function _parse_response_and_forward(websocket_msg)
 {
     transaction = _reset_current_transaction();
     var msg = JSON.parse(websocket_msg.data);
-    transaction.on_success(msg);
+    transaction.on_success(msg['content']);
 }

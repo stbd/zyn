@@ -340,7 +340,7 @@
                _current_file.bytes(),
                edited_content,
                new Transaction(function (rsp) {
-                   _current_file.update_revision(rsp['content']['revision']);
+                   _current_file.update_revision(rsp['revision']);
                    _set_current_file(_current_file);
                })
            );
@@ -351,7 +351,7 @@
                _current_file.type_of_file(),
                edited_content,
                new Transaction(function (rsp) {
-                   _current_file.update_revision(rsp['content']['revision']);
+                   _current_file.update_revision(rsp['revision']);
                    _set_current_file(_current_file);
                })
            );
@@ -482,11 +482,11 @@
    function _handle_load_file_rsp(msg)
    {
        _current_file.change_to(
-           msg['content']['filename'],
-           msg['content']['node-id'],
-           msg['content']['revision'],
-           msg['content']['file-type'],
-           atob(msg['content']['bytes'])
+           msg['filename'],
+           msg['node-id'],
+           msg['revision'],
+           msg['file-type'],
+           atob(msg['bytes'])
        );
 
        _set_current_file(_current_file);

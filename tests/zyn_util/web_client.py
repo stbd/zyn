@@ -141,6 +141,7 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 'type': 'register-rsp',
                 'user-id': user_id,
                 'tab-id': self._tab_id,
+                'content': '',
             }))
 
             self._log.info("Registered, tab_id=%d" % self._tab_id)
@@ -170,8 +171,10 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 'type': msg_type + '-rsp',
                 'user-id': user_id,
                 'tab-id': self._tab_id,
-                'path': path,
-                'description': desc
+                'content': {
+                    'path': path,
+                    'description': desc
+                },
             }))
 
         elif msg_type == 'list-directory-content':
@@ -203,7 +206,9 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 'type': msg_type + '-rsp',
                 'user-id': user_id,
                 'tab-id': self._tab_id,
-                'elements': elements,
+                'content': {
+                    'elements': elements,
+                },
             }))
 
         elif msg_type == 'load-file':
