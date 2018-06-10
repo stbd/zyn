@@ -85,6 +85,10 @@ class ZynCliClient(cmd.Cmd):
         else:
             raise ValueError()
 
+    def emptyline(self):
+        # Do nothing
+        pass
+
     def do_pwd(self, args):
         'Print current folder'
         print(self._pwd)
