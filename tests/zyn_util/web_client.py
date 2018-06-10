@@ -12,6 +12,7 @@ import tornado.web
 import tornado.websocket
 
 import zyn_util.connection
+import zyn_util.errors
 import zyn_util.util
 
 
@@ -81,6 +82,7 @@ class WebSocket(tornado.websocket.WebSocketHandler):
     def open(self):
         self._connection = None
         self._tab_id = 0
+        self._user_id = None
         self._log = logging.getLogger(__name__)
         self._log.info("New websocket connected")
 
@@ -102,8 +104,15 @@ class WebSocket(tornado.websocket.WebSocketHandler):
         tab_id = int(msg['tab-id'])
 
         if tab_id != self._tab_id:
-            self._log.error("Closing socket: tab_ids do not match")
+            self._log.error("Closing web socket: tab ids do not match")
             self._close_socket()
+
+        if self._user_id is not None and self._user_id != user_id:
+            self._log.error("Closing web socket: user ids do not match")
+            self._close_socket()
+
+        while self._connection and self._connection.zyn_connection().has_notifications():
+            self._send_notification(self._connection.zyn_connection().pop_notification())
 
         max_number_of_trials = 2
         trial = 1
@@ -133,18 +142,11 @@ class WebSocket(tornado.websocket.WebSocketHandler):
         elif msg_type == 'register':
 
             self._log.debug('Register, user_id={}'.format(user_id))
-
-            self._connection = connections.find_connection(user_id)
+            self._user_id = user_id
+            self._connection = connections.find_connection(self._user_id)
             self._tab_id = self._connection.add_web_socket(self)
-
-            self.write_message(json.dumps({
-                'type': 'register-rsp',
-                'user-id': user_id,
-                'tab-id': self._tab_id,
-                'content': '',
-            }))
-
-            self._log.info("Registered, tab_id=%d" % self._tab_id)
+            self._send_response(msg_type)
+            self._log.info("Registered, user_id={}, tab_id={}".format(self._user_id, self._tab_id))
 
         elif msg_type == 'query-filesystem-element':
 
@@ -167,49 +169,41 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 else:
                     raise RuntimeError()
 
-            self.write_message(json.dumps({
-                'type': msg_type + '-rsp',
-                'user-id': user_id,
-                'tab-id': self._tab_id,
-                'content': {
-                    'path': path,
-                    'description': desc
-                },
-            }))
+            self._send_response(msg_type, {
+                'path': path,
+                'description': desc
+            })
 
         elif msg_type == 'list-directory-content':
 
             path = content['path']
             self._log.debug('{}: path={}'.format(msg_type, path))
 
-            elements = []
             rsp = self._connection.zyn_connection().query_list(path=path)
+            if rsp.is_error():
+                self._send_error_response(msg_type, None, rsp.error_code())
+                return
 
-            if not rsp.is_error():
-                rsp = rsp.as_query_list_rsp()
-                for element in rsp.elements:
+            elements = []
+            rsp = rsp.as_query_list_rsp()
+            for element in rsp.elements:
 
-                    if element.is_file():
-                        element_type = 'file'
-                    elif element.is_directory():
-                        element_type = 'dir'
-                    else:
-                        raise RuntimeError()
+                if element.is_file():
+                    element_type = 'file'
+                elif element.is_directory():
+                    element_type = 'dir'
+                else:
+                    raise RuntimeError()
 
-                    elements.append({
-                        'name': element.name,
-                        'node-id': element.node_id,
-                        'element-type': element_type,
-                    })
+                elements.append({
+                    'name': element.name,
+                    'node-id': element.node_id,
+                    'element-type': element_type,
+                })
 
-            self.write_message(json.dumps({
-                'type': msg_type + '-rsp',
-                'user-id': user_id,
-                'tab-id': self._tab_id,
-                'content': {
-                    'elements': elements,
-                },
-            }))
+            self._send_response(msg_type, {
+                'elements': elements,
+            })
 
         elif msg_type == 'load-file':
 
@@ -222,23 +216,29 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             open_rsp = None
             try:
                 rsp = self._connection.zyn_connection().open_file_read(node_id=node_id)
-                if not rsp.is_error():
-                    open_rsp = rsp.as_open_rsp()
-                    if open_rsp.is_random_access():
-                        file_type = FILE_TYPE_RANDOM_ACCESS
-                    elif open_rsp.is_blob():
-                        file_type = FILE_TYPE_BLOB
-                    else:
-                        raise RuntimeError()
+                if rsp.is_error():
+                    self._send_error_response(msg_type, None, rsp.error_code())
+                    return
 
-                    if open_rsp.size > 0:
-                        rsp, data = self._connection.zyn_connection().read_file(
-                            node_id,
-                            0,
-                            open_rsp.size
-                        )
-                        if not rsp.is_error():
-                            file_content = data
+                open_rsp = rsp.as_open_rsp()
+                if open_rsp.is_random_access():
+                    file_type = FILE_TYPE_RANDOM_ACCESS
+                elif open_rsp.is_blob():
+                    file_type = FILE_TYPE_BLOB
+                else:
+                    raise RuntimeError()
+
+                if open_rsp.size > 0:
+                    rsp, data = self._connection.zyn_connection().read_file(
+                        node_id,
+                        0,
+                        open_rsp.size
+                    )
+                    if rsp.is_error():
+                        self._send_error_response(msg_type, None, rsp.error_code())
+                        return
+                    file_content = data
+
             finally:
                 if open_rsp is not None:
                     rsp = self._connection.zyn_connection().close_file(node_id=node_id)
@@ -246,18 +246,13 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             self._log.debug('{}: loaded {} bytes, node_id={}'.format(
                 msg_type, len(file_content), node_id))
 
-            self.write_message(json.dumps({
-                'type': msg_type + '-rsp',
-                'user-id': user_id,
-                'tab-id': self._tab_id,
-                'content': {
-                    'node-id': node_id,
-                    'revision': open_rsp.revision,
-                    'filename': filename,
-                    'file-type': file_type,
-                    'bytes': str(base64.b64encode(file_content), 'ascii'),
-                },
-            }))
+            self._send_response(msg_type, {
+                'node-id': node_id,
+                'revision': open_rsp.revision,
+                'filename': filename,
+                'file-type': file_type,
+                'bytes': str(base64.b64encode(file_content), 'ascii'),
+            })
 
         elif msg_type == 'edit-file':
 
@@ -276,12 +271,13 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                     node_id=node_id
                 )
                 if rsp.is_error():
-                    raise RuntimeError('Error opening file')
+                    self._send_error_response(msg_type, None, rsp.error_code())
+                    return
 
                 open_rsp = rsp.as_open_rsp()
 
                 if open_rsp.revision != revision:
-                    raise RuntimeError()
+                    self._send_error_response(msg_type, 'Revision too old', None)
 
                 if file_type == FILE_TYPE_RANDOM_ACCESS:
                     revision = zyn_util.util.edit_random_access_file(
@@ -303,15 +299,11 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 else:
                     raise RuntimeError()
 
-                self.write_message(json.dumps({
-                    'type': msg_type + '-rsp',
-                    'user-id': user_id,
-                    'tab-id': self._tab_id,
-                    'content': {
-                        'node-id': node_id,
-                        'revision': revision,
+                self._send_response(msg_type, {
+                    'node-id': node_id,
+                    'revision': revision,
                     },
-                }))
+                )
 
             finally:
                 if open_rsp is not None:
@@ -320,6 +312,44 @@ class WebSocket(tornado.websocket.WebSocketHandler):
         else:
             self._log.error("Closing socket: unexpected message: {}".format(msg_type))
             self._close_socket()
+
+    def _message_headers(self, msg_type):
+        return {
+            'type': msg_type,
+            'user-id': self._user_id,
+            'tab-id': self._tab_id,
+        }
+
+    def _send_error_response(self, msg_type, web_server_error_str, zyn_server_error_code):
+        msg = self._message_headers(msg_type + '-rsp')
+        if web_server_error_str is None:
+            web_server_error_str = ''
+
+        if zyn_server_error_code is not None:
+            zyn_server_error_str = zyn_util.errors.error_to_string(zyn_server_error_code)
+        else:
+            zyn_server_error_str = ''
+
+        msg['error'] = {
+            'web-server-error': web_server_error_str,
+            'zyn-server-error': zyn_server_error_str,
+        }
+        self.write_message(json.dumps(msg))
+
+    def _send_response(self, msg_type, content=None):
+        if content is None:
+            content = ''
+
+        msg = self._message_headers(msg_type + '-rsp')
+        msg['content'] = content
+        self.write_message(json.dumps(msg))
+
+    def _send_notification(self, notification):
+        msg = self._message_headers('notification')
+        # todo: implement
+        # print (notification)
+        msg['notification'] = 'notification'
+        self.write_message(json.dumps(msg))
 
 
 class MainHandler(tornado.web.RequestHandler):

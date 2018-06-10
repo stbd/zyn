@@ -384,8 +384,6 @@ class ZynCliClient(cmd.Cmd):
         path_remote = self._to_absolute_remote_path(args['path'])
         delete_local_file = False
 
-        print (args)
-
         if args['delete_local_file']:
             answer = input('Delete local file from file system? yes/no: ')
             if answer.strip().lower() == 'yes':

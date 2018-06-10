@@ -2,8 +2,12 @@ var _socket = null;
 var _user_id = 0;
 var _tab_id = 0;
 var _current_transaction = null;
+var _notification_callback = null;
 
 var ZYN_ERROR_CODE_TRANSACTION_ALREADY_IN_PROGRESS = 1;
+var ZYN_ERROR_CODE_SERVER_RESPONDED_WITH_UEXPECTED_MESSAGE = 2;
+var ZYN_ERROR_CODE_NOT_INITIALIZED = 2;
+var ZYN_ERROR_CODE_ALREADY_INITIALIZED = 2;
 
 
 class Path {
@@ -147,11 +151,18 @@ function zyn_load_folder_contents(path, transaction)
 
 function _handle_register_response(websocket_msg)
 {
-    var transaction = _reset_current_transaction();
     var msg = JSON.parse(websocket_msg.data);
+    if (_handle_notification_msg(msg)) {
+        return ;
+    }
+    var transaction = _reset_current_transaction();
 
     if (msg['type'] != 'register-rsp') {
-        transaction.on_error(); // todo
+        transaction.on_error(ZYN_ERROR_CODE_SERVER_RESPONDED_WITH_UEXPECTED_MESSAGE, null, null);
+        return ;
+    }
+
+    if (_handle_error_rsp(msg, transaction)) {
         return ;
     }
 
@@ -159,14 +170,15 @@ function _handle_register_response(websocket_msg)
     transaction.on_success(msg['content']);
 }
 
-function zyn_init(user_id, transaction)
+function zyn_init(user_id, notification_callback, transaction)
 {
     if (_user_id === null) {
-        transaction.on_error(); // todo
+        transaction.on_error(ZYN_ERROR_CODE_ALREADY_INITIALIZED, null, null);
         return ;
     }
 
     _user_id = user_id;
+    _notification_callback = notification_callback;
     _current_transaction = transaction;
 
     var url = new URL(window.location.href)
@@ -200,6 +212,34 @@ function zyn_log_on_server(message, level='debug')
     ));
 }
 
+function _handle_notification_msg(msg) {
+    if (msg['type'] === 'notification') {
+        _notification_callback(msg['notification']);
+        return true;
+    }
+    return false;
+}
+
+
+function _handle_error_rsp(msg, transaction) {
+    if ('error' in msg) {
+        web = msg['error']['web-server-error'];
+        zyn = msg['error']['zyn-server-error'];
+
+        if (web === '') {
+            web = null;
+        }
+
+        if (zyn === '') {
+            zyn = null;
+        }
+
+        transaction.on_error(null, web, zyn);
+        return true;
+    }
+    return false;
+}
+
 function _to_json_message(msg_type, content)
 {
     var msg = {
@@ -218,12 +258,12 @@ function _to_json_message(msg_type, content)
 function _start_transaction(transaction)
 {
     if (_socket == null) {
-        transaction.on_error(); // todo
+        transaction.on_error(ZYN_ERROR_CODE_NOT_INITIALIZED, null, null);
         return false;
     }
 
     if (_current_transaction != null) {
-        transaction.on_error(ZYN_ERROR_CODE_TRANSACTION_ALREADY_IN_PROGRESS);
+        transaction.on_error(ZYN_ERROR_CODE_TRANSACTION_ALREADY_IN_PROGRESS, null, null);
         return false;
     }
 
@@ -240,7 +280,13 @@ function _reset_current_transaction()
 
 function _parse_response_and_forward(websocket_msg)
 {
-    transaction = _reset_current_transaction();
     var msg = JSON.parse(websocket_msg.data);
+    if (_handle_notification_msg(msg)) {
+        return ;
+    }
+    transaction = _reset_current_transaction();
+    if (_handle_error_rsp(msg, transaction)) {
+        return ;
+    }
     transaction.on_success(msg['content']);
 }

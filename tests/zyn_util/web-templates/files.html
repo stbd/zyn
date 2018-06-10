@@ -122,13 +122,16 @@
            this._on_success(msg, this);
        }
 
-       on_error() {
-           alert('error');
-       }
-
-       on_notification() {
-           alert('notification');
-
+       on_error(browser_error, web_server_error, zyn_server_error) {
+           if (browser_error !== null) {
+               alert('Browser error: ' + browser_error);
+           } else if (web_server_error !== null) {
+               alert('Web server error: ' + web_server_error);
+           } else if (zyn_server_error !== null) {
+               alert('Zyn server error: ' + zyn_server_error);
+           } else {
+               alert('todo')
+           }
        }
    }
 
@@ -206,6 +209,10 @@
 
    var _current_file = new CurrentFile();
    var _current_workdir = new Path();
+
+   function _handle_notification(notification) {
+       alert('notification: ' + notification);
+   }
 
    function _set_button_activity(name, active) {
        var button = document.getElementById(name);
@@ -577,7 +584,7 @@
 
    {% elif is_logged_in == 1 %}
 
-   zyn_init("{{ user_id }}", new Transaction(function (_, _) {
+   zyn_init("{{ user_id }}", _handle_notification, new Transaction(function (_, _) {
        var path = _current_workdir.clone();
        _set_current_workdir(path.to_str());
        _fetch_and_set_folder_content(path);

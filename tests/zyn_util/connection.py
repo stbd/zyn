@@ -53,6 +53,9 @@ class ZynConnection:
         self.write(req)
         return self.read_response()
 
+    def has_notifications(self):
+        return len(self._notifications) > 0
+
     def pop_notification(self):
         if self._notifications:
             return self._notifications.pop(0)
