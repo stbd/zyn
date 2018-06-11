@@ -387,7 +387,7 @@ class ZynCliClient(cmd.Cmd):
         print (args)
 
         if args['delete_local_file']:
-            answer = input('Delete local file from file system? yes/no')
+            answer = input('Delete local file from file system? yes/no: ')
             if answer.strip().lower() == 'yes':
                 delete_local_file = True
             else:

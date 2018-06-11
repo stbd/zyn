@@ -231,6 +231,8 @@ class LocalFile(LocalFileSystemElement):
                 local_data,
                 logger
             )
+
+            self._checksum = self._calculate_checksum(local_data)
         finally:
             if open_rsp is not None:
                 close_rsp = connection.close_file(open_rsp.node_id)
