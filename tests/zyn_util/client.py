@@ -301,7 +301,9 @@ class LocalFile(LocalFileSystemElement):
                 close_rsp = connection.close_file(open_rsp.node_id)
                 zyn_util.util.check_server_response(close_rsp)
 
-        if open_rsp.revision == self._revision and has_changes:
+        if open_rsp.revision == self._revision and not has_changes:
+            return
+        elif open_rsp.revision == self._revision and has_changes:
             # If local file is at same level as remote and has changes,
             # push changes to remote
             if self._file_type == zyn_util.connection.FILE_TYPE_RANDOM_ACCESS:
@@ -321,7 +323,7 @@ class LocalFile(LocalFileSystemElement):
         elif open_rsp.revision > self._revision and has_changes:
             # If remote file is newer and local file has changes,
             # this requires some kind of merge
-            raise NotImplementedError()
+            raise NotImplementedError('Both remote and local file have changes, merge is not implemented')
 
         else:
             raise NotImplementedError()
