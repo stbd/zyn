@@ -325,7 +325,9 @@ class LocalFile(LocalFileSystemElement):
         elif open_rsp.revision > self._revision and has_changes:
             # If remote file is newer and local file has changes,
             # this requires some kind of merge
-            raise NotImplementedError('Both remote and local file have changes, merge is not implemented')
+            raise NotImplementedError(
+                'Both remote and local file have changes, merge is not implemented'
+            )
 
         else:
             raise NotImplementedError()
