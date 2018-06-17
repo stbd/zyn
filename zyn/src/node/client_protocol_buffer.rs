@@ -335,7 +335,7 @@ impl SendBuffer {
     pub fn write_notification_modified(& mut self, node_id: & NodeId, revision: & u64, offset: & u64, size: & u64)
                                        -> Result<(), ()> {
         self.write_notification_field() ? ;
-        write!(self.buffer, "PF-MOD:;N:U:{};;U:{};BL:U:{};U:{};;", node_id, revision, offset, size)
+        write!(self.buffer, "F-MOD:;N:U:{};;U:{};BL:U:{};U:{};;", node_id, revision, offset, size)
             .map_err(| _ | ()) ? ;
         self.write_end_of_message()
     }
@@ -343,7 +343,7 @@ impl SendBuffer {
     pub fn write_notification_inserted(& mut self, node_id: & NodeId, revision: & u64, offset: & u64, size: & u64)
                                        -> Result<(), ()> {
         self.write_notification_field() ? ;
-        write!(self.buffer, "PF-INS:;N:U:{};;U:{};BL:U:{};U:{};;", node_id, revision, offset, size)
+        write!(self.buffer, "F-INS:;N:U:{};;U:{};BL:U:{};U:{};;", node_id, revision, offset, size)
             .map_err(| _ | ()) ? ;
         self.write_end_of_message()
     }
@@ -351,7 +351,7 @@ impl SendBuffer {
     pub fn write_notification_deleted(& mut self, node_id: & NodeId, revision: & u64, offset: & u64, size: & u64)
                                       -> Result<(), ()> {
         self.write_notification_field() ? ;
-        write!(self.buffer, "PF-DEL:;N:U:{};;U:{};BL:U:{};U:{};;", node_id, revision, offset, size)
+        write!(self.buffer, "F-DEL:;N:U:{};;U:{};BL:U:{};U:{};;", node_id, revision, offset, size)
             .map_err(| _ | ()) ? ;
         self.write_end_of_message()
     }
