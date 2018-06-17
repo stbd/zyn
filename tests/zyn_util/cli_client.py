@@ -107,6 +107,29 @@ class ZynCliClient(cmd.Cmd):
         self._pwd = path_remote
         self._set_prompt(self._pwd)
 
+    def _parser_check_notifications(self):
+        parser = argparse.ArgumentParser(prog='check_notifications')
+        parser.add_argument('--timeout', type=int, default=5)
+        return parser
+
+    def help_check_notifications(self):
+        print(self._parser_check_notifications().format_help())
+
+    def do_check_notifications(self, args):
+        parser = self._parser_check_notifications()
+        args = vars(parser.parse_args(self._parse_args(args)))
+
+        if self._client.connection().check_for_notifications():
+            notification = self._client.connection().pop_notification()
+            if notification.notification_type() == \
+               zyn_util.connection.Notification.TYPE_DISCONNEDTED:
+                print('Connection to Zyn server lost, reason: "{}"'.format(notification.reason))
+            else:
+                raise NotImplementedError()
+
+        else:
+            print('No notifications')
+
     def _parser_create_file(self):
         parser = argparse.ArgumentParser(prog='create_file')
         parser.add_argument('path', type=str)
