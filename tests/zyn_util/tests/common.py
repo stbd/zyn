@@ -9,6 +9,7 @@ import time
 import unittest
 
 import zyn_util.connection
+import zyn_util.exception
 
 PATH_FILE = os.path.dirname(os.path.abspath(__file__))
 PATH_BIN = PATH_FILE + '/../../../zyn/target/debug/zyn'
@@ -140,7 +141,7 @@ class TestCommon(TestZyn):
             process.kill()
 
     def _validate_socket_is_disconnected(self, connection):
-        with self.assertRaises(TimeoutError):
+        with self.assertRaises(zyn_util.exception.ZynConnectionLost):
             connection.read_message()
 
     def _start_node(self, server_workdir=DEFAULT_SERVER_WORKDIR, init=True):

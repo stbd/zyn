@@ -100,3 +100,84 @@ class TestLargeFiles(zyn_util.tests.common.TestCommon):
         read_rsp = read_rsp.as_read_rsp()
         self.assertEqual(read_data, data)
         self.assertEqual(read_rsp.size, len(data))
+
+
+class TestMultipleUsersEditingFile(zyn_util.tests.common.TestCommon):
+    def _open_file_write(self, node_id, connections):
+        revision = None
+        for c in connections:
+            rsp = c.open_file_write(node_id=node_id).as_open_rsp()
+            if revision is None:
+                revision = rsp.revision
+            else:
+                self.assertEqual(revision, rsp.revision)
+        return revision
+
+    def _validate_notification(
+            self,
+            notification,
+            expected_notification_type,
+            expected_node_id,
+            expected_revision,
+            expected_offset,
+            expected_size,
+    ):
+        self.assertNotEqual(notification, None)
+        self.assertEqual(notification.notification_type(), expected_notification_type)
+        self.assertEqual(notification.node_id, expected_node_id)
+        self.assertEqual(notification.revision, expected_revision)
+        self.assertEqual(notification.block_offset, expected_offset)
+        self.assertEqual(notification.block_size, expected_size)
+
+    def _ra_write(self, connection, node_id, revision, offset, data, connections):
+        rsp = connection.ra_write(node_id, revision, offset, data).as_write_rsp()
+        for c in connections:
+            n = c.pop_notification(timeout=1)
+            self._validate_notification(
+                n,
+                zyn_util.connection.Notification.TYPE_MODIFIED,
+                node_id,
+                rsp.revision,
+                offset,
+                len(data),
+            )
+        return rsp.revision
+
+    def _ra_insert(self, connection, node_id, revision, offset, data, connections):
+        rsp = connection.ra_insert(node_id, revision, offset, data).as_insert_rsp()
+        for c in connections:
+            n = c.pop_notification(timeout=1)
+            self._validate_notification(
+                n,
+                zyn_util.connection.Notification.TYPE_INSERTED,
+                node_id,
+                rsp.revision,
+                offset,
+                len(data),
+            )
+        return rsp.revision
+
+    def _ra_delete(self, connection, node_id, revision, offset, size, connections):
+        rsp = connection.ra_delete(node_id, revision, offset, size).as_delete_rsp()
+        for c in connections:
+            n = c.pop_notification(timeout=1)
+            self._validate_notification(
+                n,
+                zyn_util.connection.Notification.TYPE_DELETED,
+                node_id,
+                rsp.revision,
+                offset,
+                size,
+            )
+        return rsp.revision
+
+    def test_edit_triggers_notification(self):
+        filename = 'file'
+        c_1 = self._start_and_connect_to_node_and_handle_auth()
+        c_2 = self._connect_to_node_and_handle_auth()
+        c_3 = self._connect_to_node_and_handle_auth()
+        node_id = c_1.create_file_random_access(filename, parent_path='/').as_create_rsp().node_id
+        revision = self._open_file_write(node_id, [c_1, c_2, c_3])
+        revision = self._ra_write(c_1, node_id, revision, 0, b'write', [c_2, c_3])
+        revision = self._ra_insert(c_2, node_id, revision, 2, b'insert', [c_1, c_3])
+        revision = self._ra_delete(c_3, node_id, revision, 2, 1, [c_1, c_2])

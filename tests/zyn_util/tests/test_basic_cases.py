@@ -9,7 +9,10 @@ class TestBasicUsage(zyn_util.tests.common.TestCommon):
         self._process.terminate()
         msg = c.read_message()
         self.assertEqual(msg.type(), zyn_util.connection.Message.NOTIFICATION)
-        self.assertEqual(msg.notification_type(), "DISCONNECTED")
+        self.assertEqual(
+            msg.notification_type(),
+            zyn_util.connection.Notification.TYPE_DISCONNECTED
+        )
         self.assertNotEqual(msg.field(0).as_string(), "")
         self._validate_socket_is_disconnected(c)
 
