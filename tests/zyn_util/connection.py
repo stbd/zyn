@@ -5,6 +5,8 @@ import time
 
 import certifi
 
+import zyn_util.exception
+
 
 FILE_TYPE_FILE = 0  # todo: Rename FILESYSTEM_ELEMENT_FILE
 FILE_TYPE_FOLDER = 1
@@ -53,11 +55,24 @@ class ZynConnection:
         self.write(req)
         return self.read_response()
 
-    def has_notifications(self):
-        return len(self._notifications) > 0
+    def _read_notification(self, timeout=0):
+        msg = self.read_message(timeout=timeout)
+        if msg is not None:
+            if msg.type() != Message.NOTIFICATION:
+                raise RuntimeError('Server sent an unexpected response')
+            self._notifications.append(msg)
+            return True
+        return False
 
-    def pop_notification(self):
+    def check_for_notifications(self, timeout=0):
         if self._notifications:
+            return True
+        return self._read_notification(timeout=timeout)
+
+    def pop_notification(self, timeout=0):
+        if self._notifications:
+            return self._notifications.pop(0)
+        if self._read_notification(timeout):
             return self._notifications.pop(0)
         return None
 
@@ -424,18 +439,21 @@ class ZynConnection:
         return buffer
 
     def read_response(self, end_of_message_field=None, timeout=None):
+
+        timeout = timeout or 10.
         while True:
             message = self.read_message(end_of_message_field, timeout)
+            if message is None:
+                raise TimeoutError('No response received from socket on time')
             if message.type() == Message.NOTIFICATION:
                 self._notifications.append(message)
                 continue
             return message
 
     def read_message(self, end_of_message_field=None, timeout=None):
+
         eom = end_of_message_field or self.field_end_of_message()
         eom = eom.encode('utf-8')
-
-        timeout = timeout or 10.
         self._socket.settimeout(timeout)
 
         message = ''
@@ -443,12 +461,15 @@ class ZynConnection:
             try:
                 d = self._socket.recv()
             except ssl.SSLWantReadError:
-                continue
-            except Exception as e:
-                print('Exception while reading message:', type(e), e)
                 d = None
-            if not d:
-                raise TimeoutError('Socket disconnected')
+            except socket.timeout as e:
+                d = None
+
+            if d is None:
+                return None
+
+            if len(d) == 0:
+                raise zyn_util.exception.ZynConnectionLost()
 
             self._input_buffer += d
             i = self._input_buffer.find(eom)
@@ -462,7 +483,7 @@ class ZynConnection:
 
         parsed = self.parse_message(message)
         if parsed[1][0] == 'NOTIFICATION':
-            return Notification(parsed)
+            return Notification.create(parsed)
         return Response(parsed)
 
     def _parse_transaction_completed(self, msg, expected_error_code, has_error_string=False):
@@ -1024,21 +1045,72 @@ class Response(Message):
 
 
 class Notification(Message):
+    TYPE_DISCONNECTED = 1
+    TYPE_MODIFIED = 2
+    TYPE_INSERTED = 3
+    TYPE_DELETED = 4
+
+    # todo: rename to type_of_message
     def type(self):
         return Message.NOTIFICATION
 
-    def __init__(self, rsp):
-        super(Notification, self).__init__(rsp)
+    def type_of_notification(self):
+        raise NotImplemented()
+
+    def create(msg):
+        n = Notification(msg)
+        if n.notification_type() == Notification.TYPE_DISCONNECTED:
+            return NotificationDisconnected(msg)
+        elif n.notification_type() == Notification.TYPE_MODIFIED:
+            return NotificationModified(msg)
+        elif n.notification_type() == Notification.TYPE_INSERTED:
+            return NotificationModified(msg)
+        elif n.notification_type() == Notification.TYPE_DELETED:
+            return NotificationModified(msg)
+        else:
+            raise NotImplemented()
+
+    def __init__(self, msg):
+        super(Notification, self).__init__(msg)
         if self._rsp[1][0] != TAG_NOTIFICATION:
             _malfomed_message()
         if self._rsp[-1][0] != TAG_END_OF_MESSAGE:
             _malfomed_message()
 
     def notification_type(self):
-        return self._rsp[2][0]
+        t = self._rsp[2][0]
+        if t == 'DISCONNECTED':
+            return Notification.TYPE_DISCONNECTED
+        elif t == 'F-MOD':
+            return Notification.TYPE_MODIFIED
+        elif t == 'F-INS':
+            return Notification.TYPE_INSERTED
+        elif t == 'F-DEL':
+            return Notification.TYPE_DELETED
+        raise NotImplementedError()
 
     def number_of_fields(self):
-        return len(self._rsp) - 3  # Ignore protocol version, rsp, notification type, and end
+        return len(self._rsp) - 4  # Ignore version, message type, notification type, and end
 
     def field(self, index):
         return Field(self._rsp[3 + index])
+
+
+class NotificationDisconnected(Notification):
+    def __init__(self, msg):
+        super(Notification, self).__init__(msg)
+        if self.number_of_fields() != 1:
+            _malfomed_message()
+
+        self.reason = self.field(0).as_string()
+
+
+class NotificationModified(Notification):
+    def __init__(self, msg):
+        super(Notification, self).__init__(msg)
+        if self.number_of_fields() != 3:
+            _malfomed_message()
+
+        self.node_id = self.field(0).as_node_id()
+        self.revision = self.field(1).as_uint()
+        self.block_offset, self.block_size = self.field(2).as_block()
