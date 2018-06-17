@@ -3,6 +3,7 @@ var _user_id = 0;
 var _tab_id = 0;
 var _current_transaction = null;
 var _notification_callback = null;
+var _disconnected_callback = null;
 
 var ZYN_ERROR_CODE_TRANSACTION_ALREADY_IN_PROGRESS = 1;
 var ZYN_ERROR_CODE_SERVER_RESPONDED_WITH_UEXPECTED_MESSAGE = 2;
@@ -75,6 +76,15 @@ function zyn_edit_file_blob(
             'content-edited': btoa(content_edited),
         }
     ));
+}
+
+function zyn_poll_server()
+{
+    if (_current_transaction !== null) {
+        return ;
+    }
+    _socket.onmessage = _parse_response_and_forward;
+    _socket.send(_to_json_message('poll', {}));
 }
 
 function zyn_edit_file_random_access(
@@ -170,7 +180,7 @@ function _handle_register_response(websocket_msg)
     transaction.on_success(msg['content']);
 }
 
-function zyn_init(user_id, notification_callback, transaction)
+function zyn_init(user_id, notification_callback, disconnected_callback, transaction)
 {
     if (_user_id === null) {
         transaction.on_error(ZYN_ERROR_CODE_ALREADY_INITIALIZED, null, null);
@@ -179,6 +189,7 @@ function zyn_init(user_id, notification_callback, transaction)
 
     _user_id = user_id;
     _notification_callback = notification_callback;
+    _disconnected_callback = disconnected_callback;
     _current_transaction = transaction;
 
     var url = new URL(window.location.href)
@@ -190,6 +201,7 @@ function zyn_init(user_id, notification_callback, transaction)
 
     _socket = new WebSocket(websocket_url);
     _socket.onmessage = _handle_register_response;
+    _socket.onclose = _handle_on_close;
     _socket.onopen = function () {
         _socket.send(_to_json_message('register', null));
     };
@@ -289,4 +301,9 @@ function _parse_response_and_forward(websocket_msg)
         return ;
     }
     transaction.on_success(msg['content']);
+}
+
+function _handle_on_close()
+{
+    _disconnected_callback();
 }

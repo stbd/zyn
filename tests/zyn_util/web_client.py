@@ -21,6 +21,8 @@ PATH_TEMPLATES = os.path.dirname(os.path.abspath(__file__)) + '/web-templates'
 COOKIE_NAME = 'zyn-cookie'
 FILE_TYPE_RANDOM_ACCESS = 'random-access'
 FILE_TYPE_BLOB = 'blob'
+NOTIFICATION_SOURCE_WEB_SERVER = 'web-server'
+NOTIFICATION_SOURCE_ZYN_SERVER = 'zyn-server'
 
 
 class ConnectionContainer:
@@ -111,17 +113,19 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             self._log.error("Closing web socket: user ids do not match")
             self._close_socket()
 
-        while self._connection and self._connection.zyn_connection().has_notifications():
-            self._send_notification(self._connection.zyn_connection().pop_notification())
-
         max_number_of_trials = 2
         trial = 1
-        while trial < max_number_of_trials:
+        while trial <= max_number_of_trials:
             try:
                 return self._handle_message(msg_type, user_id, msg.get('content', None))
-            except TimeoutError:
+            except zyn_util.exception.ZynConnectionLost:
                 self._log.info('Connection to Zyn server lost, trying to reconnect')
                 self._connection.reconnect()
+                self._send_notification(
+                    NOTIFICATION_SOURCE_WEB_SERVER,
+                    'reconnect',
+                    {'trial': trial}
+                )
             trial += 1
 
     def _handle_message(self, msg_type, user_id, content):
@@ -138,6 +142,13 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 self._log.info(msg)
             else:
                 raise RuntimeError()
+
+        elif msg_type == 'poll':
+
+            # self._log.debug('Client poll')
+            # self._send_notification(NOTIFICATION_SOURCE_WEB_SERVER, 'not', {"f": 1}, )
+            while self._connection.zyn_connection().check_for_notifications():
+                self._send_server_notification(self._connection.zyn_connection().pop_notification())
 
         elif msg_type == 'register':
 
@@ -344,11 +355,24 @@ class WebSocket(tornado.websocket.WebSocketHandler):
         msg['content'] = content
         self.write_message(json.dumps(msg))
 
-    def _send_notification(self, notification):
+    def _send_server_notification(self, notification):
+        if notification.notification_type() == zyn_util.connection.Notification.TYPE_DISCONNECTED:
+            self._send_notification(
+                NOTIFICATION_SOURCE_ZYN_SERVER,
+                'disconnected',
+                {
+                    'reason': notification.reason,
+                })
+        else:
+            raise NotImplementedError()
+
+    def _send_notification(self, source, notification_type, content):
         msg = self._message_headers('notification')
-        # todo: implement
-        # print (notification)
-        msg['notification'] = 'notification'
+        msg['notification'] = {
+            'source': source,
+            'type': notification_type,
+            'content': content,
+        }
         self.write_message(json.dumps(msg))
 
 

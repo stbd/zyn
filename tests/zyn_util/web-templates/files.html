@@ -209,9 +209,53 @@
 
    var _current_file = new CurrentFile();
    var _current_workdir = new Path();
+   var _poll_timer = null;
+
+   function _handle_poll_timer() {
+       // console.log('timeout');
+       zyn_poll_server();
+   }
+
+   function _stop_poll_timer() {
+       window.clearTimeout(_poll_timer);
+       _poll_timer = null;
+   }
+
+   function _start_poll_timer(duration_seconds) {
+       if (_poll_timer !== null) {
+           _stop_poll_timer();
+       }
+       _poll_timer = window.setInterval(_handle_poll_timer, duration_seconds * 1000);
+   }
 
    function _handle_notification(notification) {
-       alert('notification: ' + notification);
+       // console.log(notification)
+       var source = notification['source'];
+       var type_of = notification['type'];
+       var content = notification['content'];
+       if (source === 'web-server') {
+           if (type_of == 'reconnect') {
+               _add_notification(source, 'Web server reconncted to Zyn server');
+           } else {
+               alert('Unhamdled notification type for web server');
+           }
+       } else if (source === 'zyn-server') {
+           if (type_of === 'disconnected') {
+               _add_notification(
+                   source,
+                   'Zyn server disconnected, message from node: ' + content['reason']
+               );
+           } else {
+               alert('not imeplemented')
+           }
+       } else {
+           alert('Unhamdled notification source');
+       }
+   }
+
+   function _handle_disconnected() {
+       _stop_poll_timer();
+       alert('Connection to Web server lost');
    }
 
    function _set_button_activity(name, active) {
@@ -584,12 +628,17 @@
 
    {% elif is_logged_in == 1 %}
 
-   zyn_init("{{ user_id }}", _handle_notification, new Transaction(function (_, _) {
-       var path = _current_workdir.clone();
-       _set_current_workdir(path.to_str());
-       _fetch_and_set_folder_content(path);
-       zyn_log_on_server('Client ready');
-   }));
+   zyn_init(
+       "{{ user_id }}",
+       _handle_notification,
+       _handle_disconnected,
+       new Transaction(function (_, _) {
+           var path = _current_workdir.clone();
+           _set_current_workdir(path.to_str());
+           _fetch_and_set_folder_content(path);
+           _start_poll_timer(5);
+           zyn_log_on_server('Client ready');
+       }));
 
    {% end %}
 
