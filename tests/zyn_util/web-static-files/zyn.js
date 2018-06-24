@@ -25,8 +25,6 @@ class Path {
 
     is_equal(other) {
 
-        console.log(this._path + ' == ' + other._path);
-
         if (this._path.length != other._path.length) {
             return false;
         }
