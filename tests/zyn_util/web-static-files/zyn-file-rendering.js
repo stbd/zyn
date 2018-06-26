@@ -8,8 +8,7 @@ function zyn_render_file_content(content_element, current_file) {
         var converter = new showdown.Converter({
             'simplifiedAutoLink': true,
         });
-        var decoded = utf8.decode(current_file.bytes());
-        var html = converter.makeHtml(decoded);
+        var html = converter.makeHtml(current_file.decoded());
         content_element.innerHTML = html;
     } else if (current_file.file_extension() == 'pdf') {
 
@@ -50,6 +49,6 @@ function zyn_render_file_content(content_element, current_file) {
         content_element.appendChild(root);
 
     } else {
-        content_element.innerHTML = '<pre>' + current_file.bytes() + '</pre>';
+        content_element.innerHTML = '<pre>' + current_file.decoded() + '</pre>';
     }
 }

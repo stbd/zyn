@@ -110,6 +110,7 @@
                     <li class="w3-padding-small"><span>Node Id: </span><span id="zyn-current-file-node-id">null</span></li>
                     <li class="w3-padding-small"><span>Type: </span><span id="zyn-current-file-type">null</span></li>
                     <li class="w3-padding-small"><span>Revision: </span><span id="zyn-current-file-revision">null</span></li>
+                    <li class="w3-padding-small"><span>Encoding: </span><span id="zyn-current-file-encoding">null</span></li>
                 </ul>
                 <button id="zyn-current-file-button-edit" class="w3-bar-item w3-button w3-border" onclick="_handle_edit_clicked()">Edit</button>
                 <button id="zyn-current-file-button-cancel" class="w3-bar-item w3-button w3-border" onclick="_handle_cancel_clicked()">Cancel</button>
@@ -184,6 +185,11 @@
            this._type_of_file = null;
            this._extension = null;
            this._mode = null;
+           this._encoding = null;
+       }
+
+       encoding() {
+           return this._encoding;
        }
 
        is_set() {
@@ -211,6 +217,11 @@
            if (split_name.length != 1) {
                this._extension = split_name[split_name.length - 1];
            }
+
+           this._encoding = CurrentFile.encoding_binary;
+           if (['md', 'txt'].indexOf(this._extension) !== -1) {
+               this._encoding = CurrentFile.encoding_utf8;
+           }
        }
 
        is_editable() {
@@ -237,6 +248,16 @@
            );
        }
 
+       decoded() {
+           if (this._encoding == CurrentFile.encoding_utf8) {
+               return utf8.decode(this._bytes);
+           } else if (this._encoding == CurrentFile.encoding_utf8) {
+               return unescape(this._bytes);
+           } else {
+               return this._bytes
+           }
+       }
+
        mode() { return this._mode; }
        file_extension() { return this._extension; }
        name() { return this._name; }
@@ -251,6 +272,11 @@
    CurrentFile.file_type_random_access = 'random-access';
    CurrentFile.file_type_blob = 'blob';
    CurrentFile.file_types = [CurrentFile.file_type_random_access, CurrentFile.file_type_blob];
+
+   CurrentFile.encoding_utf8 = 'utf8';
+   CurrentFile.encoding_ascii = 'ascii';
+   CurrentFile.encoding_binary = 'binary';
+   CurrentFile.encoding_types = [CurrentFile.encoding_utf8, CurrentFile.encoding_ascii, CurrentFile.encoding_binary];
 
    var _current_file = new CurrentFile();
    var _current_file_edited = false;
@@ -355,8 +381,8 @@
            document.getElementById('zyn-sidebar').style.width = '25%'
            document.getElementById('zyn-content').style.marginLeft = '27%'
        } else if (size === 'large') {
-           document.getElementById('zyn-sidebar').style.width = '50%'
-           document.getElementById('zyn-content').style.marginLeft = '52%'
+           document.getElementById('zyn-sidebar').style.width = '500px'
+           document.getElementById('zyn-content').style.marginLeft = '505px'
        } else {
            _unhandled('_set_sidebar_size: Unhandled value size' + size);
            return ;
@@ -370,6 +396,7 @@
        document.getElementById('zyn-current-file-name').innerText = current_file.name();
        document.getElementById('zyn-current-file-node-id').innerText = current_file.node_id();
        document.getElementById('zyn-current-file-revision').innerText = current_file.revision();
+       document.getElementById('zyn-current-file-encoding').innerText = current_file.encoding();
        if (current_file.type_of_file() === CurrentFile.file_type_random_access) {
            document.getElementById('zyn-current-file-type').innerText = "Random Access";
        } else if (current_file.type_of_file() === CurrentFile.file_type_blob) {
@@ -399,6 +426,7 @@
        document.getElementById('zyn-current-file-node-id').innerText = "";
        document.getElementById('zyn-current-file-type').innerText = "";
        document.getElementById('zyn-current-file-revision').innerText = "";
+       document.getElementById('zyn-current-file-encoding').innerText = "";
        _set_button_activity('zyn-current-file-button-edit', false);
        _set_button_activity('zyn-current-file-button-done', false);
        _set_button_activity('zyn-current-file-button-save', false);
@@ -478,8 +506,10 @@
        var content_element = document.getElementById('zyn-edit-content');
        edited_content = content_element.innerText;
 
-       if (['md'].indexOf(_current_file.file_extension()) !== -1) {
+       if (_current_file.encoding() == CurrentFile.encoding_utf8) {
            edited_content = utf8.encode(edited_content);
+       } else if (_current_file.encoding() == CurrentFile.encoding_ascii) {
+           edited_content = escape(edited_content);
        }
 
        if (_current_file.type_of_file() === CurrentFile.file_type_random_access) {
@@ -547,7 +577,7 @@
            + 'class="w3-pale-green" '
            + 'onkeyup="_handle_file_keypressed_on_file_content()"'
            + '>'
-           + _current_file.bytes()
+           + _current_file.decoded()
            + '</pre>'
        ;
 
