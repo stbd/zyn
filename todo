@@ -1,10 +1,11 @@
 # todo
  * Think about when to close connection to client
- * Go trough client to make sure trace levels are consistent
+ * Go trough client.rs to make sure trace levels are consistent
  * Make sure naming of blocks is consistent around system (not pages)
  * Cleanup responsibilities between file impl and metadata, who owns the data and who does the action
   * Cleanup file properties
  * Possibility to store protocol messages to file, to make debugging easier?
+  * When debugging protocol, passwords are vissible in logs
  * Replace anything that mentions folder to directory
  * Open response should include block size
  * Rethink were properties should be stored, some cases it would make sense to have them in filesystem instead of description/metadata for faster access
@@ -12,9 +13,23 @@
  * Replace all encrypt/decrypt operations with encrypt_to_file and decrypt_from_file
  * Think how commands could be batched together
 
-## Client:
- * In add, check that local file exists
- * Windows paths have... issues
+## CLI Client:
+ * Update tests to test cli interface instead of the class
+ * cd ..
+ * Recursive commands
+ * Command: Open, continuous edits
+ * When adding files to server after boot, make sure elements are added in order where no child is added before parent
+ * sync-all
+ * fetch-all
+
+## Web Client:
+ * Leave file as open when reading/editing
+ * Create files/directories
+ * Sorting of directory content is different in different browsers
+ * Table extension for showdown
+ * Math extension for showdown
+ * Table extension for showdown
+ * Imges
 
 ## Check
  * Are files closed when user disconnects, system test case

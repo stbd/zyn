@@ -89,27 +89,43 @@ class ZynCliClient(cmd.Cmd):
         # Do nothing
         pass
 
-    def do_pwd(self, args):
+    def do_pwd(self, _):
         'Print current folder'
         print(self._pwd)
 
-    def do_cd(self, args):
-        'Change current directory, [String: path]'
-        args = self._parse_args(args)
-        if len(args) != 1:
-            print('Invalid arguments')
-            return
+    def get_pwd(self):
+        return self._pwd
 
-        path_remote = self._to_absolute_remote_path(args[0])
-        element = self._client.filesystem_element(path_remote)
-        if not element.is_directory():
-            raise zyn_util.client.ZynClientException('Not a folder, path="{}"'.format(path_remote))
+    def _parser_cd(self):
+        parser = argparse.ArgumentParser(prog='cd')
+        parser.add_argument('path', type=str)
+        return parser
+
+    def help_cd(self):
+        print(self._parser_cd().format_help())
+
+    def do_cd(self, args):
+        parser = self._parser_cd()
+        args = vars(parser.parse_args(self._parse_args(args)))
+        path_remote = self._to_absolute_remote_path(args['path'])
+        path_remote = os.path.normpath(path_remote)
+
+        # todo: maybe just check from local elements if target is known and folder
+        if path_remote == '/':
+            pass
+        else:
+            element = self._client.filesystem_element(path_remote)
+            if not element.is_directory():
+                raise zyn_util.client.ZynClientException(
+                    'Target is not a folder, path="{}"'.format(path_remote)
+                )
+
         self._pwd = path_remote
         self._set_prompt(self._pwd)
 
     def _parser_check_notifications(self):
         parser = argparse.ArgumentParser(prog='check_notifications')
-        parser.add_argument('--timeout', type=int, default=5)
+        parser.add_argument('--timeout', type=int, default=0)
         return parser
 
     def help_check_notifications(self):
@@ -416,11 +432,6 @@ class ZynCliClient(cmd.Cmd):
 
         self._client.remove(path_remote, delete_local_file)
 
-    def do_exit(self, _):
-        'Close connection and exit client'
-        self._client.disconnect()
-        sys.exit(0)
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -527,8 +538,10 @@ def main():
             answer = input('yes/no? ')
             if answer.strip().lower() == 'yes':
                 client.add_tracked_files_to_remote()
+                print('Done')
             else:
                 client.remove_local_files()
+                print('Removing local files from tracked files')
 
     cli = ZynCliClient(client)
     while True:

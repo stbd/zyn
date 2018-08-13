@@ -659,7 +659,9 @@ class ZynFilesystemClient:
         self._local_files[path_in_remote] = file
 
     def add_tracked_files_to_remote(self):
-        for path_remote, element in self._local_files.items():
+        paths = sorted(self._local_files.keys(), key=lambda x: len(x))
+        for path_remote in paths:
+            element = self._local_files[path_remote]
             if element.is_directory():
                 self.add_directory(path_remote)
             elif element.is_file():
