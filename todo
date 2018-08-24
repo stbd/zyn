@@ -1,4 +1,5 @@
 # todo
+## Server
  * Think about when to close connection to client
  * Go trough client.rs to make sure trace levels are consistent
  * Make sure naming of blocks is consistent around system (not pages)
@@ -12,6 +13,7 @@
  * Cleanup and remove references to GPGME
  * Replace all encrypt/decrypt operations with encrypt_to_file and decrypt_from_file
  * Think how commands could be batched together
+ * Delete direcotry
 
 ## CLI Client:
  * Update tests to test cli interface instead of the class
@@ -38,6 +40,10 @@
  * It is possible to create file/folder with name that already exists under parent
  * Think about how to handle reopening file
   * Could user promote file from read mode to write mode?
+ * Creating file with same name in different folder fails
+  * self._create_file(cli, '/dir-1/file-1', '-ra')
+  * self._create_file(cli, '/dir-2/file-1', '-ra')
+
 
 ## Security
  * Passwords are printed when protocol is debugged

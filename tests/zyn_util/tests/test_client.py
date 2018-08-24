@@ -43,24 +43,6 @@ class ClientState:
             else:
                 assert not 'Invalid file type'
 
-    # todo: remove
-    def validate_directory(self, path_in_remote, expected_child_elements=[]):
-        path_local = _join_paths([self.path_data, path_in_remote])
-        assert os.path.exists(path_local)
-        local_children = [
-            os.path.basename(p)
-            for p in glob.glob(_join_paths([path_local, '*']))
-        ]
-        assert sorted(local_children) == sorted(expected_child_elements)
-
-    # todo: remove
-    def validate_file_exists(self, path_in_remote, expect_not_to_exists=False):
-        path_local = _join_paths([self.path_data, path_in_remote])
-        if expect_not_to_exists:
-            assert not os.path.exists(path_local)
-        else:
-            assert os.path.exists(path_local)
-
     def validate_text_file_content(self, path_in_remote, expected_text_content=None):
         expected_content = bytearray()
         if expected_text_content is not None:
@@ -147,10 +129,14 @@ class TestClients(zyn_util.tests.common.TestCommon):
         return [client_1] + clients
 
 
-class Test__(TestClients):
-    def _cli_client(self):
-        client_state, = self._start_server_and_create_number_of_clients(1)
-        return client_state, zyn_util.cli_client.ZynCliClient(client_state.client)
+class TestClient(TestClients):
+    def _cli_client(self, number_of_clients=1):
+        if number_of_clients == 1:
+            client_state, = self._start_server_and_create_number_of_clients(number_of_clients)
+            return client_state, zyn_util.cli_client.ZynCliClient(client_state.client)
+        else:
+            client_states = self._start_server_and_create_number_of_clients(number_of_clients)
+            return [(s, zyn_util.cli_client.ZynCliClient(s.client)) for s in client_states]
 
     def _params(self, params):
         params = [p for p in params if p]
@@ -162,14 +148,22 @@ class Test__(TestClients):
     def _to_filenames(self, elements):
         return [e.split('/')[-1] for e in elements]
 
+    def _create_directory(self, cli, path):
+        cli.do_create_directory(path)
+        return path
+
+    def _create_file(self, cli, path, create_parameters=None):
+        cli.do_create_file(self._params([create_parameters, path]))
+        return path
+
     def _create_directory_and_fetch(self, cli, path):
         cli.do_create_directory(path)
-        cli.do_fetch(path)
+        cli.do_fetch('-p ' + path)
         return path
 
     def _create_file_and_fetch(self, cli, path, create_parameters=None):
         cli.do_create_file(self._params([create_parameters, path]))
-        cli.do_fetch(path)
+        cli.do_fetch('-p ' + path)
         return path
 
     def _create_file_and_add(self, state, cli, path, add_parameters=None, content=None):
@@ -277,3 +271,148 @@ class Test__(TestClients):
         self._write_to_stdin('yes')
         cli.do_remove(self._params([path_file, '-dl']))
         state.validate_local_data({})
+
+    def test_remove_remote_only_file(self): pass  # todo: update server to support deleting dir
+
+    def test_sync_all_with_changes(self):
+        data = 'qwerty'
+        state, cli = self._cli_client()
+        self._create_directory_and_fetch(cli, '/dir-1')
+        self._create_directory_and_fetch(cli, '/dir-2')
+        path_file_1 = self._create_file_and_fetch(cli, '/dir-1/file-1', '-ra')
+        path_file_2 = self._create_file_and_fetch(cli, '/dir-1/file-2', '-ra')
+        path_file_3 = self._create_file_and_fetch(cli, '/dir-2/file', '-ra')
+
+        state.write_local_file_text(path_file_1, data)
+        state.write_local_file_text(path_file_2, data)
+        state.write_local_file_text(path_file_3, '')
+        self.assertEqual(cli.do_sync(''), 2)
+
+    def test_sync_random_access_file(self):
+        state, cli = self._cli_client()
+        self._create_file_and_fetch(cli, '/file-1', '-ra')
+        path_file_2 = self._create_file_and_fetch(cli, '/file-3', '-ra')
+        state.write_local_file_text(path_file_2, 'data')
+        self.assertEqual(cli.do_sync('-p ' + path_file_2), 1)
+
+    def test_sync_blob_file(self):
+        state, cli = self._cli_client()
+        self._create_file_and_fetch(cli, '/file-1', '-b')
+        path_file_2 = self._create_file_and_fetch(cli, '/file-3', '-b')
+        state.write_local_file_text(path_file_2, 'data')
+        self.assertEqual(cli.do_sync('-p ' + path_file_2), 1)
+
+    def test_sync_directory(self):
+        data = 'qwerty'
+        state, cli = self._cli_client()
+        path_dir_1 = self._create_directory_and_fetch(cli, '/dir-1')
+        self._create_directory_and_fetch(cli, '/dir-2')
+        path_file_1 = self._create_file_and_fetch(cli, '/dir-1/file-1', '-ra')
+        path_file_2 = self._create_file_and_fetch(cli, '/dir-1/file-2', '-ra')
+        path_file_3 = self._create_file_and_fetch(cli, '/dir-2/file', '-ra')
+        path_file_4 = self._create_file_and_fetch(cli, '/file-root', '-ra')
+
+        state.write_local_file_text(path_file_1, data)
+        state.write_local_file_text(path_file_2, data)
+        state.write_local_file_text(path_file_3, data)
+        state.write_local_file_text(path_file_4, data)
+        self.assertEqual(cli.do_sync('-p ' + path_dir_1), 2)
+
+    def test_sync_between_multiple_clients(self):
+        data_1 = '1111111111'
+        data_2 = '2222222222'
+        [(state_1, cli_1), (state_2, cli_2)] = self._cli_client(2)
+        self._create_directory_and_fetch(cli_1, '/dir-1')
+        path_file_1 = self._create_file_and_fetch(cli_1, '/dir-1/file-1', '-ra')
+        self._create_file_and_fetch(cli_1, '/dir-1/file-2', '-ra')
+
+        state_1.write_local_file_text(path_file_1, data_1)
+        self.assertEqual(cli_1.do_sync(''), 1)
+
+        cli_2.do_fetch('')
+        state_2.validate_text_file_content(path_file_1, data_1)
+
+        state_2.write_local_file_text(path_file_1, data_2)
+        self.assertEqual(cli_2.do_sync(''), 1)
+
+        self.assertEqual(cli_1.do_sync(''), 1)
+        state_1.validate_text_file_content(path_file_1, data_2)
+
+    def test_fetch_all(self):
+        state, cli = self._cli_client()
+        path_dir_1 = self._create_directory(cli, '/dir-1')
+        path_dir_2 = self._create_directory(cli, '/dir-2')
+        path_file_1 = self._create_file(cli, '/dir-1/file-1', '-ra')
+        path_file_2 = self._create_file(cli, '/dir-1/file-2', '-ra')
+        path_file_3 = self._create_file(cli, '/dir-2/file', '-ra')
+        path_file_4 = self._create_file(cli, '/root-file', '-ra')
+
+        cli.do_fetch('')
+        state.validate_local_data({
+            path_dir_1: {'type': 'd'},
+            path_dir_2: {'type': 'd'},
+            path_file_1: {'type': 'f'},
+            path_file_2: {'type': 'f'},
+            path_file_3: {'type': 'f'},
+            path_file_4: {'type': 'f'},
+        })
+
+    def test_fetch_directory(self):
+        state, cli = self._cli_client()
+        path_dir_1 = self._create_directory(cli, '/dir-1')
+        self._create_directory(cli, '/dir-2')
+        path_file_1 = self._create_file(cli, '/dir-1/file-1', '-ra')
+        path_file_2 = self._create_file(cli, '/dir-1/file-2', '-ra')
+        self._create_file(cli, '/dir-2/file', '-ra')
+        self._create_file(cli, '/root-file', '-ra')
+
+        cli.do_fetch('-p ' + path_dir_1)
+        state.validate_local_data({
+            path_dir_1: {'type': 'd'},
+            path_file_1: {'type': 'f'},
+            path_file_2: {'type': 'f'},
+        })
+
+    def test_fetch_file(self):
+        state, cli = self._cli_client()
+        self._create_directory(cli, '/dir-1')
+        self._create_file(cli, '/dir-1/file', '-ra')
+        path_file_2 = self._create_file(cli, '/file-1', '-ra')
+        self._create_file(cli, '/file-2', '-ra')
+
+        cli.do_fetch('-p ' + path_file_2)
+        state.validate_local_data({
+            path_file_2: {'type': 'f'},
+        })
+
+    def test_fetch_only_new_elements(self):
+        state, cli = self._cli_client()
+        path_dir_1 = self._create_directory(cli, '/dir-1')
+        path_file_1 = self._create_file(cli, '/dir-1/file', '-ra')
+        path_file_2 = self._create_file(cli, '/file-1', '-ra')
+        path_file_3 = self._create_file(cli, '/file-2', '-ra')
+
+        cli.do_fetch('')
+        state.validate_local_data({
+            path_dir_1: {'type': 'd'},
+            path_file_1: {'type': 'f'},
+            path_file_2: {'type': 'f'},
+            path_file_3: {'type': 'f'},
+        })
+
+        path_dir_2 = self._create_directory(cli, '/dir-2')
+        path_file_4 = self._create_file(cli, '/file-3', '-ra')
+        path_file_5 = self._create_file(cli, '/dir-2/file-4', '-ra')
+
+        cli.do_fetch('')
+        state.validate_local_data({
+            path_dir_1: {'type': 'd'},
+            path_dir_2: {'type': 'd'},
+            path_file_1: {'type': 'f'},
+            path_file_2: {'type': 'f'},
+            path_file_3: {'type': 'f'},
+            path_file_4: {'type': 'f'},
+            path_file_5: {'type': 'f'},
+        })
+
+    def test_open_file(self): pass  # Only for random access

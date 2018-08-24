@@ -20,19 +20,12 @@ def _command_completed():
     print('Command completed successfully')
 
 
-def _join_paths(list_of_paths):
-    path = posixpath.normpath('/'.join(list_of_paths))
-    if path.startswith('//'):
-        path = path[1:]
-    return path
-
-
 def _normalise_path(path_original):
     elements = []
 
     path = path_original
     while True:
-        path, e = os.path.split(path)
+        path, e = posixpath.split(path)
         if e != '':
             elements.append(e)
         if e == '' or path == '':
@@ -41,7 +34,7 @@ def _normalise_path(path_original):
     if path != '':
         elements.append('/')
     elements.reverse()
-    return _join_paths(elements)
+    return zyn_util.util.join_paths(elements)
 
 
 class ZynCliClient(cmd.Cmd):
@@ -108,7 +101,7 @@ class ZynCliClient(cmd.Cmd):
         parser = self._parser_cd()
         args = vars(parser.parse_args(self._parse_args(args)))
         path_remote = self._to_absolute_remote_path(args['path'])
-        path_remote = os.path.normpath(path_remote)
+        path_remote = posixpath.normpath(path_remote)
 
         # todo: maybe just check from local elements if target is known and folder
         if path_remote == '/':
@@ -230,6 +223,8 @@ class ZynCliClient(cmd.Cmd):
                     state = 'Out of sync'
                 elif not f.local_file.exists_locally and not f.local_file.tracked:
                     state = 'Not fetched'
+                else:
+                    raise NotImplementedError()
 
                 if state is None:
                     raise RuntimeError()
@@ -262,7 +257,7 @@ class ZynCliClient(cmd.Cmd):
         args = vars(parser.parse_args(self._parse_args(args)))
         path = args['path']
         path_remote = self._to_absolute_remote_path(path)
-        path_local = _join_paths([self._client._path_data, path_remote])
+        path_local = zyn_util.util.join_paths([self._client._path_data, path_remote])
 
         if os.path.isfile(path_local):
             if args['random_access']:
@@ -355,7 +350,7 @@ class ZynCliClient(cmd.Cmd):
 
     def _parser_fetch(self):
         parser = argparse.ArgumentParser(prog='fetch')
-        parser.add_argument('path', type=str)
+        parser.add_argument('-p', '--path', type=str, default='/')
         return parser
 
     def help_fetch(self):
@@ -367,32 +362,12 @@ class ZynCliClient(cmd.Cmd):
 
         path = args['path']
         path_remote = self._to_absolute_remote_path(path)
-
-        print('Fetching, path={}'.format(path_remote))
-
-        self._client.fetch(path_remote)
-
-        element = self._client.filesystem_element(path_remote)
-
-        if element.is_file():
-            print('File "{}" (Node Id: {}, revision: {}) fetched to "{}" successfully'.format(
-                element.path_remote,
-                element.node_id,
-                element.revision,
-                element.path_local
-            ))
-        elif element.is_directory():
-            print('Directory "{}" (Node Id: {}) fetched to "{}" successfully'.format(
-                element.path_remote,
-                element.node_id,
-                element.path_local
-            ))
-        else:
-            raise RuntimeError()
+        num_fetched = self._client.fetch(path_remote)
+        print("Fetched {} filesystem elements".format(num_fetched))
 
     def _parser_sync(self):
         parser = argparse.ArgumentParser(prog='sync')
-        parser.add_argument('path', type=str)
+        parser.add_argument('-p', '--path', type=str, default='/')
         return parser
 
     def help_sync(self):
@@ -402,11 +377,9 @@ class ZynCliClient(cmd.Cmd):
         parser = self._parser_sync()
         args = vars(parser.parse_args(self._parse_args(args)))
         path_remote = self._to_absolute_remote_path(args['path'])
-
-        self._log.debug('Synchronizing, path={}'.format(path_remote))
-        self._client.sync(path_remote)
-        element = self._client.filesystem_element(path_remote)
-        print('File {} synchronized to revision {}'.format(path_remote, element.revision))
+        num_sync = self._client.sync(path_remote)
+        print("Synchronized {} filesystem elements".format(num_sync))
+        return num_sync
 
     def _parser_remove(self):
         parser = argparse.ArgumentParser(prog='remove')
