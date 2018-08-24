@@ -31,6 +31,11 @@ def join_paths(list_of_paths):
     return path
 
 
+def to_remote_path(path):
+    path = path.replace('\\', '/')
+    return path
+
+
 def edit_random_access_file(
         connection,
         node_id,

@@ -377,7 +377,7 @@ class ZynFilesystemClient:
             json.dump({
                 'server-started': None,
                 'server-id': None,
-                'path-data-directory': path_data_directory,
+                'path-data-directory': os.path.normpath(path_data_directory),
                 'local-filesystem-elements': [],
             }, fp)
 
@@ -575,7 +575,14 @@ class ZynFilesystemClient:
                 query_list = self._list_filesystem(dir)
                 for element in query_list.elements:
                     path_remote_element = zyn_util.util.join_paths([dir, element.name])
+
+                    print('Processing element "{}" in "{}"'.format(
+                        path_remote_element,
+                        dir
+                    ))
+
                     if path_remote_element in self._local_files:
+                        print('"{}" already exists'.format(path_remote_element))
                         continue
 
                     try:
@@ -608,18 +615,22 @@ class ZynFilesystemClient:
 
         elements_synchronized = 0
         path_local = zyn_util.util.join_paths([self._path_data, path_in_remote])
+        path_local = os.path.normpath(path_local)
+
         if os.path.isfile(path_local):
             element = self._local_files[path_in_remote]
             if element.sync(self._connection, self._path_data, discard_local_changes, self._log):
                 elements_synchronized += 1
 
         elif os.path.isdir(path_local):
-            for root, dirs, files in os.walk(
-                    zyn_util.util.join_paths([self._path_data, path_in_remote])
-            ):
+            for root, dirs, files in os.walk(path_local):
+
                 for path_file in files:
                     path_local_file = zyn_util.util.join_paths([root, path_file])
+                    path_local_file = os.path.normpath(path_local_file)
                     path_remote_file = path_local_file.replace(self._path_data, '')
+                    path_remote_file = zyn_util.util.to_remote_path(path_remote_file)
+
                     if path_remote_file not in self._local_files:
                         continue
 

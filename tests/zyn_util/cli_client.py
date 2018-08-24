@@ -385,6 +385,7 @@ class ZynCliClient(cmd.Cmd):
             args['stop_on_error'],
             args['discard_local_changes']
         )
+        print('Done')
         print("Synchronized {} filesystem elements".format(num_sync))
         return num_sync
 
