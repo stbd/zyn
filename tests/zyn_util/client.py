@@ -549,7 +549,7 @@ class ZynFilesystemClient:
         zyn_util.util.check_server_response(rsp)
         return rsp.as_query_list_rsp()
 
-    def fetch(self, path_in_remote):
+    def fetch(self, path_in_remote, stop_on_error):
 
         print("Fetching, path={}".format(path_in_remote))
 
@@ -575,16 +575,26 @@ class ZynFilesystemClient:
                     if path_remote_element in self._local_files:
                         continue
 
-                    if element.is_file():
-                        rsp = self._query_filesystem(path_remote_element)
-                        self._fetch_file(path_remote_element, rsp)
-                        elements_fetched += 1
-                    elif element.is_directory():
-                        self._fetch_directory(path_remote_element, element)
-                        dirs.append(path_remote_element)
-                        elements_fetched += 1
-                    else:
-                        raise RuntimeError()
+                    try:
+                        if element.is_file():
+                            rsp = self._query_filesystem(path_remote_element)
+                            self._fetch_file(path_remote_element, rsp)
+                            elements_fetched += 1
+                        elif element.is_directory():
+                            self._fetch_directory(path_remote_element, element)
+                            dirs.append(path_remote_element)
+                            elements_fetched += 1
+                        else:
+                            raise RuntimeError()
+                    except RuntimeError:
+                        raise
+                    except Exception:
+                        if stop_on_error:
+                            raise
+                        print('There was an exception while processing element, path="{}"'.format(
+                            path_remote_element
+                        ))
+                        print(traceback.format_exc())
         else:
             raise RuntimeError()
         return elements_fetched

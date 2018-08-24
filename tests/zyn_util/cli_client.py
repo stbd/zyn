@@ -351,6 +351,7 @@ class ZynCliClient(cmd.Cmd):
     def _parser_fetch(self):
         parser = argparse.ArgumentParser(prog='fetch')
         parser.add_argument('-p', '--path', type=str, default='/')
+        parser.add_argument('--stop-on-error', action='store_true')
         return parser
 
     def help_fetch(self):
@@ -362,7 +363,7 @@ class ZynCliClient(cmd.Cmd):
 
         path = args['path']
         path_remote = self._to_absolute_remote_path(path)
-        num_fetched = self._client.fetch(path_remote)
+        num_fetched = self._client.fetch(path_remote, args['stop_on_error'])
         print("Fetched {} filesystem elements".format(num_fetched))
 
     def _parser_sync(self):
