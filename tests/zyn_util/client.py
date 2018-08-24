@@ -2,8 +2,9 @@ import glob
 import hashlib
 import json
 import logging
-import posixpath
 import os.path
+import posixpath
+import traceback
 
 import zyn_util.errors
 import zyn_util.exception
@@ -588,7 +589,7 @@ class ZynFilesystemClient:
             raise RuntimeError()
         return elements_fetched
 
-    def sync(self, path_in_remote):
+    def sync(self, path_in_remote, stop_on_error):
 
         print("Synchronizing, path={}".format(path_in_remote))
 
@@ -610,8 +611,16 @@ class ZynFilesystemClient:
                         continue
 
                     element = self._local_files[path_remote_file]
-                    if element.sync(self._connection, self._path_data, self._log):
-                        elements_synchronized += 1
+                    try:
+                        if element.sync(self._connection, self._path_data, self._log):
+                            elements_synchronized += 1
+                    except Exception:
+                        if stop_on_error:
+                            raise
+                        print('There was an exception while processing file, path="{}"'.format(
+                            path_remote_file
+                        ))
+                        print(traceback.format_exc())
 
         else:
             raise RuntimeError('Unknown filesystem element: "{}"'.format(path_in_remote))

@@ -338,6 +338,39 @@ class TestClient(TestClients):
         self.assertEqual(cli_1.do_sync(''), 1)
         state_1.validate_text_file_content(path_file_1, data_2)
 
+    def _init_two_clients_into_state_where_one_file_conflicts(self):
+        data_1 = '1111'
+        data_2 = '2222'
+        [(state_1, cli_1), (state_2, cli_2)] = self._cli_client(2)
+        path_file_1 = self._create_file_and_fetch(cli_1, '/file-1', '-ra')
+        path_file_2 = self._create_file_and_fetch(cli_1, '/file-2', '-ra')
+        path_file_3 = self._create_file_and_fetch(cli_1, '/file-3', '-ra')
+
+        cli_2.do_fetch('')
+
+        state_1.write_local_file_text(path_file_1, data_1)
+        state_1.write_local_file_text(path_file_2, data_1)
+        state_1.write_local_file_text(path_file_3, data_1)
+        cli_1.do_sync('')
+
+        # path_file_2 now has edits on both sides
+        state_2.write_local_file_text(path_file_2, data_2)
+
+        return [(state_1, cli_1), (state_2, cli_2)]
+
+    def test_sync_error_does_not_stop_processing(self):
+        [(state_1, cli_1), (state_2, cli_2)] = \
+            self._init_two_clients_into_state_where_one_file_conflicts()
+
+        self.assertEqual(cli_2.do_sync(''), 2)
+
+    def test_sync_error_stops_processing(self):
+        [(state_1, cli_1), (state_2, cli_2)] = \
+            self._init_two_clients_into_state_where_one_file_conflicts()
+
+        with self.assertRaises(NotImplementedError):
+            cli_2.do_sync('--stop-on-error')
+
     def test_fetch_all(self):
         state, cli = self._cli_client()
         path_dir_1 = self._create_directory(cli, '/dir-1')

@@ -368,6 +368,7 @@ class ZynCliClient(cmd.Cmd):
     def _parser_sync(self):
         parser = argparse.ArgumentParser(prog='sync')
         parser.add_argument('-p', '--path', type=str, default='/')
+        parser.add_argument('--stop-on-error', action='store_true')
         return parser
 
     def help_sync(self):
@@ -377,7 +378,7 @@ class ZynCliClient(cmd.Cmd):
         parser = self._parser_sync()
         args = vars(parser.parse_args(self._parse_args(args)))
         path_remote = self._to_absolute_remote_path(args['path'])
-        num_sync = self._client.sync(path_remote)
+        num_sync = self._client.sync(path_remote, args['stop_on_error'])
         print("Synchronized {} filesystem elements".format(num_sync))
         return num_sync
 
