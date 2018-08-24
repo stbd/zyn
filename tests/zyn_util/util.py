@@ -13,7 +13,7 @@ def verbose_count_to_log_level(verbose_count):
         level = logging.INFO
     elif verbose_count == 2:
         level = logging.DEBUG
-    elif level > 2:
+    elif verbose_count > 2:
         logger.warn('Maximum number of verbose flags is 2, greater value is ignored')
     logger.setLevel(level)
 
