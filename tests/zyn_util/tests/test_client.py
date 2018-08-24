@@ -356,20 +356,27 @@ class TestClient(TestClients):
         # path_file_2 now has edits on both sides
         state_2.write_local_file_text(path_file_2, data_2)
 
-        return [(state_1, cli_1), (state_2, cli_2)]
+        return [(state_1, cli_1), (state_2, cli_2)], path_file_2, [data_1, data_2]
 
     def test_sync_error_does_not_stop_processing(self):
-        [(state_1, cli_1), (state_2, cli_2)] = \
+        [(state_1, cli_1), (state_2, cli_2)], _, _ = \
             self._init_two_clients_into_state_where_one_file_conflicts()
 
         self.assertEqual(cli_2.do_sync(''), 2)
 
     def test_sync_error_stops_processing(self):
-        [(state_1, cli_1), (state_2, cli_2)] = \
+        [(state_1, cli_1), (state_2, cli_2)], _, _ = \
             self._init_two_clients_into_state_where_one_file_conflicts()
 
         with self.assertRaises(NotImplementedError):
             cli_2.do_sync('--stop-on-error')
+
+    def test_sync_discard_local_changes(self):
+        [(state_1, cli_1), (state_2, cli_2)], path_file, [data, _] = \
+            self._init_two_clients_into_state_where_one_file_conflicts()
+
+        self.assertEqual(cli_2.do_sync('--discard-local-changes'), 3)
+        state_2.validate_text_file_content(path_file, data)
 
     def test_fetch_all(self):
         state, cli = self._cli_client()

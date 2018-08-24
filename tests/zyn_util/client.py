@@ -285,7 +285,7 @@ class LocalFile(LocalFileSystemElement):
             path_in_remote=self._path_remote
         )
 
-    def sync(self, connection, path_data_root, logger):
+    def sync(self, connection, path_data_root, discard_local_changes, logger):
 
         synchronized = False
         path_local = self.path_to_local_file(path_data_root)
@@ -333,10 +333,13 @@ class LocalFile(LocalFileSystemElement):
 
         elif open_rsp.revision > self._revision and has_changes:
             # If remote file is newer and local file has changes,
-            # this requires some kind of merge
-            raise NotImplementedError(
-                'Both remote and local file have changes, merge is not implemented'
-            )
+            # unless it is allowed to drop local changes, this will require some kind of merge
+            if not discard_local_changes:
+                raise NotImplementedError(
+                    'Both remote and local file have changes, merge is not implemented'
+                )
+            self._download_full_file(connection, path_local, node_id=self._node_id)
+            synchronized = True
 
         else:
             raise NotImplementedError()
@@ -599,7 +602,7 @@ class ZynFilesystemClient:
             raise RuntimeError()
         return elements_fetched
 
-    def sync(self, path_in_remote, stop_on_error):
+    def sync(self, path_in_remote, stop_on_error, discard_local_changes):
 
         print("Synchronizing, path={}".format(path_in_remote))
 
@@ -607,7 +610,7 @@ class ZynFilesystemClient:
         path_local = zyn_util.util.join_paths([self._path_data, path_in_remote])
         if os.path.isfile(path_local):
             element = self._local_files[path_in_remote]
-            if element.sync(self._connection, self._path_data, self._log):
+            if element.sync(self._connection, self._path_data, discard_local_changes, self._log):
                 elements_synchronized += 1
 
         elif os.path.isdir(path_local):
@@ -622,8 +625,14 @@ class ZynFilesystemClient:
 
                     element = self._local_files[path_remote_file]
                     try:
-                        if element.sync(self._connection, self._path_data, self._log):
+                        if element.sync(
+                                self._connection,
+                                self._path_data,
+                                discard_local_changes,
+                                self._log
+                        ):
                             elements_synchronized += 1
+
                     except Exception:
                         if stop_on_error:
                             raise
