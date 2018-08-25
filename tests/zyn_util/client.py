@@ -692,16 +692,16 @@ class ZynFilesystemClient:
         for element in rsp.elements:
             exists_locally = False
             tracked = False
-            file_path = zyn_util.util.join_paths([path_parent, element.name])
+            element_path = zyn_util.util.join_paths([path_parent, element.name])
 
-            self._log.debug('Processing "{}"'.format(file_path))
+            self._log.debug('Processing "{}"'.format(element_path))
 
-            if file_path in self._local_files:
+            if element_path in self._local_files:
 
-                self._log.debug('"{}" found in local files'.format(file_path))
+                self._log.debug('"{}" found in local elements'.format(element_path))
 
-                file = self._local_files[file_path]
-                if file.exists_locally(self._path_data):
+                local_element = self._local_files[element_path]
+                if local_element.exists_locally(self._path_data):
                     exists_locally = True
                     tracked = True
                     local_files.remove(element.name)
@@ -713,11 +713,10 @@ class ZynFilesystemClient:
 
             elements.append(Element(element, Localfile(exists_locally, tracked)))
 
-        return elements, \
-            [
-                zyn_util.util.join_paths([path_parent, f])
-                for f in local_files
-            ]
+        return elements, [
+            zyn_util.util.join_paths([path_parent, f])
+            for f in local_files
+        ]
 
     def _add(self, element):
         if not element.exists_locally(self._path_data):

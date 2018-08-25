@@ -185,8 +185,8 @@ class ZynCliClient(cmd.Cmd):
 
     def _parser_list(self):
         parser = argparse.ArgumentParser(prog='list')
-        parser.add_argument('--path', type=str)
-        parser.add_argument('--show-local-files', action='store_false')  # todo: fixme, use
+        parser.add_argument('-p', '--path', type=str)
+        parser.add_argument('--hide-untracked-files', action='store_true')
         return parser
 
     def help_list(self):
@@ -205,7 +205,7 @@ class ZynCliClient(cmd.Cmd):
         tracked_files, untracked_files = self._client.list(path_remote)
 
         print()
-        print('{:6} {:8} {:12} {}'.format('Type', 'Node Id', 'Local file', 'Name'))
+        print('{:6} {:8} {:14} {}'.format('Type', 'Node Id', 'Local element', 'Name'))
         for f in sorted(tracked_files, key=lambda e: e.remote_file.is_file()):
             name = f.remote_file.name
             type_of = 'file'
@@ -213,33 +213,33 @@ class ZynCliClient(cmd.Cmd):
                 name += '/'
                 type_of = 'dir'
 
-            if f.remote_file.is_file():
-                state = None
-                if f.local_file.exists_locally and f.local_file.tracked:
-                    state = 'Tracked'
-                elif f.local_file.exists_locally and not f.local_file.tracked:
-                    state = 'Conflict'
-                elif not f.local_file.exists_locally and f.local_file.tracked:
-                    state = 'Out of sync'
-                elif not f.local_file.exists_locally and not f.local_file.tracked:
-                    state = 'Not fetched'
-                else:
-                    raise NotImplementedError()
-
-                if state is None:
-                    raise RuntimeError()
+            state = None
+            if f.local_file.exists_locally and f.local_file.tracked:
+                state = 'Tracked'
+            elif f.local_file.exists_locally and not f.local_file.tracked:
+                state = 'Conflict'
+            elif not f.local_file.exists_locally and f.local_file.tracked:
+                state = 'Out of sync'
+            elif not f.local_file.exists_locally and not f.local_file.tracked:
+                state = 'Not fetched'
             else:
-                state = ''
+                raise NotImplementedError()
 
-            print('{:<6} {:<8} {:<12} {}'.format(type_of, f.remote_file.node_id, state, name))
+            if state is None:
+                raise RuntimeError()
+
+            print('{:<6} {:<8} {:<14} {}'.format(type_of, f.remote_file.node_id, state, name))
+
+        if args['hide_untracked_files']:
+            return
 
         if len(untracked_files) == 0:
             return
 
         print()
-        print('Untracked files:')
+        print('Untracked elements:')
         for f in untracked_files:
-            print(f)
+            print(os.path.basename(f))
 
     def _parser_add(self):
         parser = argparse.ArgumentParser(prog='add')

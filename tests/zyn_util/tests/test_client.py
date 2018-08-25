@@ -73,6 +73,7 @@ class ClientState:
     def create_directory(self, path_remote):
         path_local = _join_paths([self.path_data, path_remote])
         os.makedirs(path_local)
+        return path_remote
 
     def create_local_file(self, path_remote, content=None):
         path_local = _join_paths([self.path_data, path_remote])
@@ -497,3 +498,49 @@ class TestClient(TestClients):
         })
 
     def test_open_file(self): pass  # Only for random access
+
+    def _find_from_tracked_files(self, tracked_files, path_element):
+        for t in tracked_files:
+            if t.remote_file.name == self._to_filenames([path_element])[0]:
+                return t
+        self.assertFalse('Tracked file not found')
+
+    def _validate_tracked_file_local_status(self, tracked_file, exists_locally, tracked):
+        self.assertEqual(tracked_file.local_file.exists_locally, exists_locally)
+        self.assertEqual(tracked_file.local_file.tracked, tracked)
+
+    def test_list(self):
+        state, cli = self._cli_client()
+        self._create_directory_and_fetch(cli, '/dir-1')
+        path_dir_2 = self._create_directory(cli, '/dir-2')
+        self._create_file_and_fetch(cli, '/file-1', '-ra')
+        self._create_file_and_fetch(cli, '/file-2', '-ra')
+        state.create_directory('/dir-2')
+        path_untacked_dir_2 = state.create_directory('/dir-3')
+        path_untacked_file_1 = state.create_local_file('/file-3')
+
+        tracked_files, untracked_files = state.client.list('/')
+        cli.do_list('')
+        self.assertEqual(len(tracked_files), 4)
+        expected_untracked_elements = [path_untacked_dir_2, path_untacked_file_1]
+        self.assertEqual(sorted(untracked_files), sorted(expected_untracked_elements))
+        self._validate_tracked_file_local_status(
+            self._find_from_tracked_files(tracked_files, path_dir_2),
+            True,
+            False,
+        )
+
+    def test_list_in_subfolder(self):
+        state, cli = self._cli_client()
+        path_dir_1 = self._create_directory_and_fetch(cli, '/dir-1')
+        self._create_file_and_fetch(cli, '/dir-1/file-1', '-ra')
+        self._create_file_and_fetch(cli, '/dir-1/file-2', '-ra')
+        self._create_file_and_fetch(cli, '/file', '-ra')
+        path_untacked_file_1 = state.create_local_file('/dir-1/file-3')
+
+        tracked_files, untracked_files = state.client.list(path_dir_1)
+        cli.do_list('-p ' + path_dir_1)
+
+        self.assertEqual(len(tracked_files), 2)
+        expected_untracked_elements = [path_untacked_file_1]
+        self.assertEqual(sorted(untracked_files), sorted(expected_untracked_elements))
