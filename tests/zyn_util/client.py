@@ -104,6 +104,14 @@ class LocalDirectory(LocalFileSystemElement):
     def craete(self, path_data_root):
         os.mkdir(self.path_to_local_file(path_data_root))
 
+    def remove_local(self, path_data):
+        path = self.path_to_local_file(path_data)
+        try:
+            os.rmdir(path)
+        except OSError:
+            print(traceback.format_exc())
+            print('Directory not empty, skipping, path="{}"'.format(path))
+
 
 class FileState:
     def __init__(self, file, path_data):
@@ -172,7 +180,7 @@ class LocalFile(LocalFileSystemElement):
         # dir._revision = rsp.revision todo: add revision to query
         return dir
 
-    def remove(self, path_data):
+    def remove_local(self, path_data):
         os.remove(self.path_to_local_file(path_data))
 
     def _calculate_checksum(self, content):
@@ -542,13 +550,13 @@ class ZynFilesystemClient:
         dir.craete(self._path_data)
         self._local_files[path_remote] = dir
 
-    def _query_filesystem(self, path):
+    def _query_element(self, path):
         rsp = self._connection.query_filesystem(path=path)
         zyn_util.util.check_server_response(rsp)
         return rsp.as_query_filesystem_rsp()
 
-    def _list_filesystem(self, path_remote):
-        rsp = self._connection.query_list(path=path_remote)
+    def _query_list(self, path_remote_parent):
+        rsp = self._connection.query_list(path=path_remote_parent)
         zyn_util.util.check_server_response(rsp)
         return rsp.as_query_list_rsp()
 
@@ -557,7 +565,7 @@ class ZynFilesystemClient:
         print("Fetching, path={}".format(path_in_remote))
 
         elements_fetched = 0
-        query = self._query_filesystem(path_in_remote)
+        query = self._query_element(path_in_remote)
         if query.is_file():
             if path_in_remote not in self._local_files:
                 self._fetch_file(path_in_remote, query)
@@ -572,7 +580,7 @@ class ZynFilesystemClient:
                 if not dirs:
                     break
                 dir = dirs.pop()
-                query_list = self._list_filesystem(dir)
+                query_list = self._query_list(dir)
                 for element in query_list.elements:
                     path_remote_element = zyn_util.util.join_paths([dir, element.name])
 
@@ -587,7 +595,7 @@ class ZynFilesystemClient:
 
                     try:
                         if element.is_file():
-                            rsp = self._query_filesystem(path_remote_element)
+                            rsp = self._query_element(path_remote_element)
                             self._fetch_file(path_remote_element, rsp)
                             elements_fetched += 1
                         elif element.is_directory():
@@ -661,10 +669,7 @@ class ZynFilesystemClient:
 
         # todo: handle case where node id is used
 
-        rsp = self._connection.query_list(path=path_parent)
-        zyn_util.util.check_server_response(rsp)
-        rsp = rsp.as_query_list_rsp()
-
+        rsp = self._query_list(path_parent)
         local_files = [
             os.path.basename(p)
             for p in glob.glob(zyn_util.util.join_paths([self._path_data, path_parent, '*']))
@@ -737,7 +742,7 @@ class ZynFilesystemClient:
             raise ZynClientException('"{}" must be directory'.format(element.path_remote()))
 
         self.create_directory(path_in_remote)
-        rsp = self._query_filesystem(path_in_remote)
+        rsp = self._query_element(path_in_remote)
         dir = LocalDirectory.from_filesystem_query(path_in_remote, rsp)
         self._local_files[path_in_remote] = dir
 
@@ -750,7 +755,7 @@ class ZynFilesystemClient:
             raise ZynClientException('"{}" must be file'.format(element.path_remote()))
 
         self.create_file(path_in_remote, type_of_file)
-        rsp = self._query_filesystem(path_in_remote)
+        rsp = self._query_element(path_in_remote)
         file = LocalFile.from_filesystem_query(path_in_remote, rsp)
         file.push(self._connection, self._path_data)
         self._local_files[path_in_remote] = file
@@ -766,17 +771,37 @@ class ZynFilesystemClient:
             else:
                 raise RuntimeError()
 
-    def remove(self, path_remote, remove_local_file):
+    def find_tracked_elements(self, path_in_remote):
 
-        if path_remote not in self._local_files:
-            raise ZynClientException('File "{}" is not tracked locally'.format(path_remote))
+        elements = []
+        query_element = self._query_element(path_in_remote)
+        if query_element.is_file():
+            elements.append((path_in_remote, query_element.node_id))
+
+        elif query_element.is_directory():
+            query_list = self._query_list(path_in_remote)
+            for element in query_list.elements:
+                element_path = zyn_util.util.join_paths([path_in_remote, element.name])
+                if element.is_file():
+                    elements.append((element_path, element.node_id))
+
+                elif element.is_directory():
+                    elements += self.find_tracked_elements(element_path)
+                else:
+                    raise RuntimeError()
+            elements.append((path_in_remote, query_element.node_id))
+        else:
+            raise RuntimeError()
+        return elements
+
+    def remove(self, path_remote, node_id, remove_local_file, remove_remote_file):
+
+        if remove_remote_file:
+            self._connection.delete(node_id=node_id)
 
         element = self._local_files[path_remote]
-        if not element.is_file():
-            raise NotImplementedError('Removing directory')
-
         if remove_local_file:
-            element.remove(self._path_data)
+            element.remove_local(self._path_data)
 
         del self._local_files[path_remote]
 

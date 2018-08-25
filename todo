@@ -13,16 +13,11 @@
  * Cleanup and remove references to GPGME
  * Replace all encrypt/decrypt operations with encrypt_to_file and decrypt_from_file
  * Think how commands could be batched together
- * Delete direcotry
+ * Delete directory
 
 ## CLI Client:
- * Update tests to test cli interface instead of the class
- * cd ..
- * Recursive commands
  * Command: Open, continuous edits
- * When adding files to server after boot, make sure elements are added in order where no child is added before parent
- * sync-all
- * fetch-all
+ * Improve list printout
 
 ## Web Client:
  * Leave file as open when reading/editing
@@ -31,7 +26,8 @@
  * Table extension for showdown
  * Math extension for showdown
  * Table extension for showdown
- * Imges
+ * Images
+ * Support for raw links, raw.server.path-file
 
 ## Check
  * Are files closed when user disconnects, system test case

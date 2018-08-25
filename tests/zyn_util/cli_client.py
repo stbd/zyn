@@ -393,6 +393,7 @@ class ZynCliClient(cmd.Cmd):
         parser = argparse.ArgumentParser(prog='remove')
         parser.add_argument('path', type=str)
         parser.add_argument('-dl', '--delete-local-file', action="store_true")
+        parser.add_argument('-dr', '--delete-remote-file', action="store_true")
         return parser
 
     def help_remove(self):
@@ -402,16 +403,31 @@ class ZynCliClient(cmd.Cmd):
         parser = self._parser_remove()
         args = vars(parser.parse_args(self._parse_args(args)))
         path_remote = self._to_absolute_remote_path(args['path'])
-        delete_local_file = False
+        delete_local_file = args['delete_local_file']
+        delete_remote_file = args['delete_remote_file']
 
-        if args['delete_local_file']:
-            answer = input('Delete local file from file system? yes/no: ')
-            if answer.strip().lower() == 'yes':
-                delete_local_file = True
-            else:
-                print('Skipping deletion')
+        elements = self._client.find_tracked_elements(path_remote)
+        if not elements:
+            raise zyn_util.client.ZynClientException(
+                'No filesystem elements found, path="{}"'.format(path_remote)
+            )
 
-        self._client.remove(path_remote, delete_local_file)
+        print('Following filesystem elements will be deleted:')
+        for e in elements:
+            print('Node Id: {}, Path: "{}"'.format(e[1], e[0]))
+
+        print('Delete local file: "{}", Delete remote file: "{}"'.format(
+            delete_local_file,
+            delete_remote_file
+        ))
+
+        answer = input('Is this ok? yes/no: ')
+        if answer.strip().lower() != 'yes':
+            print('Canceling')
+            return
+
+        for e in elements:
+            self._client.remove(e[0], e[1], delete_local_file, delete_remote_file)
 
 
 def main():

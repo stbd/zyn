@@ -30,6 +30,9 @@ class ClientState:
                    glob.glob(_join_paths([self.path_data, '/**/*'])) \
                    + glob.glob(_join_paths([self.path_data, '/*']))
 
+        if len(elements) != len(expected_elements):
+            print('Number of filesystem elements do not match')
+            print('Expected: {}, found: {}'.format(len(elements), len(expected_elements)))
         assert len(elements) == len(expected_elements)
 
         for e in elements:
@@ -76,6 +79,7 @@ class ClientState:
         open(path_local, 'w').close()
         if content is not None:
             self.write_local_file_text(path_remote, content)
+        return path_remote
 
 
 class TestClients(zyn_util.tests.common.TestCommon):
@@ -259,20 +263,57 @@ class TestClient(TestClients):
         cli.do_cd('../' + path_dir_1)
         self.assertEqual(cli.get_pwd(), path_dir_1)
 
-    def test_remove_file_without_deleting_local_file(self):
+    def test_remove_file_leave_local_file_and_remote(self):
         state, cli = self._cli_client()
         path_file = self._create_file_and_fetch(cli, "/file", '-b')
+        self._write_to_stdin('yes')
         cli.do_remove(self._params([path_file]))
         state.validate_local_data({path_file: {'type': 'f'}})
+        self._validate_tracked_files(state, '/', self._to_filenames([path_file]))
 
-    def test_remove_file_and_delete_local_file(self):
+    def test_remove_file_and_local_file_leave_remote(self):
         state, cli = self._cli_client()
         path_file = self._create_file_and_fetch(cli, "/file", '-b')
         self._write_to_stdin('yes')
         cli.do_remove(self._params([path_file, '-dl']))
         state.validate_local_data({})
+        self._validate_tracked_files(state, '/', self._to_filenames([path_file]))
 
-    def test_remove_remote_only_file(self): pass  # todo: update server to support deleting dir
+    def test_remove_file_and_remote_leave_local(self):
+        state, cli = self._cli_client()
+        path_file = self._create_file_and_fetch(cli, "/file", '-b')
+        self._write_to_stdin('yes')
+        cli.do_remove(self._params([path_file, '-dr']))
+        state.validate_local_data({path_file: {'type': 'f'}})
+        self._validate_tracked_files(state, '/', [])
+
+    def test_remove_directory_with_elements(self):
+        state, cli = self._cli_client()
+        path_dir = self._create_directory_and_fetch(cli, '/dir-1')
+        self._create_directory_and_fetch(cli, '/dir-1/dir-2')
+        self._create_file_and_fetch(cli, "/dir-1/file-1", '-b')
+        self._create_file_and_fetch(cli, "/dir-1/file-2", '-b')
+        self._create_file_and_fetch(cli, "/dir-1/dir-2/file", '-b')
+        path_file_root = self._create_file_and_fetch(cli, "/file-root", '-b')
+
+        self._write_to_stdin('yes')
+        cli.do_remove(self._params([path_dir, '-dl', '-dr']))
+        state.validate_local_data({path_file_root: {'type': 'f'}})
+        self._validate_tracked_files(state, '/', self._to_filenames([path_file_root]))
+
+    def test_remove_directory_leaves_local_if_not_empty(self):
+        state, cli = self._cli_client()
+        path_dir = self._create_directory_and_fetch(cli, '/dir')
+        self._create_directory_and_fetch(cli, '/dir/file')
+        path_untracked = state.create_local_file('/dir/local')
+
+        self._write_to_stdin('yes')
+        cli.do_remove(self._params([path_dir, '-dl', '-dr']))
+        state.validate_local_data({
+            path_dir: {'type': 'd'},
+            path_untracked: {'type': 'f'},
+        })
+        self._validate_tracked_files(state, '/', [])
 
     def test_sync_all_with_changes(self):
         data = 'qwerty'
