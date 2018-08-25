@@ -41,12 +41,13 @@ class ZynCliClient(cmd.Cmd):
     intro = 'Zyn CLI client, type "help" for help'
     prompt = ' '
 
-    def __init__(self, client, pwd='/'):
+    def __init__(self, client, pwd='/', remote_description=None):
         super(ZynCliClient, self).__init__()
         self._pwd = pwd
         self._client = client
-        self._set_prompt(self._pwd)
         self._log = logging.getLogger(__name__)
+        self._remote_description = remote_description
+        self._set_prompt(self._pwd)
 
     def _parse_args(self, args_str):
         args = args_str.split()
@@ -61,7 +62,7 @@ class ZynCliClient(cmd.Cmd):
         else:
             current_folder = path
 
-        self.prompt = '{}:{} {}$ '.format("127.0.0.1", "1234", current_folder)
+        self.prompt = '{} {}$ '.format(self._remote_description, current_folder)
 
     def _to_absolute_remote_path(self, path):
         path = _normalise_path(path)
@@ -544,7 +545,8 @@ def main():
                 client.remove_local_files()
                 print('Removing local files from tracked files')
 
-    cli = ZynCliClient(client)
+    remote_description = '{}:{}'.format(args['remote-address'], args['remote-port'])
+    cli = ZynCliClient(client, remote_description=remote_description)
     while True:
         try:
             cli.cmdloop()
