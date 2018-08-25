@@ -429,6 +429,9 @@ class ZynFilesystemClient:
     def server_info(self):
         return self._server_info
 
+    def path_to_local_file(self, path_remote):
+        return zyn_util.util.join_paths([self._path_data, path_remote])
+
     def filesystem_element(self, path_in_remote):
         try:
             element = self._local_files[path_in_remote]

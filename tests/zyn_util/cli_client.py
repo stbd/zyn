@@ -239,7 +239,11 @@ class ZynCliClient(cmd.Cmd):
         print()
         print('Untracked elements:')
         for f in untracked_files:
-            print(os.path.basename(f))
+            path_local = self._client.path_to_local_file(f)
+            name = os.path.basename(f)
+            if os.path.isdir(path_local):
+                name += '/'
+            print(name)
 
     def _parser_add(self):
         parser = argparse.ArgumentParser(prog='add')
