@@ -9,15 +9,13 @@
   * When debugging protocol, passwords are vissible in logs
  * Replace anything that mentions folder to directory
  * Open response should include block size
- * Rethink were properties should be stored, some cases it would make sense to have them in filesystem instead of description/metadata for faster access
+ * Rethink where properties should be stored, some cases it would make sense to have them in filesystem instead of description/metadata for faster access
  * Cleanup and remove references to GPGME
  * Replace all encrypt/decrypt operations with encrypt_to_file and decrypt_from_file
  * Think how commands could be batched together
- * Delete directory
 
 ## CLI Client:
  * Command: Open, continuous edits
- * Improve list printout
 
 ## Web Client:
  * Leave file as open when reading/editing
@@ -39,7 +37,6 @@
  * Creating file with same name in different folder fails
   * self._create_file(cli, '/dir-1/file-1', '-ra')
   * self._create_file(cli, '/dir-2/file-1', '-ra')
-
 
 ## Security
  * Passwords are printed when protocol is debugged

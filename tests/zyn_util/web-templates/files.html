@@ -7,6 +7,7 @@
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.0.489/pdf.js"></script>
     <link rel="stylesheet" href="{{ static_url('zyn.css') }}">
     <script type="text/javascript" src="{{ static_url('zyn.js') }}"></script>
+    <script type="text/javascript" src="{{ static_url('files.js') }}"></script>
     <script type="text/javascript" src="{{ static_url('zyn-file-rendering.js') }}"></script>
     <script type="text/javascript" src="{{ static_url('utf8.js') }}"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -98,6 +99,18 @@
             </div>
 
             <h3 class="w3-bar-item w3-center">Content</h3>
+
+            <!--div class="w3-dropdown-hover" -->
+            <div class="w3-dropdown-click" >
+                <button class="w3-button w3-border" onclick="_toggle_create_element_content()">Create</button>
+                <div id="input-create-element-content" class="w3-dropdown-content w3-bar-block w3-border">
+                    Name:
+                    <input id="input-create-element-name" class="w3-input w3-border w3-round" type="text">
+                    Type:
+                    <a class="w3-bar-item w3-button" onclick="_handle_create_random_access_clicked()" >File: Random Access</a>
+                    <a class="w3-bar-item w3-button" onclick="_handle_create_direcotry_clicked()">Directory</a>
+                </div>
+            </div>
             <div id="zyn-workdir-content" style="min-width: 500px;"></div>
         </div>
 
@@ -211,12 +224,7 @@
            this._type_of_file = type_of_file;
            this._bytes = bytes;
            this._mode = CurrentFile.mode_view;
-
-           this._extension = null;
-           var split_name = this._name.split('.');
-           if (split_name.length != 1) {
-               this._extension = split_name[split_name.length - 1];
-           }
+           this._extension = zyn_get_file_extension(name);
 
            this._encoding = CurrentFile.encoding_binary;
            if (['md', 'txt'].indexOf(this._extension) !== -1) {
@@ -225,10 +233,7 @@
        }
 
        is_editable() {
-           if (['md', 'txt'].indexOf(this._extension) === -1) {
-               return false;
-           }
-           return true;
+           return is_editable_file(this._extension);
        }
 
        set_mode(mode) {
@@ -278,6 +283,13 @@
    CurrentFile.encoding_binary = 'binary';
    CurrentFile.encoding_types = [CurrentFile.encoding_utf8, CurrentFile.encoding_ascii, CurrentFile.encoding_binary];
 
+   function is_editable_file(file_extension) {
+       if (['md', 'txt'].indexOf(file_extension) === -1) {
+           return false;
+       }
+       return true;
+   }
+
    var _current_file = new CurrentFile();
    var _current_file_edited = false;
    var _current_workdir = new Path();
@@ -300,6 +312,7 @@
        _poll_timer = window.setInterval(_handle_poll_timer, duration_seconds * 1000);
    }
 
+   _ERROR_CONNECTION = 'Connection problem';
    _ERROR_CRITICAL = 'Critical error';
    _ERROR_OPERATION = 'Operational problem';
    function _show_error(criticality, description, detail=null)
@@ -347,12 +360,12 @@
 
    function _handle_disconnected() {
        _stop_poll_timer();
-       _show_error(_ERROR_CRITICAL, "Connection to Web server lost, try again after while");
+       _show_error(_ERROR_CONNECTION, "Connection to Web server lost, try again after while");
    }
 
-   function _set_button_activity(name, active) {
+   function _set_button_enabled(name, enabled) {
        var button = document.getElementById(name);
-       if (active) {
+       if (enabled) {
            button.classList.remove("w3-disabled");
        } else {
            button.classList.add("w3-disabled");
@@ -364,8 +377,6 @@
        if (sidebar.dataset.size === 'min') {
            _set_sidebar_size('large');
        } else if (sidebar.dataset.size === 'large') {
-           _set_sidebar_size('normal');
-       } else if (sidebar.dataset.size === 'normal') {
            _set_sidebar_size('min');
        } else {
            _unhandled('_set_sidebar_size: Unhandled value dataset.size: ' + sidebar.dataset.size);
@@ -377,9 +388,6 @@
        if (size === 'min') {
            document.getElementById('zyn-sidebar').style.width = '5%'
            document.getElementById('zyn-content').style.marginLeft = '7%'
-       } else if (size === 'normal') {
-           document.getElementById('zyn-sidebar').style.width = '25%'
-           document.getElementById('zyn-content').style.marginLeft = '27%'
        } else if (size === 'large') {
            document.getElementById('zyn-sidebar').style.width = '500px'
            document.getElementById('zyn-content').style.marginLeft = '505px'
@@ -402,20 +410,20 @@
        } else if (current_file.type_of_file() === CurrentFile.file_type_blob) {
            document.getElementById('zyn-current-file-type').innerText = "Blob";
        } else {
-           alert('todo');
+           _unhandled('_set_current_file: current_file.type_of_file');
        }
 
        if (current_file.is_editable()) {
            if (current_file.mode() === CurrentFile.mode_view) {
-               _set_button_activity('zyn-current-file-button-edit', true);
-               _set_button_activity('zyn-current-file-button-done', false);
-               _set_button_activity('zyn-current-file-button-save', false);
-               _set_button_activity('zyn-current-file-button-cancel', false);
+               _set_button_enabled('zyn-current-file-button-edit', true);
+               _set_button_enabled('zyn-current-file-button-done', false);
+               _set_button_enabled('zyn-current-file-button-save', false);
+               _set_button_enabled('zyn-current-file-button-cancel', false);
            } else if (current_file.mode() === CurrentFile.mode_edit) {
-               _set_button_activity('zyn-current-file-button-edit', false);
-               _set_button_activity('zyn-current-file-button-done', true);
-               _set_button_activity('zyn-current-file-button-save', true);
-               _set_button_activity('zyn-current-file-button-cancel', true);
+               _set_button_enabled('zyn-current-file-button-edit', false);
+               _set_button_enabled('zyn-current-file-button-done', true);
+               _set_button_enabled('zyn-current-file-button-save', true);
+               _set_button_enabled('zyn-current-file-button-cancel', true);
            }
        }
    }
@@ -427,10 +435,10 @@
        document.getElementById('zyn-current-file-type').innerText = "";
        document.getElementById('zyn-current-file-revision').innerText = "";
        document.getElementById('zyn-current-file-encoding').innerText = "";
-       _set_button_activity('zyn-current-file-button-edit', false);
-       _set_button_activity('zyn-current-file-button-done', false);
-       _set_button_activity('zyn-current-file-button-save', false);
-       _set_button_activity('zyn-current-file-button-cancel', false);
+       _set_button_enabled('zyn-current-file-button-edit', false);
+       _set_button_enabled('zyn-current-file-button-done', false);
+       _set_button_enabled('zyn-current-file-button-save', false);
+       _set_button_enabled('zyn-current-file-button-cancel', false);
    }
 
    function _add_notification(source, description)
@@ -499,7 +507,6 @@
        }
 
        if (! _current_file_edited) {
-           console.log('no edits')
            return ;
        }
 
@@ -702,90 +709,6 @@
        }
    }
 
-   function _create_folder_list_element(row, element_data) {
-       row.addEventListener('click', function() { _handle_folder_content_list_item_clicked(
-           element_data['element-type'],
-           element_data['name'],
-           element_data['node-id']);
-       });
-
-       var t = ''
-       if (element_data['element-type'] === 'file') {
-           t = 'File'
-
-           var cell = row.insertCell();
-           cell.innerHTML =
-               '<button'
-               + ' id="zyn-open-file-in-edit-mode"'
-               + ' class="w3-button w3-border"'
-               + ' onclick="(function() { _handle_open_in_edit_mode_button_clicked(event, \'' + element_data['name'] + '\', ' + element_data['node-id'] + '); }) ()"'
-               + ' >Edit</button>';
-
-       } else if (element_data['element-type'] === 'dir') {
-           t = 'Dir'
-           row.insertCell();
-       } else {
-           _unhandled('_create_folder_list_element: element_data["element-type"]: ' + element_data['element-type'])
-           return ;
-       }
-
-       row.insertCell().innerText = t;
-       row.insertCell().innerText = element_data['node-id'];
-       row.insertCell().innerText = element_data['name'];
-       row.style.cursor = 'pointer';
-       row.classList.add('w3-hover-light-gray');
-   }
-
-   function _fetch_and_set_folder_content(path)
-   {
-       _show_loading_indication();
-       zyn_load_folder_contents(path, new Transaction(function (rsp, _) {
-           _hide_loading_indication();
-           var workdir_content = document.getElementById("zyn-workdir-content");
-           var elements = rsp['elements'];
-
-           while (workdir_content.firstChild) {
-               workdir_content.removeChild(workdir_content.firstChild);
-           }
-
-           var content = document.createElement('table');
-           content.id = 'zyn-workdir-content-listing';
-           content.classList.add('w3-table');
-           content.classList.add('w3-bordered');
-
-           var row = content.insertRow(0);
-
-           var cell = document.createElement("th");
-           cell.style.width = '10%';
-           row.appendChild(cell)
-
-           var cell = document.createElement("th");
-           cell.innerText = 'Type';
-           cell.style.width = '10%';
-           row.appendChild(cell)
-
-           var cell = document.createElement("th");
-           cell.innerText = 'Node Id';
-           cell.style.width = '20%';
-           row.appendChild(cell)
-
-           var cell = document.createElement("th");
-           cell.innerText = 'Name';
-           cell.style.width = '60%';
-           row.appendChild(cell)
-
-           for (var i = 0; i < elements.length; i++) {
-               var row = content.insertRow(i + 1);
-               _create_folder_list_element(row, elements[i]);
-           }
-
-           workdir_content.appendChild(content);
-           _sort_workdir_content(content, _sort_workdir_content_by_type);
-
-           workdir_content.style.minHeight = String(workdir_content.scrollHeight + 500) + 'px';
-       }));
-   }
-
    function _handle_load_file_rsp(msg, state)
    {
        _hide_loading_indication();
@@ -814,14 +737,6 @@
    {
        var content_element = document.getElementById('zyn-document-content');
        zyn_render_file_content(content_element, _current_file);
-   }
-
-   function _show_loading_indication() {
-       document.getElementById('zyn-loading-modal').style.display = 'block';
-   }
-
-   function _hide_loading_indication() {
-       document.getElementById('zyn-loading-modal').style.display = 'none';
    }
 
   </script>
