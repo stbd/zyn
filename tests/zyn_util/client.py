@@ -2,12 +2,16 @@ import glob
 import hashlib
 import json
 import logging
-import posixpath
 import os.path
+import posixpath
+import traceback
 
 import zyn_util.errors
 import zyn_util.exception
 import zyn_util.util
+
+
+_REMOTE_PATH_ROOT = '/'
 
 
 class ZynClientException(zyn_util.exception.ZynException):
@@ -100,6 +104,14 @@ class LocalDirectory(LocalFileSystemElement):
     def craete(self, path_data_root):
         os.mkdir(self.path_to_local_file(path_data_root))
 
+    def remove_local(self, path_data):
+        path = self.path_to_local_file(path_data)
+        try:
+            os.rmdir(path)
+        except OSError:
+            print(traceback.format_exc())
+            print('Directory not empty, skipping, path="{}"'.format(path))
+
 
 class FileState:
     def __init__(self, file, path_data):
@@ -168,7 +180,7 @@ class LocalFile(LocalFileSystemElement):
         # dir._revision = rsp.revision todo: add revision to query
         return dir
 
-    def remove(self, path_data):
+    def remove_local(self, path_data):
         os.remove(self.path_to_local_file(path_data))
 
     def _calculate_checksum(self, content):
@@ -281,8 +293,9 @@ class LocalFile(LocalFileSystemElement):
             path_in_remote=self._path_remote
         )
 
-    def sync(self, connection, path_data_root, logger):
+    def sync(self, connection, path_data_root, discard_local_changes, logger):
 
+        synchronized = False
         path_local = self.path_to_local_file(path_data_root)
         if not posixpath.exists(path_local):
             raise ZynClientException('Local file does not exist, path_remote="{}"'.format(
@@ -304,7 +317,8 @@ class LocalFile(LocalFileSystemElement):
                 zyn_util.util.check_server_response(close_rsp)
 
         if open_rsp.revision == self._revision and not has_changes:
-            return
+            pass
+
         elif open_rsp.revision == self._revision and has_changes:
             # If local file is at same level as remote and has changes,
             # push changes to remote
@@ -317,20 +331,28 @@ class LocalFile(LocalFileSystemElement):
             else:
                 raise RuntimeError()
 
+            synchronized = True
+
         elif open_rsp.revision > self._revision and not has_changes:
             # If remote file is newer and file has no local changes,
             # fetch file from remote
             self._download_full_file(connection, path_local, node_id=self._node_id)
+            synchronized = True
 
         elif open_rsp.revision > self._revision and has_changes:
             # If remote file is newer and local file has changes,
-            # this requires some kind of merge
-            raise NotImplementedError(
-                'Both remote and local file have changes, merge is not implemented'
-            )
+            # unless it is allowed to drop local changes, this will require some kind of merge
+            if not discard_local_changes:
+                raise NotImplementedError(
+                    'Both remote and local file have changes, merge is not implemented'
+                )
+            self._download_full_file(connection, path_local, node_id=self._node_id)
+            synchronized = True
 
         else:
             raise NotImplementedError()
+
+        return synchronized
 
 
 class ServerInfo:
@@ -363,7 +385,7 @@ class ZynFilesystemClient:
             json.dump({
                 'server-started': None,
                 'server-id': None,
-                'path-data-directory': path_data_directory,
+                'path-data-directory': os.path.normpath(path_data_directory),
                 'local-filesystem-elements': [],
             }, fp)
 
@@ -406,6 +428,9 @@ class ZynFilesystemClient:
 
     def server_info(self):
         return self._server_info
+
+    def path_to_local_file(self, path_remote):
+        return zyn_util.util.join_paths([self._path_data, path_remote])
 
     def filesystem_element(self, path_in_remote):
         try:
@@ -495,79 +520,157 @@ class ZynFilesystemClient:
         zyn_util.util.check_server_response(rsp)
         return rsp.as_create_rsp()
 
-    def _query_filesystem(self, path):
+    def _fetch_file(self, path_remote, fs_query):
+        file = LocalFile.from_filesystem_query(path_remote, fs_query)
+        if file.exists_locally(self._path_data):
+            raise ZynClientException('Local file already exists, path="{}"'.format(
+                path_remote
+            ))
+
+        print(
+            'Fetching file: path_remote={}, path_data={}, type_of_file={}'.format(
+                path_remote,
+                self._path_data,
+                fs_query.type_of_file,
+            ))
+
+        file.fetch(self._connection, self._path_data)
+        self._local_files[path_remote] = file
+
+    def _fetch_directory(self, path_remote, fs_query):
+        dir = LocalDirectory.from_filesystem_query(path_remote, fs_query)
+        if dir.exists_locally(self._path_data):
+            raise ZynClientException('Local directory already exists, path="{}"'.format(
+                path_remote
+            ))
+
+        print(
+            'Fetching directory: path_remote={}, path_data={}'.format(
+                path_remote,
+                self._path_data,
+            ))
+
+        dir.craete(self._path_data)
+        self._local_files[path_remote] = dir
+
+    def _query_element(self, path):
         rsp = self._connection.query_filesystem(path=path)
         zyn_util.util.check_server_response(rsp)
         return rsp.as_query_filesystem_rsp()
 
-    def fetch(self, path_in_remote):
+    def _query_list(self, path_remote_parent):
+        rsp = self._connection.query_list(path=path_remote_parent)
+        zyn_util.util.check_server_response(rsp)
+        return rsp.as_query_list_rsp()
 
-        rsp = self._query_filesystem(path_in_remote)
-        if rsp.is_directory():
-            dir = LocalDirectory.from_filesystem_query(path_in_remote, rsp)
-            if dir.exists_locally(self._path_data):
-                raise ZynClientException('Local directory already exists, path="{}"'.format(
-                    path_in_remote
-                ))
-            dir.craete(self._path_data)
-            self._local_files[path_in_remote] = dir
+    def fetch(self, path_in_remote, stop_on_error):
 
-        elif rsp.is_file():
-            file = LocalFile.from_filesystem_query(path_in_remote, rsp)
-            if file.exists_locally(self._path_data):
-                raise ZynClientException('Local file already exists, path="{}"'.format(
-                    path_in_remote
-                ))
-            self._log.debug(
-                'Fetching file: path_in_remote={}, path_data={}, type_of_file={}'.format(
-                    path_in_remote,
-                    self._path_data,
-                    rsp.type_of_file,
-                ))
+        print("Fetching, path={}".format(path_in_remote))
 
-            file.fetch(self._connection, self._path_data)
-            self._local_files[path_in_remote] = file
+        elements_fetched = 0
+        query = self._query_element(path_in_remote)
+        if query.is_file():
+            if path_in_remote not in self._local_files:
+                self._fetch_file(path_in_remote, query)
+                elements_fetched += 1
+        elif query.is_directory():
+            dirs = [path_in_remote]
+            if path_in_remote != _REMOTE_PATH_ROOT and path_in_remote not in self._local_files:
+                self._fetch_directory(path_in_remote, query)
+                elements_fetched += 1
+
+            while True:
+                if not dirs:
+                    break
+                dir = dirs.pop()
+                query_list = self._query_list(dir)
+                for element in query_list.elements:
+                    path_remote_element = zyn_util.util.join_paths([dir, element.name])
+
+                    print('Processing element "{}"'.format(
+                        path_remote_element,
+                    ))
+
+                    if path_remote_element in self._local_files:
+                        continue
+
+                    try:
+                        if element.is_file():
+                            rsp = self._query_element(path_remote_element)
+                            self._fetch_file(path_remote_element, rsp)
+                            elements_fetched += 1
+                        elif element.is_directory():
+                            self._fetch_directory(path_remote_element, element)
+                            dirs.append(path_remote_element)
+                            elements_fetched += 1
+                        else:
+                            raise RuntimeError()
+                    except RuntimeError:
+                        raise
+                    except Exception:
+                        if stop_on_error:
+                            raise
+                        print('There was an exception while processing element, path="{}"'.format(
+                            path_remote_element
+                        ))
+                        print(traceback.format_exc())
         else:
             raise RuntimeError()
+        return elements_fetched
 
-    def sync(self, path_in_remote):
+    def sync(self, path_in_remote, stop_on_error, discard_local_changes):
 
-        try:
+        print("Synchronizing, path={}".format(path_in_remote))
+
+        elements_synchronized = 0
+        path_local = zyn_util.util.join_paths([self._path_data, path_in_remote])
+        path_local = os.path.normpath(path_local)
+
+        if os.path.isfile(path_local):
             element = self._local_files[path_in_remote]
-        except KeyError:
-            raise ZynClientException(
-                'Local filesystem elements does not exist, path_in_remote="{}"'.format(
-                    path_in_remote
-                ))
+            if element.sync(self._connection, self._path_data, discard_local_changes, self._log):
+                elements_synchronized += 1
 
-        if not element.is_file():
-            raise ZynClientException(
-                'Synchronizing directories it not supported, path_local="{}"'.format(
-                    path_in_remote
-                ))
+        elif os.path.isdir(path_local):
+            for root, dirs, files in os.walk(path_local):
 
-        path_local = element.path_to_local_file(self._path_data)
-        if not os.path.exists(path_local):
-            raise ZynClientException('Local file does not exist, path_local="{}"'.format(
-                path_local
-            ))
+                for path_file in files:
+                    path_local_file = zyn_util.util.join_paths([root, path_file])
+                    path_local_file = os.path.normpath(path_local_file)
+                    path_remote_file = path_local_file.replace(self._path_data, '')
+                    path_remote_file = zyn_util.util.to_remote_path(path_remote_file)
 
-        local_file_changed = element.has_changes(self._path_data)
-        self._log.debug('Synchronizing: path_local={}, local_file_changed={}'.format(
-            path_local,
-            local_file_changed
-        ))
+                    if path_remote_file not in self._local_files:
+                        continue
 
-        element.sync(self._connection, self._path_data, self._log)
+                    element = self._local_files[path_remote_file]
+                    try:
+                        if element.sync(
+                                self._connection,
+                                self._path_data,
+                                discard_local_changes,
+                                self._log
+                        ):
+                            elements_synchronized += 1
+
+                    except Exception:
+                        if stop_on_error:
+                            raise
+                        print('There was an exception while processing file, path="{}"'.format(
+                            path_remote_file
+                        ))
+                        print(traceback.format_exc())
+
+        else:
+            raise RuntimeError('Unknown filesystem element: "{}"'.format(path_in_remote))
+
+        return elements_synchronized
 
     def list(self, path_parent):
 
         # todo: handle case where node id is used
 
-        rsp = self._connection.query_list(path=path_parent)
-        zyn_util.util.check_server_response(rsp)
-        rsp = rsp.as_query_list_rsp()
-
+        rsp = self._query_list(path_parent)
         local_files = [
             os.path.basename(p)
             for p in glob.glob(zyn_util.util.join_paths([self._path_data, path_parent, '*']))
@@ -590,16 +693,16 @@ class ZynFilesystemClient:
         for element in rsp.elements:
             exists_locally = False
             tracked = False
-            file_path = zyn_util.util.join_paths([path_parent, element.name])
+            element_path = zyn_util.util.join_paths([path_parent, element.name])
 
-            self._log.debug('Processing "{}"'.format(file_path))
+            self._log.debug('Processing "{}"'.format(element_path))
 
-            if file_path in self._local_files:
+            if element_path in self._local_files:
 
-                self._log.debug('"{}" found in local files'.format(file_path))
+                self._log.debug('"{}" found in local elements'.format(element_path))
 
-                file = self._local_files[file_path]
-                if file.exists_locally(self._path_data):
+                local_element = self._local_files[element_path]
+                if local_element.exists_locally(self._path_data):
                     exists_locally = True
                     tracked = True
                     local_files.remove(element.name)
@@ -611,11 +714,10 @@ class ZynFilesystemClient:
 
             elements.append(Element(element, Localfile(exists_locally, tracked)))
 
-        return elements, \
-            [
-                zyn_util.util.join_paths([path_parent, f])
-                for f in local_files
-            ]
+        return elements, [
+            zyn_util.util.join_paths([path_parent, f])
+            for f in local_files
+        ]
 
     def _add(self, element):
         if not element.exists_locally(self._path_data):
@@ -640,7 +742,7 @@ class ZynFilesystemClient:
             raise ZynClientException('"{}" must be directory'.format(element.path_remote()))
 
         self.create_directory(path_in_remote)
-        rsp = self._query_filesystem(path_in_remote)
+        rsp = self._query_element(path_in_remote)
         dir = LocalDirectory.from_filesystem_query(path_in_remote, rsp)
         self._local_files[path_in_remote] = dir
 
@@ -653,13 +755,15 @@ class ZynFilesystemClient:
             raise ZynClientException('"{}" must be file'.format(element.path_remote()))
 
         self.create_file(path_in_remote, type_of_file)
-        rsp = self._query_filesystem(path_in_remote)
+        rsp = self._query_element(path_in_remote)
         file = LocalFile.from_filesystem_query(path_in_remote, rsp)
         file.push(self._connection, self._path_data)
         self._local_files[path_in_remote] = file
 
     def add_tracked_files_to_remote(self):
-        for path_remote, element in self._local_files.items():
+        paths = sorted(self._local_files.keys(), key=lambda x: len(x))
+        for path_remote in paths:
+            element = self._local_files[path_remote]
             if element.is_directory():
                 self.add_directory(path_remote)
             elif element.is_file():
@@ -667,17 +771,37 @@ class ZynFilesystemClient:
             else:
                 raise RuntimeError()
 
-    def remove(self, path_remote, remove_local_file):
+    def find_tracked_elements(self, path_in_remote):
 
-        if path_remote not in self._local_files:
-            raise ZynClientException('File "{}" is not tracked locally'.format(path_remote))
+        elements = []
+        query_element = self._query_element(path_in_remote)
+        if query_element.is_file():
+            elements.append((path_in_remote, query_element.node_id))
+
+        elif query_element.is_directory():
+            query_list = self._query_list(path_in_remote)
+            for element in query_list.elements:
+                element_path = zyn_util.util.join_paths([path_in_remote, element.name])
+                if element.is_file():
+                    elements.append((element_path, element.node_id))
+
+                elif element.is_directory():
+                    elements += self.find_tracked_elements(element_path)
+                else:
+                    raise RuntimeError()
+            elements.append((path_in_remote, query_element.node_id))
+        else:
+            raise RuntimeError()
+        return elements
+
+    def remove(self, path_remote, node_id, remove_local_file, remove_remote_file):
+
+        if remove_remote_file:
+            self._connection.delete(node_id=node_id)
 
         element = self._local_files[path_remote]
-        if not element.is_file():
-            raise NotImplementedError('Removing directory')
-
         if remove_local_file:
-            element.remove(self._path_data)
+            element.remove_local(self._path_data)
 
         del self._local_files[path_remote]
 

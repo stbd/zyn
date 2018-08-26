@@ -21,6 +21,8 @@ PATH_TEMPLATES = os.path.dirname(os.path.abspath(__file__)) + '/web-templates'
 COOKIE_NAME = 'zyn-cookie'
 FILE_TYPE_RANDOM_ACCESS = 'random-access'
 FILE_TYPE_BLOB = 'blob'
+ELEMENT_TYPE_FILE = 'file'
+ELEMENT_TYPE_DIRECTORY = 'dir'
 NOTIFICATION_SOURCE_WEB_SERVER = 'web-server'
 NOTIFICATION_SOURCE_ZYN_SERVER = 'zyn-server'
 
@@ -158,6 +160,41 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             self._tab_id = self._connection.add_web_socket(self)
             self._send_response(msg_type)
             self._log.info("Registered, user_id={}, tab_id={}".format(self._user_id, self._tab_id))
+
+        elif msg_type == 'create':
+
+            element_type = content['type']
+            element_name = content['name']
+            parent = content['parent']
+            self._log.debug('Create, type="{}", parent="{}"'.format(element_type, parent))
+
+            if element_type == ELEMENT_TYPE_FILE:
+                file_type = content['file-type']
+                if file_type == FILE_TYPE_RANDOM_ACCESS:
+                    rsp = self._connection.zyn_connection().create_file_random_access(
+                        element_name,
+                        parent_path=parent
+                    )
+                else:
+                    raise NotImplementedError()
+            elif element_type == ELEMENT_TYPE_DIRECTORY:
+                rsp = self._connection.zyn_connection().create_folder(
+                    element_name,
+                    parent_path=parent
+                )
+            else:
+                raise RuntimeError(element_type)
+
+            self._send_response(msg_type, {})
+
+        elif msg_type == 'delete':
+
+            node_id = content['node-id']
+            self._log.debug('Delete, node-id={}'.format(node_id))
+            rsp = self._connection.zyn_connection().delete(
+                node_id=node_id
+            )
+            self._send_response(msg_type, {})
 
         elif msg_type == 'query-filesystem-element':
 

@@ -1,3 +1,10 @@
+
+function _render_image(mime_type, base64_content) {
+    var html = '<img src="data:' + mime_type + ';';
+    html += 'base64,' + base64_content + '">';
+    return html;
+}
+
 function zyn_render_file_content(content_element, current_file) {
 
     while (content_element.firstChild) {
@@ -10,6 +17,10 @@ function zyn_render_file_content(content_element, current_file) {
         });
         var html = converter.makeHtml(current_file.decoded());
         content_element.innerHTML = html;
+
+    } else if (current_file.file_extension() == 'jpg') {
+        content_element.innerHTML = _render_image("image/jpeg",  btoa(current_file.bytes()));
+
     } else if (current_file.file_extension() == 'pdf') {
 
         var root = document.createElement('div');

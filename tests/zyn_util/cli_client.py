@@ -20,19 +20,12 @@ def _command_completed():
     print('Command completed successfully')
 
 
-def _join_paths(list_of_paths):
-    path = posixpath.normpath('/'.join(list_of_paths))
-    if path.startswith('//'):
-        path = path[1:]
-    return path
-
-
 def _normalise_path(path_original):
     elements = []
 
     path = path_original
     while True:
-        path, e = os.path.split(path)
+        path, e = posixpath.split(path)
         if e != '':
             elements.append(e)
         if e == '' or path == '':
@@ -41,19 +34,20 @@ def _normalise_path(path_original):
     if path != '':
         elements.append('/')
     elements.reverse()
-    return _join_paths(elements)
+    return zyn_util.util.join_paths(elements)
 
 
 class ZynCliClient(cmd.Cmd):
     intro = 'Zyn CLI client, type "help" for help'
     prompt = ' '
 
-    def __init__(self, client, pwd='/'):
+    def __init__(self, client, pwd='/', remote_description=None):
         super(ZynCliClient, self).__init__()
         self._pwd = pwd
         self._client = client
-        self._set_prompt(self._pwd)
         self._log = logging.getLogger(__name__)
+        self._remote_description = remote_description
+        self._set_prompt(self._pwd)
 
     def _parse_args(self, args_str):
         args = args_str.split()
@@ -68,7 +62,7 @@ class ZynCliClient(cmd.Cmd):
         else:
             current_folder = path
 
-        self.prompt = '{}:{} {}$ '.format("127.0.0.1", "1234", current_folder)
+        self.prompt = '{} {}$ '.format(self._remote_description, current_folder)
 
     def _to_absolute_remote_path(self, path):
         path = _normalise_path(path)
@@ -89,27 +83,43 @@ class ZynCliClient(cmd.Cmd):
         # Do nothing
         pass
 
-    def do_pwd(self, args):
+    def do_pwd(self, _):
         'Print current folder'
         print(self._pwd)
 
-    def do_cd(self, args):
-        'Change current directory, [String: path]'
-        args = self._parse_args(args)
-        if len(args) != 1:
-            print('Invalid arguments')
-            return
+    def get_pwd(self):
+        return self._pwd
 
-        path_remote = self._to_absolute_remote_path(args[0])
-        element = self._client.filesystem_element(path_remote)
-        if not element.is_directory():
-            raise zyn_util.client.ZynClientException('Not a folder, path="{}"'.format(path_remote))
+    def _parser_cd(self):
+        parser = argparse.ArgumentParser(prog='cd')
+        parser.add_argument('path', type=str)
+        return parser
+
+    def help_cd(self):
+        print(self._parser_cd().format_help())
+
+    def do_cd(self, args):
+        parser = self._parser_cd()
+        args = vars(parser.parse_args(self._parse_args(args)))
+        path_remote = self._to_absolute_remote_path(args['path'])
+        path_remote = posixpath.normpath(path_remote)
+
+        # todo: maybe just check from local elements if target is known and folder
+        if path_remote == '/':
+            pass
+        else:
+            element = self._client.filesystem_element(path_remote)
+            if not element.is_directory():
+                raise zyn_util.client.ZynClientException(
+                    'Target is not a folder, path="{}"'.format(path_remote)
+                )
+
         self._pwd = path_remote
         self._set_prompt(self._pwd)
 
     def _parser_check_notifications(self):
         parser = argparse.ArgumentParser(prog='check_notifications')
-        parser.add_argument('--timeout', type=int, default=5)
+        parser.add_argument('--timeout', type=int, default=0)
         return parser
 
     def help_check_notifications(self):
@@ -176,8 +186,8 @@ class ZynCliClient(cmd.Cmd):
 
     def _parser_list(self):
         parser = argparse.ArgumentParser(prog='list')
-        parser.add_argument('--path', type=str)
-        parser.add_argument('--show-local-files', action='store_false')  # todo: fixme, use
+        parser.add_argument('-p', '--path', type=str)
+        parser.add_argument('--hide-untracked-files', action='store_true')
         return parser
 
     def help_list(self):
@@ -196,7 +206,7 @@ class ZynCliClient(cmd.Cmd):
         tracked_files, untracked_files = self._client.list(path_remote)
 
         print()
-        print('{:6} {:8} {:12} {}'.format('Type', 'Node Id', 'Local file', 'Name'))
+        print('{:6} {:8} {:14} {}'.format('Type', 'Node Id', 'Local element', 'Name'))
         for f in sorted(tracked_files, key=lambda e: e.remote_file.is_file()):
             name = f.remote_file.name
             type_of = 'file'
@@ -204,31 +214,37 @@ class ZynCliClient(cmd.Cmd):
                 name += '/'
                 type_of = 'dir'
 
-            if f.remote_file.is_file():
-                state = None
-                if f.local_file.exists_locally and f.local_file.tracked:
-                    state = 'Tracked'
-                elif f.local_file.exists_locally and not f.local_file.tracked:
-                    state = 'Conflict'
-                elif not f.local_file.exists_locally and f.local_file.tracked:
-                    state = 'Out of sync'
-                elif not f.local_file.exists_locally and not f.local_file.tracked:
-                    state = 'Not fetched'
-
-                if state is None:
-                    raise RuntimeError()
+            state = None
+            if f.local_file.exists_locally and f.local_file.tracked:
+                state = 'Tracked'
+            elif f.local_file.exists_locally and not f.local_file.tracked:
+                state = 'Conflict'
+            elif not f.local_file.exists_locally and f.local_file.tracked:
+                state = 'Out of sync'
+            elif not f.local_file.exists_locally and not f.local_file.tracked:
+                state = 'Not fetched'
             else:
-                state = ''
+                raise NotImplementedError()
 
-            print('{:<6} {:<8} {:<12} {}'.format(type_of, f.remote_file.node_id, state, name))
+            if state is None:
+                raise RuntimeError()
+
+            print('{:<6} {:<8} {:<14} {}'.format(type_of, f.remote_file.node_id, state, name))
+
+        if args['hide_untracked_files']:
+            return
 
         if len(untracked_files) == 0:
             return
 
         print()
-        print('Untracked files:')
+        print('Untracked elements:')
         for f in untracked_files:
-            print(f)
+            path_local = self._client.path_to_local_file(f)
+            name = os.path.basename(f)
+            if os.path.isdir(path_local):
+                name += '/'
+            print(name)
 
     def _parser_add(self):
         parser = argparse.ArgumentParser(prog='add')
@@ -246,7 +262,7 @@ class ZynCliClient(cmd.Cmd):
         args = vars(parser.parse_args(self._parse_args(args)))
         path = args['path']
         path_remote = self._to_absolute_remote_path(path)
-        path_local = _join_paths([self._client._path_data, path_remote])
+        path_local = zyn_util.util.join_paths([self._client._path_data, path_remote])
 
         if os.path.isfile(path_local):
             if args['random_access']:
@@ -295,7 +311,7 @@ class ZynCliClient(cmd.Cmd):
         group.add_argument('--expiration', type=str)
         group.add_argument('-de', '--disable-expiration', action='store_true')
         parser.add_argument('--expiration-format', type=str, default='%d.%m.%Y')
-        parser.add_argument('-p', '--password', type=str)
+        parser.add_argument('-p', '--password', action='store_true')
         return parser
 
     def help_modify_user(self):
@@ -307,13 +323,13 @@ class ZynCliClient(cmd.Cmd):
 
         # print (args)
 
-        password = args['password']
+        password = None
         expiration = args['expiration']
         disable_expiration = args['disable_expiration']
         username = args['username']
 
         if (
-                password is None
+                args['password'] == False
                 and expiration is None
                 and not disable_expiration
         ):
@@ -329,6 +345,9 @@ class ZynCliClient(cmd.Cmd):
         if disable_expiration:
             expiration = zyn_util.connection.EXPIRATION_NEVER_EXPIRE
 
+        if args['password']:
+            password = getpass.getpass('Password: ')
+
         rsp = self._client.connection().modify_user(
             username=username,
             expiration=expiration,
@@ -339,7 +358,8 @@ class ZynCliClient(cmd.Cmd):
 
     def _parser_fetch(self):
         parser = argparse.ArgumentParser(prog='fetch')
-        parser.add_argument('path', type=str)
+        parser.add_argument('-p', '--path', type=str, default='/')
+        parser.add_argument('-s', '--stop-on-error', action='store_true')
         return parser
 
     def help_fetch(self):
@@ -351,32 +371,14 @@ class ZynCliClient(cmd.Cmd):
 
         path = args['path']
         path_remote = self._to_absolute_remote_path(path)
-
-        print('Fetching, path={}'.format(path_remote))
-
-        self._client.fetch(path_remote)
-
-        element = self._client.filesystem_element(path_remote)
-
-        if element.is_file():
-            print('File "{}" (Node Id: {}, revision: {}) fetched to "{}" successfully'.format(
-                element.path_remote,
-                element.node_id,
-                element.revision,
-                element.path_local
-            ))
-        elif element.is_directory():
-            print('Directory "{}" (Node Id: {}) fetched to "{}" successfully'.format(
-                element.path_remote,
-                element.node_id,
-                element.path_local
-            ))
-        else:
-            raise RuntimeError()
+        num_fetched = self._client.fetch(path_remote, args['stop_on_error'])
+        print("Fetched {} filesystem elements".format(num_fetched))
 
     def _parser_sync(self):
         parser = argparse.ArgumentParser(prog='sync')
-        parser.add_argument('path', type=str)
+        parser.add_argument('-p', '--path', type=str, default='/')
+        parser.add_argument('-s', '--stop-on-error', action='store_true')
+        parser.add_argument('-dl', '--discard-local-changes', action='store_true')
         return parser
 
     def help_sync(self):
@@ -386,16 +388,20 @@ class ZynCliClient(cmd.Cmd):
         parser = self._parser_sync()
         args = vars(parser.parse_args(self._parse_args(args)))
         path_remote = self._to_absolute_remote_path(args['path'])
-
-        self._log.debug('Synchronizing, path={}'.format(path_remote))
-        self._client.sync(path_remote)
-        element = self._client.filesystem_element(path_remote)
-        print('File {} synchronized to revision {}'.format(path_remote, element.revision))
+        num_sync = self._client.sync(
+            path_remote,
+            args['stop_on_error'],
+            args['discard_local_changes']
+        )
+        print('Done')
+        print("Synchronized {} filesystem elements".format(num_sync))
+        return num_sync
 
     def _parser_remove(self):
         parser = argparse.ArgumentParser(prog='remove')
         parser.add_argument('path', type=str)
         parser.add_argument('-dl', '--delete-local-file', action="store_true")
+        parser.add_argument('-dr', '--delete-remote-file', action="store_true")
         return parser
 
     def help_remove(self):
@@ -405,21 +411,31 @@ class ZynCliClient(cmd.Cmd):
         parser = self._parser_remove()
         args = vars(parser.parse_args(self._parse_args(args)))
         path_remote = self._to_absolute_remote_path(args['path'])
-        delete_local_file = False
+        delete_local_file = args['delete_local_file']
+        delete_remote_file = args['delete_remote_file']
 
-        if args['delete_local_file']:
-            answer = input('Delete local file from file system? yes/no: ')
-            if answer.strip().lower() == 'yes':
-                delete_local_file = True
-            else:
-                print('Skipping deletion')
+        elements = self._client.find_tracked_elements(path_remote)
+        if not elements:
+            raise zyn_util.client.ZynClientException(
+                'No filesystem elements found, path="{}"'.format(path_remote)
+            )
 
-        self._client.remove(path_remote, delete_local_file)
+        print('Following filesystem elements will be deleted:')
+        for e in elements:
+            print('Node Id: {}, Path: "{}"'.format(e[1], e[0]))
 
-    def do_exit(self, _):
-        'Close connection and exit client'
-        self._client.disconnect()
-        sys.exit(0)
+        print('Delete local file: "{}", Delete remote file: "{}"'.format(
+            delete_local_file,
+            delete_remote_file
+        ))
+
+        answer = input('Is this ok? yes/no: ')
+        if answer.strip().lower() != 'yes':
+            print('Canceling')
+            return
+
+        for e in elements:
+            self._client.remove(e[0], e[1], delete_local_file, delete_remote_file)
 
 
 def main():
@@ -527,10 +543,13 @@ def main():
             answer = input('yes/no? ')
             if answer.strip().lower() == 'yes':
                 client.add_tracked_files_to_remote()
+                print('Done')
             else:
                 client.remove_local_files()
+                print('Removing local files from tracked files')
 
-    cli = ZynCliClient(client)
+    remote_description = '{}:{}'.format(args['remote-address'], args['remote-port'])
+    cli = ZynCliClient(client, remote_description=remote_description)
     while True:
         try:
             cli.cmdloop()

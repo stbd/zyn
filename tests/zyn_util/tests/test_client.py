@@ -1,7 +1,9 @@
+import io
 import glob
 import os
 import os.path
 import random
+import sys
 
 import zyn_util.tests.common
 import zyn_util.errors
@@ -9,11 +11,7 @@ import zyn_util.client
 import zyn_util.cli_client
 
 
-def _join_paths(path_1, path_2):
-    return '{}/{}'.format(path_1, path_2)
-
-
-def _join_paths_(list_of_paths):
+def _join_paths(list_of_paths):
     path = os.path.normpath('/'.join(list_of_paths))
     if path.startswith('//'):
         path = path[1:]
@@ -27,28 +25,33 @@ class ClientState:
         self.path_data = path_data
         self.client = zyn_client
 
-    def validate_directory(self, path_in_remote, expected_child_elements=[]):
-        path_local = _join_paths_([self.path_data, path_in_remote])
-        assert os.path.exists(path_local)
-        local_children = [
-            os.path.basename(p)
-            for p in glob.glob(_join_paths_([path_local, '*']))
-        ]
-        assert sorted(local_children) == sorted(expected_child_elements)
+    def validate_local_data(self, expected_elements):
+        elements = \
+                   glob.glob(_join_paths([self.path_data, '/**/*'])) \
+                   + glob.glob(_join_paths([self.path_data, '/*']))
 
-    def validate_file_exists(self, path_in_remote, expect_not_to_exists=False):
-        path_local = _join_paths(self.path_data, path_in_remote)
-        if expect_not_to_exists:
-            assert not os.path.exists(path_local)
-        else:
-            assert os.path.exists(path_local)
+        if len(elements) != len(expected_elements):
+            print('Number of filesystem elements do not match')
+            print('Expected: {}, found: {}'.format(len(elements), len(expected_elements)))
+        assert len(elements) == len(expected_elements)
+
+        for e in elements:
+            path_zyn = e.replace(self.path_data, '')
+            assert path_zyn in expected_elements
+            desc = expected_elements[path_zyn]
+            if os.path.isdir(e):
+                assert desc['type'] == 'd'
+            elif os.path.isfile(e):
+                assert desc['type'] == 'f'
+            else:
+                assert not 'Invalid file type'
 
     def validate_text_file_content(self, path_in_remote, expected_text_content=None):
         expected_content = bytearray()
         if expected_text_content is not None:
             expected_content = expected_text_content.encode('utf-8')
 
-        path_local = _join_paths(self.path_data, path_in_remote)
+        path_local = _join_paths([self.path_data, path_in_remote])
         assert os.path.exists(path_local)
         content = open(path_local, 'rb').read()
         if content != expected_content:
@@ -62,20 +65,22 @@ class ClientState:
         assert open(path_local, 'rb').read() == expected_content
 
     def write_local_file_text(self, path_in_remote, text_content):
-        path_file = _join_paths(self.path_data, path_in_remote)
+        path_file = _join_paths([self.path_data, path_in_remote])
         assert os.path.exists(path_file)
         data = text_content.encode('utf-8')
         open(path_file, 'wb').write(data)
 
     def create_directory(self, path_remote):
-        path_local = _join_paths(self.path_data, path_remote)
+        path_local = _join_paths([self.path_data, path_remote])
         os.makedirs(path_local)
+        return path_remote
 
     def create_local_file(self, path_remote, content=None):
-        path_local = _join_paths_([self.path_data, path_remote])
+        path_local = _join_paths([self.path_data, path_remote])
         open(path_local, 'w').close()
         if content is not None:
             self.write_local_file_text(path_remote, content)
+        return path_remote
 
 
 class TestClients(zyn_util.tests.common.TestCommon):
@@ -130,273 +135,412 @@ class TestClients(zyn_util.tests.common.TestCommon):
 
 
 class TestClient(TestClients):
+    def _cli_client(self, number_of_clients=1):
+        if number_of_clients == 1:
+            client_state, = self._start_server_and_create_number_of_clients(number_of_clients)
+            return client_state, zyn_util.cli_client.ZynCliClient(client_state.client)
+        else:
+            client_states = self._start_server_and_create_number_of_clients(number_of_clients)
+            return [(s, zyn_util.cli_client.ZynCliClient(s.client)) for s in client_states]
+
+    def _params(self, params):
+        params = [p for p in params if p]
+        if len(params) > 1:
+            return ' '.join(params)
+        else:
+            return params[0]
+
+    def _to_filenames(self, elements):
+        return [e.split('/')[-1] for e in elements]
+
+    def _create_directory(self, cli, path):
+        cli.do_create_directory(path)
+        return path
+
+    def _create_file(self, cli, path, create_parameters=None):
+        cli.do_create_file(self._params([create_parameters, path]))
+        return path
+
+    def _create_directory_and_fetch(self, cli, path):
+        cli.do_create_directory(path)
+        cli.do_fetch('-p ' + path)
+        return path
+
+    def _create_file_and_fetch(self, cli, path, create_parameters=None):
+        cli.do_create_file(self._params([create_parameters, path]))
+        cli.do_fetch('-p ' + path)
+        return path
+
+    def _create_file_and_add(self, state, cli, path, add_parameters=None, content=None):
+        state.create_local_file(path, content)
+        cli.do_add(self._params([add_parameters, path]))
+        return path
+
+    def _validate_tracked_files(self, state, path, expected_files):
+        tracked_files, _ = state.client.list(path)
+        tracked_files_names = sorted([f.remote_file.name for f in tracked_files])
+        expected_files = sorted(expected_files)
+        assert len(tracked_files_names) == len(expected_files)
+        if tracked_files_names != expected_files:
+            print('Expected files do not match tracked files')
+            print('Expected')
+            print(expected_files)
+            print('Tracked')
+            print(tracked_files_names)
+            assert False
+
+    def _write_to_stdin(self, content):
+        sys.stdin = io.StringIO(content)
+
     def test_resume_client(self):
-        data_1 = 'data'
-        data_2 = 'datazxcc'
-        directory_name, path_directory = self._name_to_remote_path('dir')
-        filename, path_file = self._name_to_remote_path('file-1', path_directory)
+        state_1, cli = self._cli_client()
+        path_dir = self._create_directory_and_fetch(cli, "/dir")
+        path_file_1 = self._create_file_and_fetch(cli, "/dir/file", '-ra')
+        path_file_2 = self._create_file_and_fetch(cli, "/file-1", '-ra')
+        state_1.client.store()
+        state_1.validate_local_data({
+            path_dir: {'type': 'd'},
+            path_file_1: {'type': 'f'},
+            path_file_2: {'type': 'f'},
+        })
 
-        client_state_1 = self._start_server_and_create_client(1)
-        client_state_1.client.create_directory(path_directory)
-        client_state_1.client.create_random_access_file(path_file)
-        client_state_1.client.fetch(path_directory)
-        client_state_1.client.fetch(path_file)
-
-        client_state_1.validate_directory(path_directory, [filename])
-        client_state_1.write_local_file_text(path_file, data_1)
-        client_state_1.client.sync(path_file)
-
-        client_state_1.client.store()
-
-        client_state_2 = self._create_client(1, False)
-        tracked_files, _ = client_state_2.client.list('/')
-        self.assertEqual(len(tracked_files), 1)
-        self._validate_tracked_fs_element(
-            tracked_files,
-            directory_name,
-            exists_locally=True,
-            tracked=True
-        )
-
-        client_state_2.write_local_file_text(path_file, data_2)
-        client_state_2.client.sync(path_file)
+        state_2 = self._create_client(1, False)
+        self._validate_tracked_files(state_2, '/', self._to_filenames([path_dir, path_file_2]))
+        self._validate_tracked_files(state_2, path_dir, self._to_filenames([path_file_1]))
 
     def test_validating_server(self):
-        client_state_1 = self._start_server_and_create_client(1)
-
-        self.assertFalse(client_state_1.client.is_server_info_initialized())
-        client_state_1.client.initialize_server_info()
-        self.assertTrue(client_state_1.client.is_server_info_initialized())
-        client_state_1.client.store()
-
-        client_state_2 = self._create_client(1, False)
-        self.assertTrue(client_state_2.client.is_server_info_initialized())
-        self.assertTrue(client_state_2.client.is_connected_to_same_server())
-
-        # todo: add case where server is restarted to verify that it is noticed
-
-    def test_edit_fetch_random_access_file(self):
-        client_state_1, client_state_2 = self._start_server_and_create_number_of_clients(2)
-        path_in_remote = '/test_file'
-        data = 'data'
-
-        client_state_1.client.create_random_access_file(path_in_remote)
-        client_state_1.client.fetch(path_in_remote)
-        client_state_1.validate_text_file_content(path_in_remote, None)
-        client_state_1.write_local_file_text(path_in_remote, data)
-        client_state_1.client.sync(path_in_remote)
-
-        client_state_2.client.fetch(path_in_remote)
-        client_state_2.validate_text_file_content(path_in_remote, data)
-
-    def test_sync_random_access_file_after_file_already_fetched(self):
-        client_state_1, client_state_2 = self._start_server_and_create_number_of_clients(2)
-        path_in_remote = '/test_file'
-        data_1 = 'data'
-
-        client_state_1.client.create_random_access_file(path_in_remote)
-        client_state_1.client.fetch(path_in_remote)
-        client_state_2.client.fetch(path_in_remote)
-
-        client_state_1.write_local_file_text(path_in_remote, data_1)
-        client_state_1.client.sync(path_in_remote)
-        client_state_2.client.sync(path_in_remote)
-
-    def test_edit_fetch_blob_file(self):
-        client_state_1, client_state_2 = self._start_server_and_create_number_of_clients(2)
-        path_in_remote = '/test_file'
-        data = 'data'
-
-        client_state_1.client.create_blob_file(path_in_remote)
-        client_state_1.client.fetch(path_in_remote)
-        client_state_1.validate_text_file_content(path_in_remote, None)
-        client_state_1.write_local_file_text(path_in_remote, data)
-        client_state_1.client.sync(path_in_remote)
-
-        client_state_2.client.fetch(path_in_remote)
-        client_state_2.validate_text_file_content(path_in_remote, data)
-
-    def _validate_tracked_fs_element(self, tracked_files, name, exists_locally, tracked):
-        for f in tracked_files:
-            if f.remote_file.name != name:
-                continue
-            self.assertEqual(f.local_file.tracked, tracked)
-            self.assertEqual(f.local_file.exists_locally, exists_locally)
-            return
-        self.assertFalse('Tracked filesystem element not found, name=\"{}\"'.format(name))
-
-    def _name_to_remote_path(self, filename, path_parent='/'):
-        path = _join_paths_([path_parent, filename])
-        return filename, path
-
-    def test_list(self):
-        client_state_1 = self._start_server_and_create_client(1)
-        remote_tracked_1, path_remote_tracked_1 = self._name_to_remote_path('tracked_file-1')
-        remote_tracked_2, path_remote_tracked_2 = self._name_to_remote_path('tracked_file-2')
-        remote_tracked_3, path_remote_tracked_3 = self._name_to_remote_path('tracked_file-3')
-        remote_untracked_1, path_remote_untracked_1 = self._name_to_remote_path('untracked_file-1')
-        remote_dir, path_remote_dir = self._name_to_remote_path('dir')
-
-        client_state_1.client.create_random_access_file(path_remote_tracked_1)
-        client_state_1.client.fetch(path_remote_tracked_1)
-
-        client_state_1.client.create_random_access_file(path_remote_tracked_2)
-        client_state_1.create_local_file(path_remote_tracked_2)
-
-        client_state_1.client.create_random_access_file(path_remote_tracked_3)
-
-        client_state_1.client.create_directory(path_remote_dir)
-        client_state_1.client.fetch(path_remote_dir)
-
-        client_state_1.create_local_file(path_remote_untracked_1)
-
-        tracked_files, untracked_files = client_state_1.client.list('/')
-        self.assertEqual(len(tracked_files), 4)
-        self._validate_tracked_fs_element(
-            tracked_files, remote_tracked_1, exists_locally=True, tracked=True)
-        self._validate_tracked_fs_element(
-            tracked_files, remote_tracked_2, exists_locally=True, tracked=False)
-        self._validate_tracked_fs_element(
-            tracked_files, remote_tracked_3, exists_locally=False, tracked=False)
-        self._validate_tracked_fs_element(
-            tracked_files, remote_dir, exists_locally=True, tracked=True)
-        self.assertEqual(len(untracked_files), 1)
-        self.assertTrue(path_remote_untracked_1 in untracked_files)
-
-    def test_add_random_access_file(self):
-        client_state = self._start_server_and_create_client(1)
-        path_remote_1 = '/file-1'
-        path_remote_2 = '/file-2'
-
-        client_state.create_local_file(path_remote_1)
-        client_state.client.add_file(path_remote_1, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
-
-        client_state.create_local_file(path_remote_2)
-        client_state.write_local_file_text(path_remote_2, 'Hello')
-        client_state.client.add_file(path_remote_2, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
+        state_1 = self._start_server_and_create_client(1)
+        self.assertFalse(state_1.client.is_server_info_initialized())
+        state_1.client.initialize_server_info()
+        self.assertTrue(state_1.client.is_server_info_initialized())
+        state_1.client.store()
+        self._restart_server_and_replace_connection(state_1)
+        self.assertTrue(state_1.client.is_server_info_initialized())
+        self.assertFalse(state_1.client.is_connected_to_same_server())
 
     def test_add_tracked_files_to_remote_after_restart(self):
-        client_state = self._start_server_and_create_client(1)
-        filename_1, path_remote_1 = self._name_to_remote_path('file-1')
-        filename_2, path_remote_2 = self._name_to_remote_path('file-2')
+        state_1, cli = self._cli_client()
+        path_dir = self._create_directory_and_fetch(cli, "/dir")
+        path_file_1 = self._create_file_and_fetch(cli, "/dir/file-1", '-ra')
+        path_file_2 = self._create_file_and_fetch(cli, "/dir/file-2", '-ra')
+        path_file_3 = self._create_file_and_fetch(cli, "/file", '-ra')
 
-        client_state.create_local_file(path_remote_1)
-        client_state.write_local_file_text(path_remote_1, 'data-1')
-        client_state.create_local_file(path_remote_2)
-        client_state.write_local_file_text(path_remote_2, 'data-2')
-        client_state.client.add_file(path_remote_1, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
-        client_state.client.add_file(path_remote_2, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
+        self._restart_server_and_replace_connection(state_1)
+        state_1.client.add_tracked_files_to_remote()
+        self._validate_tracked_files(state_1, '/', self._to_filenames([path_dir, path_file_3]))
+        self._validate_tracked_files(
+            state_1,
+            path_dir,
+            self._to_filenames([path_file_1, path_file_2])
+        )
 
-        self._restart_server_and_replace_connection(client_state)
-        client_state.client.add_tracked_files_to_remote()
+    def test_create_random_access_file_and_add(self):
+        state, cli = self._cli_client()
+        self._create_file_and_add(state, cli, '/file', '-ra')
 
-        tracked_files, _ = client_state.client.list('/')
+    def test_create_blob_file_and_add(self):
+        state, cli = self._cli_client()
+        self._create_file_and_add(state, cli, '/file', '-b')
+
+    def test_create_random_access_file_and_fetch(self):
+        state, cli = self._cli_client()
+        self._create_file_and_fetch(cli, "/file", '-ra')
+
+    def test_create_blob_file_and_fetch(self):
+        state, cli = self._cli_client()
+        self._create_file_and_fetch(cli, "/file", '-b')
+
+    def test_change_directory(self):
+        state, cli = self._cli_client()
+        path_dir_1 = self._create_directory_and_fetch(cli, "/dir-1")
+        path_dir_2 = self._create_directory_and_fetch(cli, "/dir-2")
+        self.assertEqual(cli.get_pwd(), '/')
+        cli.do_cd(path_dir_1)
+        self.assertEqual(cli.get_pwd(), path_dir_1)
+        cli.do_cd('..')
+        self.assertEqual(cli.get_pwd(), '/')
+        cli.do_cd(path_dir_2)
+        self.assertEqual(cli.get_pwd(), path_dir_2)
+        cli.do_cd('../' + path_dir_1)
+        self.assertEqual(cli.get_pwd(), path_dir_1)
+
+    def test_remove_file_leave_local_file_and_remote(self):
+        state, cli = self._cli_client()
+        path_file = self._create_file_and_fetch(cli, "/file", '-b')
+        self._write_to_stdin('yes')
+        cli.do_remove(self._params([path_file]))
+        state.validate_local_data({path_file: {'type': 'f'}})
+        self._validate_tracked_files(state, '/', self._to_filenames([path_file]))
+
+    def test_remove_file_and_local_file_leave_remote(self):
+        state, cli = self._cli_client()
+        path_file = self._create_file_and_fetch(cli, "/file", '-b')
+        self._write_to_stdin('yes')
+        cli.do_remove(self._params([path_file, '-dl']))
+        state.validate_local_data({})
+        self._validate_tracked_files(state, '/', self._to_filenames([path_file]))
+
+    def test_remove_file_and_remote_leave_local(self):
+        state, cli = self._cli_client()
+        path_file = self._create_file_and_fetch(cli, "/file", '-b')
+        self._write_to_stdin('yes')
+        cli.do_remove(self._params([path_file, '-dr']))
+        state.validate_local_data({path_file: {'type': 'f'}})
+        self._validate_tracked_files(state, '/', [])
+
+    def test_remove_directory_with_elements(self):
+        state, cli = self._cli_client()
+        path_dir = self._create_directory_and_fetch(cli, '/dir-1')
+        self._create_directory_and_fetch(cli, '/dir-1/dir-2')
+        self._create_file_and_fetch(cli, "/dir-1/file-1", '-b')
+        self._create_file_and_fetch(cli, "/dir-1/file-2", '-b')
+        self._create_file_and_fetch(cli, "/dir-1/dir-2/file", '-b')
+        path_file_root = self._create_file_and_fetch(cli, "/file-root", '-b')
+
+        self._write_to_stdin('yes')
+        cli.do_remove(self._params([path_dir, '-dl', '-dr']))
+        state.validate_local_data({path_file_root: {'type': 'f'}})
+        self._validate_tracked_files(state, '/', self._to_filenames([path_file_root]))
+
+    def test_remove_directory_leaves_local_if_not_empty(self):
+        state, cli = self._cli_client()
+        path_dir = self._create_directory_and_fetch(cli, '/dir')
+        self._create_directory_and_fetch(cli, '/dir/file')
+        path_untracked = state.create_local_file('/dir/local')
+
+        self._write_to_stdin('yes')
+        cli.do_remove(self._params([path_dir, '-dl', '-dr']))
+        state.validate_local_data({
+            path_dir: {'type': 'd'},
+            path_untracked: {'type': 'f'},
+        })
+        self._validate_tracked_files(state, '/', [])
+
+    def test_sync_all_with_changes(self):
+        data = 'qwerty'
+        state, cli = self._cli_client()
+        self._create_directory_and_fetch(cli, '/dir-1')
+        self._create_directory_and_fetch(cli, '/dir-2')
+        path_file_1 = self._create_file_and_fetch(cli, '/dir-1/file-1', '-ra')
+        path_file_2 = self._create_file_and_fetch(cli, '/dir-1/file-2', '-ra')
+        path_file_3 = self._create_file_and_fetch(cli, '/dir-2/file', '-ra')
+
+        state.write_local_file_text(path_file_1, data)
+        state.write_local_file_text(path_file_2, data)
+        state.write_local_file_text(path_file_3, '')
+        self.assertEqual(cli.do_sync(''), 2)
+
+    def test_sync_random_access_file(self):
+        state, cli = self._cli_client()
+        self._create_file_and_fetch(cli, '/file-1', '-ra')
+        path_file_2 = self._create_file_and_fetch(cli, '/file-3', '-ra')
+        state.write_local_file_text(path_file_2, 'data')
+        self.assertEqual(cli.do_sync('-p ' + path_file_2), 1)
+
+    def test_sync_blob_file(self):
+        state, cli = self._cli_client()
+        self._create_file_and_fetch(cli, '/file-1', '-b')
+        path_file_2 = self._create_file_and_fetch(cli, '/file-3', '-b')
+        state.write_local_file_text(path_file_2, 'data')
+        self.assertEqual(cli.do_sync('-p ' + path_file_2), 1)
+
+    def test_sync_directory(self):
+        data = 'qwerty'
+        state, cli = self._cli_client()
+        path_dir_1 = self._create_directory_and_fetch(cli, '/dir-1')
+        self._create_directory_and_fetch(cli, '/dir-2')
+        path_file_1 = self._create_file_and_fetch(cli, '/dir-1/file-1', '-ra')
+        path_file_2 = self._create_file_and_fetch(cli, '/dir-1/file-2', '-ra')
+        path_file_3 = self._create_file_and_fetch(cli, '/dir-2/file', '-ra')
+        path_file_4 = self._create_file_and_fetch(cli, '/file-root', '-ra')
+
+        state.write_local_file_text(path_file_1, data)
+        state.write_local_file_text(path_file_2, data)
+        state.write_local_file_text(path_file_3, data)
+        state.write_local_file_text(path_file_4, data)
+        self.assertEqual(cli.do_sync('-p ' + path_dir_1), 2)
+
+    def test_sync_between_multiple_clients(self):
+        data_1 = '1111111111'
+        data_2 = '2222222222'
+        [(state_1, cli_1), (state_2, cli_2)] = self._cli_client(2)
+        self._create_directory_and_fetch(cli_1, '/dir-1')
+        path_file_1 = self._create_file_and_fetch(cli_1, '/dir-1/file-1', '-ra')
+        self._create_file_and_fetch(cli_1, '/dir-1/file-2', '-ra')
+
+        state_1.write_local_file_text(path_file_1, data_1)
+        self.assertEqual(cli_1.do_sync(''), 1)
+
+        cli_2.do_fetch('')
+        state_2.validate_text_file_content(path_file_1, data_1)
+
+        state_2.write_local_file_text(path_file_1, data_2)
+        self.assertEqual(cli_2.do_sync(''), 1)
+
+        self.assertEqual(cli_1.do_sync(''), 1)
+        state_1.validate_text_file_content(path_file_1, data_2)
+
+    def _init_two_clients_into_state_where_one_file_conflicts(self):
+        data_1 = '1111'
+        data_2 = '2222'
+        [(state_1, cli_1), (state_2, cli_2)] = self._cli_client(2)
+        path_file_1 = self._create_file_and_fetch(cli_1, '/file-1', '-ra')
+        path_file_2 = self._create_file_and_fetch(cli_1, '/file-2', '-ra')
+        path_file_3 = self._create_file_and_fetch(cli_1, '/file-3', '-ra')
+
+        cli_2.do_fetch('')
+
+        state_1.write_local_file_text(path_file_1, data_1)
+        state_1.write_local_file_text(path_file_2, data_1)
+        state_1.write_local_file_text(path_file_3, data_1)
+        cli_1.do_sync('')
+
+        # path_file_2 now has edits on both sides
+        state_2.write_local_file_text(path_file_2, data_2)
+
+        return [(state_1, cli_1), (state_2, cli_2)], path_file_2, [data_1, data_2]
+
+    def test_sync_error_does_not_stop_processing(self):
+        [(state_1, cli_1), (state_2, cli_2)], _, _ = \
+            self._init_two_clients_into_state_where_one_file_conflicts()
+
+        self.assertEqual(cli_2.do_sync(''), 2)
+
+    def test_sync_error_stops_processing(self):
+        [(state_1, cli_1), (state_2, cli_2)], _, _ = \
+            self._init_two_clients_into_state_where_one_file_conflicts()
+
+        with self.assertRaises(NotImplementedError):
+            cli_2.do_sync('--stop-on-error')
+
+    def test_sync_discard_local_changes(self):
+        [(state_1, cli_1), (state_2, cli_2)], path_file, [data, _] = \
+            self._init_two_clients_into_state_where_one_file_conflicts()
+
+        self.assertEqual(cli_2.do_sync('--discard-local-changes'), 3)
+        state_2.validate_text_file_content(path_file, data)
+
+    def test_fetch_all(self):
+        state, cli = self._cli_client()
+        path_dir_1 = self._create_directory(cli, '/dir-1')
+        path_dir_2 = self._create_directory(cli, '/dir-2')
+        path_file_1 = self._create_file(cli, '/dir-1/file-1', '-ra')
+        path_file_2 = self._create_file(cli, '/dir-1/file-2', '-ra')
+        path_file_3 = self._create_file(cli, '/dir-2/file', '-ra')
+        path_file_4 = self._create_file(cli, '/root-file', '-ra')
+
+        cli.do_fetch('')
+        state.validate_local_data({
+            path_dir_1: {'type': 'd'},
+            path_dir_2: {'type': 'd'},
+            path_file_1: {'type': 'f'},
+            path_file_2: {'type': 'f'},
+            path_file_3: {'type': 'f'},
+            path_file_4: {'type': 'f'},
+        })
+
+    def test_fetch_directory(self):
+        state, cli = self._cli_client()
+        path_dir_1 = self._create_directory(cli, '/dir-1')
+        self._create_directory(cli, '/dir-2')
+        path_file_1 = self._create_file(cli, '/dir-1/file-1', '-ra')
+        path_file_2 = self._create_file(cli, '/dir-1/file-2', '-ra')
+        self._create_file(cli, '/dir-2/file', '-ra')
+        self._create_file(cli, '/root-file', '-ra')
+
+        cli.do_fetch('-p ' + path_dir_1)
+        state.validate_local_data({
+            path_dir_1: {'type': 'd'},
+            path_file_1: {'type': 'f'},
+            path_file_2: {'type': 'f'},
+        })
+
+    def test_fetch_file(self):
+        state, cli = self._cli_client()
+        self._create_directory(cli, '/dir-1')
+        self._create_file(cli, '/dir-1/file', '-ra')
+        path_file_2 = self._create_file(cli, '/file-1', '-ra')
+        self._create_file(cli, '/file-2', '-ra')
+
+        cli.do_fetch('-p ' + path_file_2)
+        state.validate_local_data({
+            path_file_2: {'type': 'f'},
+        })
+
+    def test_fetch_only_new_elements(self):
+        state, cli = self._cli_client()
+        path_dir_1 = self._create_directory(cli, '/dir-1')
+        path_file_1 = self._create_file(cli, '/dir-1/file', '-ra')
+        path_file_2 = self._create_file(cli, '/file-1', '-ra')
+        path_file_3 = self._create_file(cli, '/file-2', '-ra')
+
+        cli.do_fetch('')
+        state.validate_local_data({
+            path_dir_1: {'type': 'd'},
+            path_file_1: {'type': 'f'},
+            path_file_2: {'type': 'f'},
+            path_file_3: {'type': 'f'},
+        })
+
+        path_dir_2 = self._create_directory(cli, '/dir-2')
+        path_file_4 = self._create_file(cli, '/file-3', '-ra')
+        path_file_5 = self._create_file(cli, '/dir-2/file-4', '-ra')
+
+        cli.do_fetch('')
+        state.validate_local_data({
+            path_dir_1: {'type': 'd'},
+            path_dir_2: {'type': 'd'},
+            path_file_1: {'type': 'f'},
+            path_file_2: {'type': 'f'},
+            path_file_3: {'type': 'f'},
+            path_file_4: {'type': 'f'},
+            path_file_5: {'type': 'f'},
+        })
+
+    def test_open_file(self): pass  # Only for random access
+
+    def _find_from_tracked_files(self, tracked_files, path_element):
+        for t in tracked_files:
+            if t.remote_file.name == self._to_filenames([path_element])[0]:
+                return t
+        self.assertFalse('Tracked file not found')
+
+    def _validate_tracked_file_local_status(self, tracked_file, exists_locally, tracked):
+        self.assertEqual(tracked_file.local_file.exists_locally, exists_locally)
+        self.assertEqual(tracked_file.local_file.tracked, tracked)
+
+    def test_list(self):
+        state, cli = self._cli_client()
+        self._create_directory_and_fetch(cli, '/dir-1')
+        path_dir_2 = self._create_directory(cli, '/dir-2')
+        self._create_file_and_fetch(cli, '/file-1', '-ra')
+        self._create_file_and_fetch(cli, '/file-2', '-ra')
+        state.create_directory('/dir-2')
+        path_untacked_dir_2 = state.create_directory('/dir-3')
+        path_untacked_file_1 = state.create_local_file('/file-3')
+
+        tracked_files, untracked_files = state.client.list('/')
+        cli.do_list('')
+        self.assertEqual(len(tracked_files), 4)
+        expected_untracked_elements = [path_untacked_dir_2, path_untacked_file_1]
+        self.assertEqual(sorted(untracked_files), sorted(expected_untracked_elements))
+        self._validate_tracked_file_local_status(
+            self._find_from_tracked_files(tracked_files, path_dir_2),
+            True,
+            False,
+        )
+
+    def test_list_in_subfolder(self):
+        state, cli = self._cli_client()
+        path_dir_1 = self._create_directory_and_fetch(cli, '/dir-1')
+        self._create_file_and_fetch(cli, '/dir-1/file-1', '-ra')
+        self._create_file_and_fetch(cli, '/dir-1/file-2', '-ra')
+        self._create_file_and_fetch(cli, '/file', '-ra')
+        path_untacked_file_1 = state.create_local_file('/dir-1/file-3')
+
+        tracked_files, untracked_files = state.client.list(path_dir_1)
+        cli.do_list('-p ' + path_dir_1)
+
         self.assertEqual(len(tracked_files), 2)
-        self._validate_tracked_fs_element(
-            tracked_files, filename_1, exists_locally=True, tracked=True)
-        self._validate_tracked_fs_element(
-            tracked_files, filename_1, exists_locally=True, tracked=True)
-
-    def test_reconnecting_to_server(self):
-        client_state = self._start_server_and_create_client(1)
-        filename_1, path_remote_1 = self._name_to_remote_path('file-1')
-        filename_2, path_remote_2 = self._name_to_remote_path('file-2')
-
-        client_state.create_local_file(path_remote_1)
-        client_state.write_local_file_text(path_remote_1, 'data-1')
-        client_state.create_local_file(path_remote_2)
-        client_state.write_local_file_text(path_remote_2, 'data-2')
-        client_state.client.add_file(path_remote_1, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
-        client_state.client.add_file(path_remote_2, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
-
-        client_state.client.set_connection(self._connect_to_node_and_handle_auth())
-
-        tracked_files, _ = client_state.client.list('/')
-        self.assertEqual(len(tracked_files), 2)
-        self._validate_tracked_fs_element(
-            tracked_files, filename_1, exists_locally=True, tracked=True)
-        self._validate_tracked_fs_element(
-            tracked_files, filename_1, exists_locally=True, tracked=True)
-
-    def test_multiple_sequential_edits_to_file(self):
-        client_state_1, client_state_2 = self._start_server_and_create_number_of_clients(2)
-        path_remote = '/file'
-
-        data_1 = '112233446677'
-        data_2 = '113355668877'
-
-        client_state_1.create_local_file(path_remote)
-        client_state_1.write_local_file_text(path_remote, data_1)
-        client_state_1.client.add_file(path_remote, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
-        client_state_1.write_local_file_text(path_remote, data_2)
-        client_state_1.client.sync(path_remote)
-
-        client_state_2.client.fetch(path_remote)
-        client_state_2.validate_text_file_content(path_remote, data_2)
-
-    def test_fetch_empty_directory(self):
-        client_state, = self._start_server_and_create_number_of_clients(1)
-        path_remote = '/directory'
-        client_state.client.create_directory(path_remote)
-        client_state.client.fetch(path_remote)
-        client_state.validate_directory(path_remote)
-
-    def test_remove_file_without_deleting_local_file(self):
-        client_state, = self._start_server_and_create_number_of_clients(1)
-        path_remote = '/file'
-        client_state.create_local_file(path_remote)
-        client_state.client.add_file(path_remote, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
-        client_state.client.remove(path_remote, False)
-        client_state.validate_file_exists(path_remote)
-        with self.assertRaises(zyn_util.client.ZynClientException):
-            client_state.client.filesystem_element(path_remote)
-
-    def test_remove_file_and_delete_local_file(self):
-        client_state, = self._start_server_and_create_number_of_clients(1)
-        path_remote = '/file'
-        client_state.create_local_file(path_remote)
-        client_state.client.add_file(path_remote, zyn_util.connection.FILE_TYPE_RANDOM_ACCESS)
-        client_state.client.remove(path_remote, True)
-        client_state.validate_file_exists(path_remote, expect_not_to_exists=True)
-        with self.assertRaises(zyn_util.client.ZynClientException):
-            client_state.client.filesystem_element(path_remote)
-
-
-class TestCli(TestClients):
-    def _cli_client(self):
-        client_state, = self._start_server_and_create_number_of_clients(1)
-        return client_state, zyn_util.cli_client.ZynCliClient(client_state.client)
-
-    def test_cli_add_file(self):
-        path = '/file'
-        client_state, cli = self._cli_client()
-        client_state.create_local_file(path, 'content')
-        cli.do_add(path + ' -ra')
-
-    def test_cli_add_folder(self):
-        path = '/dir'
-        client_state, cli = self._cli_client()
-        client_state.create_directory(path)
-        cli.do_add(path)
-
-    def test_cli_sync_file(self):
-        path = '/file'
-        client_state, cli = self._cli_client()
-        client_state.create_local_file(path, 'content')
-        cli.do_add(path + ' -ra')
-        client_state.write_local_file_text(path, 'content more')
-        cli.do_sync(path)
-
-    def test_cli_fetch_file(self):
-        path = '/file'
-        client_state, cli = self._cli_client()
-        cli.do_create_file(path + ' -ra')
-        cli.do_fetch(path)
-        client_state.validate_directory('/', [os.path.basename(path)])
-
-    def test_cli_fetch_directory(self):
-        path = '/dir'
-        client_state, cli = self._cli_client()
-        cli.do_create_directory(path)
-        cli.do_fetch(path)
-        client_state.validate_directory('/', [os.path.basename(path)])
+        expected_untracked_elements = [path_untacked_file_1]
+        self.assertEqual(sorted(untracked_files), sorted(expected_untracked_elements))

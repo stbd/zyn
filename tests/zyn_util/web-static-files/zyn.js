@@ -52,6 +52,14 @@ class Path {
     }
 }
 
+function zyn_get_file_extension(filename) {
+    var split_name = filename.split('.');
+    if (split_name.length != 1) {
+        return split_name[split_name.length - 1].toLowerCase();
+    }
+    return null;
+}
+
 function zyn_edit_file_blob(
     node_id,
     revision,
@@ -155,6 +163,19 @@ function zyn_load_folder_contents(path, transaction)
             'path': path.to_str(),
         }
     ));
+}
+
+function zyn_send_message(
+    message_type,
+    parameters,
+    transaction,
+) {
+    if (_start_transaction(transaction) === false) {
+        return ;
+    }
+
+    _socket.onmessage = _parse_response_and_forward;
+    _socket.send(_to_json_message(message_type, parameters));
 }
 
 function _handle_register_response(websocket_msg)
