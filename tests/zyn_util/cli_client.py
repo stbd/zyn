@@ -311,7 +311,7 @@ class ZynCliClient(cmd.Cmd):
         group.add_argument('--expiration', type=str)
         group.add_argument('-de', '--disable-expiration', action='store_true')
         parser.add_argument('--expiration-format', type=str, default='%d.%m.%Y')
-        parser.add_argument('-p', '--password', type=str)
+        parser.add_argument('-p', '--password', action='store_true')
         return parser
 
     def help_modify_user(self):
@@ -323,13 +323,13 @@ class ZynCliClient(cmd.Cmd):
 
         # print (args)
 
-        password = args['password']
+        password = None
         expiration = args['expiration']
         disable_expiration = args['disable_expiration']
         username = args['username']
 
         if (
-                password is None
+                args['password'] == False
                 and expiration is None
                 and not disable_expiration
         ):
@@ -344,6 +344,9 @@ class ZynCliClient(cmd.Cmd):
 
         if disable_expiration:
             expiration = zyn_util.connection.EXPIRATION_NEVER_EXPIRE
+
+        if args['password']:
+            password = getpass.getpass('Password: ')
 
         rsp = self._client.connection().modify_user(
             username=username,
