@@ -187,6 +187,15 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
             self._send_response(msg_type, {})
 
+        elif msg_type == 'delete':
+
+            node_id = content['node-id']
+            self._log.debug('Delete, node-id={}'.format(node_id))
+            rsp = self._connection.zyn_connection().delete(
+                node_id=node_id
+            )
+            self._send_response(msg_type, {})
+
         elif msg_type == 'query-filesystem-element':
 
             path = content['path']

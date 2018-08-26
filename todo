@@ -19,13 +19,12 @@
 
 ## Web Client:
  * Leave file as open when reading/editing
- * Create files/directories
  * Sorting of directory content is different in different browsers
  * Table extension for showdown
  * Math extension for showdown
  * Table extension for showdown
- * Images
  * Support for raw links, raw.server.path-file
+ * Do not show large binary files in raw format for unsupported files
 
 ## Check
  * Are files closed when user disconnects, system test case
