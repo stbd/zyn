@@ -55,7 +55,7 @@ class Path {
 function zyn_get_file_extension(filename) {
     var split_name = filename.split('.');
     if (split_name.length != 1) {
-        return split_name[split_name.length - 1];
+        return split_name[split_name.length - 1].toLowerCase();
     }
     return null;
 }
