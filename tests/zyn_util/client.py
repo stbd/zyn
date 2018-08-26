@@ -587,13 +587,11 @@ class ZynFilesystemClient:
                 for element in query_list.elements:
                     path_remote_element = zyn_util.util.join_paths([dir, element.name])
 
-                    print('Processing element "{}" in "{}"'.format(
+                    print('Processing element "{}"'.format(
                         path_remote_element,
-                        dir
                     ))
 
                     if path_remote_element in self._local_files:
-                        print('"{}" already exists'.format(path_remote_element))
                         continue
 
                     try:
