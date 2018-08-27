@@ -591,17 +591,19 @@ class ZynFilesystemClient:
                         path_remote_element,
                     ))
 
-                    if path_remote_element in self._local_files:
-                        continue
-
                     try:
                         if element.is_file():
+                            if path_remote_element in self._local_files:
+                                continue
+
                             rsp = self._query_element(path_remote_element)
                             self._fetch_file(path_remote_element, rsp)
                             elements_fetched += 1
                         elif element.is_directory():
-                            self._fetch_directory(path_remote_element, element)
                             dirs.append(path_remote_element)
+                            if path_remote_element in self._local_files:
+                                continue
+                            self._fetch_directory(path_remote_element, element)
                             elements_fetched += 1
                         else:
                             raise RuntimeError()
