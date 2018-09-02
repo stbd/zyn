@@ -23,6 +23,8 @@ FILE_TYPE_RANDOM_ACCESS = 'random-access'
 FILE_TYPE_BLOB = 'blob'
 ELEMENT_TYPE_FILE = 'file'
 ELEMENT_TYPE_DIRECTORY = 'dir'
+OPEN_MODE_READ = 'read'
+OPEN_MODE_WRITE = 'write'
 NOTIFICATION_SOURCE_WEB_SERVER = 'web-server'
 NOTIFICATION_SOURCE_ZYN_SERVER = 'zyn-server'
 
@@ -81,6 +83,52 @@ class Connection:
         if rsp.is_error():
             raise ValueError('Failed to login after reconnect as {}'.format(self._username))
 
+    def check_for_notifications(self):
+        while self._zyn_connection.check_for_notifications():
+            notification = self._zyn_connection.pop_notification()
+            for socket in self._web_sockets.values():
+                socket.handle_notification(notification)
+
+
+class OpenFile:
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.node_id = None
+        self.file_type = None
+        self.content = None
+        self.open_mode = None
+
+    def is_set(self):
+        return self.node_id is not None
+
+    def is_random_access(self):
+        return self.file_type == zyn_util.connection.FILE_TYPE_RANDOM_ACCESS
+
+    def is_blob(self):
+        return self.file_type == zyn_util.connection.FILE_TYPE_BLOB
+
+    def is_mode_read(self):
+        return self.open_mode == OPEN_MODE_READ
+
+    def is_mode_write(self):
+        return self.open_mode == OPEN_MODE_WRITE
+
+    def update_content(self, content, revision):
+        self.content = content
+        # todo: use revision
+
+    def reset(self, node_id, file_type, open_mode, content):
+        self.node_id = node_id
+        self.file_type = file_type
+        self.open_mode = open_mode
+
+        if self.is_random_access():
+            self.content = content
+        else:
+            self.content = None
+
 
 class WebSocket(tornado.websocket.WebSocketHandler):
     def open(self):
@@ -89,9 +137,11 @@ class WebSocket(tornado.websocket.WebSocketHandler):
         self._user_id = None
         self._log = logging.getLogger(__name__)
         self._log.info("New websocket connected")
+        self._open_file = OpenFile()
 
     def _close_socket(self):
         self._log.info("Closing: tab_id=%i" % self._tab_id)
+        self._close_current_file()
         self._connection.remote_web_socket(self._tab_id)
         self.close()
 
@@ -130,6 +180,9 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 )
             trial += 1
 
+    def handle_notification(self, notification):
+        self._send_server_notification(notification)
+
     def _handle_message(self, msg_type, user_id, content):
 
         if msg_type == 'log':
@@ -147,10 +200,7 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
         elif msg_type == 'poll':
 
-            # self._log.debug('Client poll')
-            # self._send_notification(NOTIFICATION_SOURCE_WEB_SERVER, 'not', {"f": 1}, )
-            while self._connection.zyn_connection().check_for_notifications():
-                self._send_server_notification(self._connection.zyn_connection().pop_notification())
+            self._connection.check_for_notifications()
 
         elif msg_type == 'register':
 
@@ -253,43 +303,84 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 'elements': elements,
             })
 
+        elif msg_type == 'change-open-file-mode':
+
+            node_id = content['node-id']
+            mode = content['open-mode']
+
+            self._log.debug('{}: node_id={}, mode={}, open_file.open_mode={}'.format(
+                msg_type,
+                node_id,
+                mode,
+                self._open_file.open_mode
+            ))
+
+            if not self._open_file.is_set():
+                self._send_response(msg_type, {})
+                return
+
+            if mode == self._open_file.open_mode:
+                self._send_response(msg_type, {})
+                return
+
+            # todo: Update to use some method that allows changing mode without closing
+            rsp = self._connection.zyn_connection().close_file(node_id=self._open_file.node_id)
+
+            if mode == OPEN_MODE_READ:
+                rsp = self._connection.zyn_connection().open_file_read(node_id=node_id)
+            elif mode == OPEN_MODE_WRITE:
+                rsp = self._connection.zyn_connection().open_file_write(node_id=node_id)
+            else:
+                raise RuntimeError()
+
+            self._send_response(msg_type, {})
+
         elif msg_type == 'load-file':
 
             node_id = content['node-id']
             filename = content['filename']
-            self._log.debug('{}: node_id={}, filename="{}"'.format(msg_type, node_id, filename))
+            mode = content['open-mode']
+
+            self._log.debug('{}: node_id={}, filename="{}", mode={}'.format(
+                msg_type, node_id, filename, mode
+            ))
 
             file_content = b''
             file_type = ''
             open_rsp = None
-            try:
+
+            if mode == OPEN_MODE_READ:
                 rsp = self._connection.zyn_connection().open_file_read(node_id=node_id)
+            elif mode == OPEN_MODE_WRITE:
+                rsp = self._connection.zyn_connection().open_file_write(node_id=node_id)
+            else:
+                raise RuntimeError()
+
+            if rsp.is_error():
+                self._send_error_response(msg_type, None, rsp.error_code())
+                return
+
+            open_rsp = rsp.as_open_rsp()
+            if open_rsp.is_random_access():
+                file_type = FILE_TYPE_RANDOM_ACCESS
+            elif open_rsp.is_blob():
+                file_type = FILE_TYPE_BLOB
+            else:
+                raise RuntimeError()
+
+            if open_rsp.size > 0:
+                rsp, data = self._connection.zyn_connection().read_file(
+                    node_id,
+                    0,
+                    open_rsp.size
+                )
                 if rsp.is_error():
                     self._send_error_response(msg_type, None, rsp.error_code())
                     return
+                file_content = data
 
-                open_rsp = rsp.as_open_rsp()
-                if open_rsp.is_random_access():
-                    file_type = FILE_TYPE_RANDOM_ACCESS
-                elif open_rsp.is_blob():
-                    file_type = FILE_TYPE_BLOB
-                else:
-                    raise RuntimeError()
-
-                if open_rsp.size > 0:
-                    rsp, data = self._connection.zyn_connection().read_file(
-                        node_id,
-                        0,
-                        open_rsp.size
-                    )
-                    if rsp.is_error():
-                        self._send_error_response(msg_type, None, rsp.error_code())
-                        return
-                    file_content = data
-
-            finally:
-                if open_rsp is not None:
-                    rsp = self._connection.zyn_connection().close_file(node_id=node_id)
+            self._close_current_file()
+            self._open_file.reset(node_id, open_rsp.type_of_file, mode, file_content)
 
             self._log.debug('{}: loaded {} bytes, node_id={}'.format(
                 msg_type, len(file_content), node_id))
@@ -305,61 +396,55 @@ class WebSocket(tornado.websocket.WebSocketHandler):
         elif msg_type == 'edit-file':
 
             node_id = content['node-id']
-            content_original = content['content-original']
-            content_edited = content['content-edited']
+            content_edited = base64.b64decode(content['content-edited'])
             node_id = content['node-id']
             file_type = content['type-of-file']
             revision = content['revision']
 
             self._log.debug('{}: node_id={}, revision={}'.format(msg_type, node_id, revision))
 
-            open_rsp = None
-            try:
-                rsp = self._connection.zyn_connection().open_file_write(
-                    node_id=node_id
-                )
-                if rsp.is_error():
-                    self._send_error_response(msg_type, None, rsp.error_code())
-                    return
+            if node_id != self._open_file.node_id:
+                raise RuntimeError()
 
-                open_rsp = rsp.as_open_rsp()
-
-                if open_rsp.revision != revision:
-                    self._send_error_response(msg_type, 'Revision too old', None)
-
-                if file_type == FILE_TYPE_RANDOM_ACCESS:
-                    revision = zyn_util.util.edit_random_access_file(
-                        self._connection.zyn_connection(),
-                        node_id,
-                        revision,
-                        base64.b64decode(content_original),
-                        base64.b64decode(content_edited),
-                        self._log
-                    )
-                elif file_type == FILE_TYPE_BLOB:
-                    rsp = self._connection.zyn_connection().blob_write(
-                        node_id,
-                        revision,
-                        base64.b64decode(content_edited),
-                    )
-                    if not rsp.is_error():
-                        revision = rsp.as_insert_rsp().revision
-                else:
+            if file_type == FILE_TYPE_RANDOM_ACCESS:
+                if not self._open_file.is_random_access():
                     raise RuntimeError()
 
-                self._send_response(msg_type, {
-                    'node-id': node_id,
-                    'revision': revision,
-                    },
+                revision = zyn_util.util.edit_random_access_file(
+                    self._connection.zyn_connection(),
+                    node_id,
+                    revision,
+                    self._open_file.content,
+                    content_edited,
+                    self._log
                 )
+                self._open_file.update_content(content_edited, revision)
+            elif file_type == FILE_TYPE_BLOB:
+                rsp = self._connection.zyn_connection().blob_write(
+                    node_id,
+                    revision,
+                    content_edited,
+                )
+                if not rsp.is_error():
+                    revision = rsp.as_insert_rsp().revision
+            else:
+                raise RuntimeError()
 
-            finally:
-                if open_rsp is not None:
-                    self._connection.zyn_connection().close_file(node_id=node_id)
+            self._send_response(msg_type, {
+                'node-id': node_id,
+                'revision': revision,
+            },
+            )
 
         else:
             self._log.error("Closing socket: unexpected message: {}".format(msg_type))
             self._close_socket()
+
+    def _close_current_file(self):
+        if self._open_file.is_set():
+            self._log.info("Closing currently active file {}".format(self._open_file.node_id))
+            self._connection.zyn_connection().close_file(node_id=self._open_file.node_id)
+            self._open_file.clear()
 
     def _message_headers(self, msg_type):
         return {
@@ -400,6 +485,91 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 {
                     'reason': notification.reason,
                 })
+        elif notification.notification_type() in [
+                    zyn_util.connection.Notification.TYPE_MODIFIED,
+                    zyn_util.connection.Notification.TYPE_DELETED,
+                    zyn_util.connection.Notification.TYPE_INSERTED,
+        ]:
+            if notification.node_id != self._open_file.node_id:
+                self._log.info('Discarding notification for not open file, node_id={}'.format(
+                    notification.node_id
+                ))
+                return
+            if not self._open_file.is_random_access():
+                self._send_notification(
+                    NOTIFICATION_SOURCE_ZYN_SERVER,
+                    'blob-modified',
+                    {
+                        'node-id': notification.node_id,
+                        'revision': notification.revision,
+                    })
+                return
+
+            if notification.notification_type() == zyn_util.connection.Notification.TYPE_MODIFIED:
+                rsp, bytes = self._connection.zyn_connection().read_file(
+                    self._open_file.node_id,
+                    notification.block_offset,
+                    notification.block_size
+                )
+                content = self._open_file.content
+                content = \
+                    content[0:notification.block_offset] \
+                    + bytes \
+                    + content[notification.block_offset + notification.block_size:]
+
+                self._open_file.update_content(content, notification.revision)
+                self._send_notification(
+                    NOTIFICATION_SOURCE_ZYN_SERVER,
+                    'random-access-modified',
+                    {
+                        'node-id': notification.node_id,
+                        'revision': notification.revision,
+                        'offset': notification.block_offset,
+                        'bytes': str(base64.b64encode(bytes), 'ascii'),
+                    })
+
+            elif notification.notification_type() == zyn_util.connection.Notification.TYPE_DELETED:
+                content = self._open_file.content
+                content = \
+                    content[0:notification.block_offset] \
+                    + content[notification.block_offset + notification.block_size:]
+
+                self._open_file.update_content(content, notification.revision)
+                self._send_notification(
+                    NOTIFICATION_SOURCE_ZYN_SERVER,
+                    'random-access-deleted',
+                    {
+                        'node-id': notification.node_id,
+                        'revision': notification.revision,
+                        'offset': notification.block_offset,
+                        'size': notification.block_size,
+                    })
+
+            elif notification.notification_type() == zyn_util.connection.Notification.TYPE_INSERTED:
+                rsp, bytes = self._connection.zyn_connection().read_file(
+                    self._open_file.node_id,
+                    notification.block_offset,
+                    notification.block_size
+                )
+                content = self._open_file.content
+                content = \
+                    content[0:notification.block_offset] \
+                    + bytes \
+                    + content[notification.block_offset:]
+
+                self._open_file.update_content(content, notification.revision)
+                self._send_notification(
+                    NOTIFICATION_SOURCE_ZYN_SERVER,
+                    'random-access-inserted',
+                    {
+                        'node-id': notification.node_id,
+                        'revision': notification.revision,
+                        'offset': notification.block_offset,
+                        'size': notification.block_size,
+                        'bytes': str(base64.b64encode(bytes), 'ascii'),
+                    })
+            else:
+                raise NotImplementedError()
         else:
             raise NotImplementedError()
 

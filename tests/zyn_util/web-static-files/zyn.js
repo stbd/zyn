@@ -10,6 +10,8 @@ var ZYN_ERROR_CODE_SERVER_RESPONDED_WITH_UEXPECTED_MESSAGE = 2;
 var ZYN_ERROR_CODE_NOT_INITIALIZED = 2;
 var ZYN_ERROR_CODE_ALREADY_INITIALIZED = 2;
 
+var ZYN_OPEN_FILE_MODE_READ = 'read';
+var ZYN_OPEN_FILE_MODE_WRITE = 'write';
 
 class Path {
     constructor() {
@@ -60,6 +62,15 @@ function zyn_get_file_extension(filename) {
     return null;
 }
 
+function zyn_poll_server()
+{
+    if (_current_transaction !== null) {
+        return ;
+    }
+    _socket.onmessage = _parse_response_and_forward;
+    _socket.send(_to_json_message('poll', {}));
+}
+
 function zyn_edit_file_blob(
     node_id,
     revision,
@@ -84,20 +95,10 @@ function zyn_edit_file_blob(
     ));
 }
 
-function zyn_poll_server()
-{
-    if (_current_transaction !== null) {
-        return ;
-    }
-    _socket.onmessage = _parse_response_and_forward;
-    _socket.send(_to_json_message('poll', {}));
-}
-
 function zyn_edit_file_random_access(
     node_id,
     revision,
     type_of_file,
-    content_original,
     content_edited,
     transaction,
 ) {
@@ -112,13 +113,28 @@ function zyn_edit_file_random_access(
             'node-id': node_id,
             'revision': revision,
             'type-of-file': type_of_file,
-            'content-original': btoa(content_original),
             'content-edited': btoa(content_edited),
         }
     ));
 }
 
-function zyn_load_file(node_id, filename, transaction)
+function zyn_change_file_open_mode(node_id, open_mode, transaction)
+{
+    if (_start_transaction(transaction) === false) {
+        return ;
+    }
+
+    _socket.onmessage = _parse_response_and_forward;
+    _socket.send(_to_json_message(
+        'change-open-file-mode',
+        {
+            'node-id': node_id,
+            'open-mode': open_mode,
+        }
+    ));
+}
+
+function zyn_load_file(node_id, filename, open_mode, transaction)
 {
     if (_start_transaction(transaction) === false) {
         return ;
@@ -130,6 +146,7 @@ function zyn_load_file(node_id, filename, transaction)
         {
             'node-id': node_id,
             'filename': filename,
+            'open-mode': open_mode,
         }
     ));
 }

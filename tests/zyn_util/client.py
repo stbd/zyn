@@ -4,6 +4,7 @@ import json
 import logging
 import os.path
 import posixpath
+import time
 import traceback
 
 import zyn_util.errors
@@ -144,8 +145,17 @@ class LocalFile(LocalFileSystemElement):
     def is_initialized(self):
         return self._node_id is not None
 
+    def node_id(self):
+        return self._node_id
+
     def file_type(self):
         return self._file_type
+
+    def is_random_access(self):
+        return self._file_type == zyn_util.connection.FILE_TYPE_RANDOM_ACCESS
+
+    def is_blob(self):
+        return self._file_type == zyn_util.connection.FILE_TYPE_BLOB
 
     def to_json(self):
         return {
@@ -190,10 +200,23 @@ class LocalFile(LocalFileSystemElement):
         return self._calculate_checksum(open(self.path_to_local_file(path_data_root), 'rb').read())
 
     def update_checksum(self, path_data_root):
-        self._cheksum = self._calculate_cheksum_from_file(path_data_root)
+        self._checksum = self._calculate_cheksum_from_file(path_data_root)
+
+    def update_checksum_from_content(self, content):
+        self._checksum = self._calculate_checksum(content)
 
     def has_changes(self, path_data_root):
         return self._checksum != self._calculate_cheksum_from_file(path_data_root)
+
+    def open_write(self, connection):
+        rsp = connection.open_file_write(node_id=self._node_id)
+        zyn_util.util.check_server_response(rsp)
+        return rsp.as_open_rsp()
+
+    def close(self, connection):
+        close_rsp = connection.close_file(self._node_id)
+        zyn_util.util.check_server_response(close_rsp)
+        return close_rsp
 
     def _download_full_file(self, connection, path_local, node_id=None, path_in_remote=None):
 
@@ -224,10 +247,7 @@ class LocalFile(LocalFileSystemElement):
 
         open_rsp = None
         try:
-            open_rsp = connection.open_file_write(node_id=self._node_id)
-            zyn_util.util.check_server_response(open_rsp)
-            open_rsp = open_rsp.as_open_rsp()
-
+            open_rsp = self.open_write(connection)
             remote_data = bytearray()
             if open_rsp.size > 0:
                 rsp, remote_data = connection.read_file(open_rsp.node_id, 0, open_rsp.size)
@@ -247,8 +267,7 @@ class LocalFile(LocalFileSystemElement):
             self._checksum = self._calculate_checksum(local_data)
         finally:
             if open_rsp is not None:
-                close_rsp = connection.close_file(open_rsp.node_id)
-                zyn_util.util.check_server_response(close_rsp)
+                self.close(connection)
 
     def push(self, connection, path_data_root):
 
@@ -308,13 +327,18 @@ class LocalFile(LocalFileSystemElement):
         # the latest revision
         open_rsp = None
         try:
-            open_rsp = connection.open_file_write(node_id=self._node_id)
-            zyn_util.util.check_server_response(open_rsp)
-            open_rsp = open_rsp.as_open_rsp()
+            open_rsp = self.open_write(connection)
         finally:
             if open_rsp is not None:
-                close_rsp = connection.close_file(open_rsp.node_id)
-                zyn_util.util.check_server_response(close_rsp)
+                self.close(connection)
+
+        logger.info(
+            'Synchronizing: node_id={}, remote_revision={}, revision={}, has_changes={}'.format(
+                self._node_id,
+                open_rsp.revision,
+                self._revision,
+                has_changes,
+            ))
 
         if open_rsp.revision == self._revision and not has_changes:
             pass
@@ -353,6 +377,85 @@ class LocalFile(LocalFileSystemElement):
             raise NotImplementedError()
 
         return synchronized
+
+
+class OpenLocalFile():
+    def __init__(self, file):
+        self._file = file
+        self._bytes = None
+
+    def sync(self, connection, path_data_root, logger):
+        self._file.sync(connection, path_data_root, False, logger)
+        path_local = self._file.path_to_local_file(path_data_root)
+        self._bytes = open(path_local, 'rb').read()
+
+    def open_write(self, connection):
+        self._file.open_write(connection)
+
+    def close(self, connection):
+        self._file.close(connection)
+
+    def handle_notification(self, notification, connection, path_data_root, log):
+        path_local = self._file.path_to_local_file(path_data_root)
+        has_changes = self._file.has_changes(path_data_root)
+        n = notification
+        if has_changes:
+            raise RuntimeError('Both local file and remote changed, merging changes not supported')
+
+        log.debug('Processing notification: type={}, node_id={}'.format(
+            n.notification_type(), self._file._node_id
+        ))
+
+        if n.notification_type() == zyn_util.connection.Notification.TYPE_MODIFIED:
+            rsp, new_bytes = connection.read_file(
+                self._file._node_id,
+                n.block_offset,
+                n.block_size
+            )
+            self._bytes = \
+                self._bytes[0:n.block_offset] \
+                + new_bytes \
+                + self._bytes[n.block_offset + n.block_size:]
+
+        elif n.notification_type() == zyn_util.connection.Notification.TYPE_INSERTED:
+            rsp, new_bytes = connection.read_file(
+                self._file._node_id,
+                n.block_offset,
+                n.block_size
+            )
+            self._bytes = \
+                self._bytes[0:n.block_offset] \
+                + new_bytes \
+                + self._bytes[n.block_offset:]
+
+        elif n.notification_type() == zyn_util.connection.Notification.TYPE_DELETED:
+            self._bytes = \
+                self._bytes[0:n.block_offset] \
+                + self._bytes[n.block_offset + n.block_size:]
+
+        else:
+            raise RuntimeError()
+
+        open(path_local, 'wb').write(self._bytes)
+        self._file.update_checksum_from_content(self._bytes)
+        self._file._revision = n.revision
+
+    def sync_local_changes(self, connection, path_data_root, logger):
+        if not self._file.has_changes(path_data_root):
+            return
+
+        path_local = self._file.path_to_local_file(path_data_root)
+        local_bytes = open(path_local, 'rb').read()
+        self._file._revision = zyn_util.util.edit_random_access_file(
+            connection,
+            self._file._node_id,
+            self._file._revision,
+            self._bytes,
+            local_bytes,
+            logger
+        )
+        self._bytes = local_bytes
+        self._file.update_checksum_from_content(self._bytes)
 
 
 class ServerInfo:
@@ -667,6 +770,61 @@ class ZynFilesystemClient:
             raise RuntimeError('Unknown filesystem element: "{}"'.format(path_in_remote))
 
         return elements_synchronized
+
+    def open(self, path_files, sleep_duration):
+
+        files = {}
+        for f in path_files:
+            if f not in self._local_files:
+                raise ZynClientException('File "{}" not tracked'.format(f))
+            file = self._local_files[f]
+            if not file.is_random_access():
+                raise ZynClientException('File "{}" is not of type random access'.format(f))
+            files[file.node_id()] = OpenLocalFile(file)
+
+        try:
+            for file in files.values():
+                file.sync(
+                    self._connection,
+                    self._path_data,
+                    self._log
+                )
+                file.open_write(self._connection)
+
+                print('Synchronizing, use ctrl-c to stop')
+
+            while True:
+                self._log.debug('Synchronizing')
+                while True:
+                    n = self._connection.pop_notification()
+                    if n is None:
+                        break
+                    if n.notification_type() == zyn_util.connection.Notification.TYPE_DISCONNECTED:
+                        print('Connection to Zyn server lost: "{}"'.format(n.reason))
+                    elif n.notification_type() in [
+                        zyn_util.connection.Notification.TYPE_MODIFIED,
+                        zyn_util.connection.Notification.TYPE_DELETED,
+                        zyn_util.connection.Notification.TYPE_INSERTED,
+                    ]:
+                        print('Read notification from remote')
+                        if n.node_id in files:
+                            files[n.node_id].handle_notification(
+                                n,
+                                self._connection,
+                                self._path_data,
+                                self._log
+                            )
+
+                for file in files.values():
+                    file.sync_local_changes(self._connection, self._path_data, self._log)
+
+                time.sleep(sleep_duration)
+
+        except KeyboardInterrupt as e:
+            pass
+        finally:
+            for file in files.values():
+                file.close(self._connection)
 
     def list(self, path_parent):
 
