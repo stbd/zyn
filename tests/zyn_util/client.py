@@ -696,7 +696,13 @@ class ZynFilesystemClient:
 
                     try:
                         if element.is_file():
-                            if path_remote_element in self._local_files:
+                            path_local = zyn_util.util.local_path([
+                                self._path_data,
+                                dir,
+                                path_remote_element
+                            ])
+                            exists = os.path.isfile(path_local)
+                            if exists and path_remote_element in self._local_files:
                                 continue
 
                             rsp = self._query_element(path_remote_element)
@@ -747,6 +753,8 @@ class ZynFilesystemClient:
 
                     if path_remote_file not in self._local_files:
                         continue
+
+                    print('Processing element "{}"'.format(path_remote_file))
 
                     element = self._local_files[path_remote_file]
                     try:
