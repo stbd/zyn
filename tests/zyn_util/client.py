@@ -698,7 +698,6 @@ class ZynFilesystemClient:
                         if element.is_file():
                             path_local = zyn_util.util.local_path([
                                 self._path_data,
-                                dir,
                                 path_remote_element
                             ])
                             exists = os.path.isfile(path_local)
