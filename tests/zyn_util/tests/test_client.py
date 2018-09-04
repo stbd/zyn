@@ -64,11 +64,19 @@ class ClientState:
             print('----')
         assert open(path_local, 'rb').read() == expected_content
 
+    def validate_local_files_exists(self, path_in_remote):
+        path_local = _join_paths([self.path_data, path_in_remote])
+        assert os.path.isfile(path_local) is True
+
     def write_local_file_text(self, path_in_remote, text_content):
         path_file = _join_paths([self.path_data, path_in_remote])
         assert os.path.exists(path_file)
         data = text_content.encode('utf-8')
         open(path_file, 'wb').write(data)
+
+    def delete_local_file(self, path_in_remote):
+        path_local = _join_paths([self.path_data, path_in_remote])
+        os.remove(path_local)
 
     def create_directory(self, path_remote):
         path_local = _join_paths([self.path_data, path_remote])
@@ -497,7 +505,13 @@ class TestClient(TestClients):
             path_file_5: {'type': 'f'},
         })
 
-    def test_open_file(self): pass  # Only for random access
+    def test_fetch_notices_missing_local_file(self):
+        state, cli = self._cli_client()
+        path_file = self._create_file_and_fetch(cli, '/file', '-ra')
+        state.validate_local_files_exists(path_file)
+        state.delete_local_file(path_file)
+        cli.do_fetch('')
+        state.validate_local_files_exists(path_file)
 
     def _find_from_tracked_files(self, tracked_files, path_element):
         for t in tracked_files:

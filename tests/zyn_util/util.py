@@ -1,5 +1,6 @@
 import difflib
 import logging
+import os.path
 import posixpath
 
 import zyn_util.errors
@@ -34,6 +35,11 @@ def join_paths(list_of_paths):
 def to_remote_path(path):
     path = path.replace('\\', '/')
     return path
+
+
+def local_path(paths):
+    path_local = zyn_util.util.join_paths(paths)
+    return os.path.normpath(path_local)
 
 
 def edit_random_access_file(

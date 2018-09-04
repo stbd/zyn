@@ -122,10 +122,14 @@ function _handle_open_in_edit_mode_button_clicked(event, name, node_id) {
         event.stopPropagation();
 
         _show_loading_indication();
-        zyn_load_file(node_id, name, new Transaction(
-            _handle_load_file_rsp,
-            state={'mode': 'edit'}
-        ));
+        zyn_load_file(
+            node_id,
+            name,
+            ZYN_OPEN_FILE_MODE_WRITE,
+            new Transaction(
+                _handle_load_file_rsp,
+                state={'mode': 'edit'}
+            ));
     }
 }
 

@@ -1054,9 +1054,6 @@ class Notification(Message):
     def type(self):
         return Message.NOTIFICATION
 
-    def type_of_notification(self):
-        raise NotImplemented()
-
     def create(msg):
         n = Notification(msg)
         if n.notification_type() == Notification.TYPE_DISCONNECTED:

@@ -329,7 +329,7 @@ class ZynCliClient(cmd.Cmd):
         username = args['username']
 
         if (
-                args['password'] == False
+                args['password'] is False
                 and expiration is None
                 and not disable_expiration
         ):
@@ -396,6 +396,21 @@ class ZynCliClient(cmd.Cmd):
         print('Done')
         print("Synchronized {} filesystem elements".format(num_sync))
         return num_sync
+
+    def _parser_open(self):
+        parser = argparse.ArgumentParser(prog='open')
+        parser.add_argument('path-file', type=str, action='append')
+        parser.add_argument('-s', '--poll-sleep', type=int, default=5)
+        return parser
+
+    def help_open(self):
+        print(self._parser_open().format_help())
+
+    def do_open(self, args):
+        parser = self._parser_open()
+        args = vars(parser.parse_args(self._parse_args(args)))
+        path_files = [self._to_absolute_remote_path(f) for f in args['path-file']]
+        self._client.open(path_files, args['poll_sleep'])
 
     def _parser_remove(self):
         parser = argparse.ArgumentParser(prog='remove')

@@ -163,7 +163,7 @@
                         data-state="show"
                         class="w3-button w3-border"
                         onclick="_handle_show_hide_notifications_clicked()"
-                    >Show</button>
+                    >Show more</button>
                 </div>
             </div>
             <div id="zyn-document-content" class="w3-border ">
@@ -368,6 +368,43 @@
                    source,
                    'Zyn server disconnected, message from node: ' + content['reason']
                );
+           } else if (type_of === 'random-access-deleted') {
+               var bytes = _current_file.bytes()
+               var offset = content['offset']
+               var size = content['size']
+               bytes = bytes.slice(0, offset) + bytes.slice(offset + size, bytes.length)
+               _current_file.update_content(content['revision'], bytes);
+               _set_current_file(_current_file);
+               _set_current_file_content();
+           } else if (type_of === 'random-access-inserted') {
+               var bytes = _current_file.bytes();
+               var offset = content['offset'];
+               var edited = atob(content['bytes']);
+               bytes = bytes.slice(0, offset) + edited + bytes.slice(offset, bytes.length)
+               _current_file.update_content(content['revision'], bytes);
+               _set_current_file(_current_file);
+               _set_current_file_content();
+           } else if (type_of === 'random-access-modified') {
+               var bytes = _current_file.bytes();
+               var offset = content['offset'];
+               var size = content['size'];
+               var edited = atob(content['bytes']);
+               bytes = bytes.slice(0, offset) + edited + bytes.slice(offset + size, bytes.length)
+               _current_file.update_content(content['revision'], bytes);
+               _set_current_file(_current_file);
+               _set_current_file_content();
+           } else if (type_of === 'blob-modified') {
+               _add_notification(
+                   NOTIFICATION_SOURCE_BROWSER,
+                   'File with node Id ' + content['node-id'] + ' was updated to revision ' + content['revision']
+               );
+               if (_current_file.node_id() === content['node-id']) {
+                   var revision_text = _current_file.revision()
+                                     + ' (remote has revision '
+                                     + content['revision']
+                                     + ', reload file to view it)';
+                   document.getElementById('zyn-current-file-revision').innerText = revision_text;
+               }
            } else {
                alert('not imeplemented')
            }
@@ -543,7 +580,6 @@
                _current_file.node_id(),
                _current_file.revision(),
                _current_file.type_of_file(),
-               _current_file.bytes(),
                edited_content,
                new Transaction(function (rsp, state) {
                    _hide_loading_indication();
@@ -581,9 +617,15 @@
            return ;
        }
 
-       _set_current_file_content();
        _current_file.set_mode(CurrentFile.mode_view);
        _set_current_file(_current_file);
+       _set_current_file_content();
+   }
+
+   function _handle_change_file_open_mode_rsp() {
+       _current_file.set_mode(CurrentFile.mode_edit);
+       _set_current_file(_current_file)
+       _set_current_file_content();
    }
 
    function _handle_edit_clicked()
@@ -596,19 +638,11 @@
            return ;
        }
 
-       var content_element = document.getElementById('zyn-document-content');
-       content_element.innerHTML =
-           '<pre id="zyn-edit-content" contenteditable="true" '
-           + 'class="w3-pale-green" '
-           + 'onkeyup="_handle_file_keypressed_on_file_content()"'
-           + '>'
-           + _current_file.decoded()
-           + '</pre>'
-       ;
-
-       _current_file.set_mode(CurrentFile.mode_edit);
-       _set_current_file(_current_file)
-       _current_file_edited = false;
+       zyn_change_file_open_mode(
+           _current_file.node_id(),
+           ZYN_OPEN_FILE_MODE_WRITE,
+           new Transaction(_handle_change_file_open_mode_rsp)
+       )
    }
 
    function _handle_edit_done_clicked()
@@ -682,10 +716,14 @@
 
        } else if (element_type === 'file') {
            _show_loading_indication();
-           zyn_load_file(node_id, name, new Transaction(
-               _handle_load_file_rsp,
-               state={'mode': 'view'}
-           ));
+           zyn_load_file(
+               node_id,
+               name,
+               ZYN_OPEN_FILE_MODE_READ,
+               new Transaction(
+                   _handle_load_file_rsp,
+                   state={'mode': 'view'}
+               ));
        }
    }
 
@@ -726,11 +764,9 @@
        );
 
        _set_current_file(_current_file);
-       _set_current_file_content();
-
        var mode = state['mode'];
        if (mode === 'view') {
-           // pass
+           _set_current_file_content();
        } else if (mode === 'edit') {
            _handle_edit_clicked();
        } else {
@@ -740,8 +776,24 @@
 
    function _set_current_file_content()
    {
-       var content_element = document.getElementById('zyn-document-content');
-       zyn_render_file_content(content_element, _current_file);
+       if (_current_file.mode() === CurrentFile.mode_edit) {
+           var content_element = document.getElementById('zyn-document-content');
+           content_element.innerHTML =
+               '<pre id="zyn-edit-content" contenteditable="true" '
+               + 'class="w3-pale-green" '
+               + 'onkeyup="_handle_file_keypressed_on_file_content()"'
+               + '>'
+               + _current_file.decoded()
+               + '</pre>'
+           ;
+
+       } else if (_current_file.mode() === CurrentFile.mode_view) {
+           var content_element = document.getElementById('zyn-document-content');
+           zyn_render_file_content(content_element, _current_file);
+       } else {
+           _unhandled("_set_current_file_content: mode " + _current_file.mode());
+       }
+       _current_file_edited = false;
    }
 
   </script>

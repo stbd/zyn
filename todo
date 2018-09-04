@@ -15,10 +15,11 @@
  * Think how commands could be batched together
 
 ## CLI Client:
- * Command: Open, continuous edits
+ * In sync, check that local file actually exists and fetch it if it does not
+ * Handle large files better
+  * When editing
 
 ## Web Client:
- * Leave file as open when reading/editing
  * Sorting of directory content is different in different browsers
  * Table extension for showdown
  * Math extension for showdown
@@ -36,6 +37,8 @@
  * Creating file with same name in different folder fails
   * self._create_file(cli, '/dir-1/file-1', '-ra')
   * self._create_file(cli, '/dir-2/file-1', '-ra')
+ * Deleting/moving files on remote should be notified on client
 
 ## Security
  * Passwords are printed when protocol is debugged
+ * Web server (and CLI) logs all edits on RA files
