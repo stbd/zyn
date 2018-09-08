@@ -6,16 +6,13 @@ use std::result::{ Result };
 use std::str;
 use std::vec::{ Vec };
 
-use chrono::datetime::{ DateTime };
-use chrono::{ UTC, NaiveDateTime };
-
 use node::file_handle::{ FileHandle };
 use node::folder::{ Folder };
 use node::crypto::{ Crypto };
 use node::user_authority::{ Id };
 use node::serialize::{ SerializedFilesystem };
 use node::common::{ NodeId, NODE_ID_ROOT, ADMIN_GROUP, FileType,
-                    log_crypto_context_error };
+                    log_crypto_context_error, utc_timestamp };
 
 #[derive(Debug)]
 pub enum FilesystemError {
@@ -273,7 +270,7 @@ impl Filesystem {
                 ? ;
 
             let path_file_root = self.path_storage_folder.join(
-                Filesystem::hash_filename(filename)
+                Filesystem::hash_filename(parent_node_id, filename)
             );
 
             create_dir(& path_file_root)
@@ -390,9 +387,8 @@ impl Filesystem {
         Ok(())
     }
 
-    fn hash_filename(name: & str) -> PathBuf {
-        let dt = DateTime::<UTC>::from_utc(NaiveDateTime::from_timestamp(0, 0), UTC);
-        let f = dt.format("").to_string() + name;
+    fn hash_filename(parent_node_id: & NodeId, name: & str) -> PathBuf {
+        let f = format!("{}-{}-{}", utc_timestamp(), parent_node_id, name);
         let mut hasher = DefaultHasher::new();
         f.hash(& mut hasher);
         let filename = hasher.finish().to_string();

@@ -15,15 +15,12 @@
  * Think how commands could be batched together
 
 ## CLI Client:
- * In sync, check that local file actually exists and fetch it if it does not
  * Handle large files better
   * When editing
 
 ## Web Client:
  * Sorting of directory content is different in different browsers
- * Table extension for showdown
- * Math extension for showdown
- * Table extension for showdown
+ * Math extension for showdown, lots of problems with showdown-katex, probably have to think about something else
  * Support for raw links, raw.server.path-file
  * Do not show large binary files in raw format for unsupported files
 
