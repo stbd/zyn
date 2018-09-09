@@ -9,7 +9,6 @@
   * When debugging protocol, passwords are vissible in logs
  * Replace anything that mentions folder to directory
  * Open response should include block size
- * Rethink where properties should be stored, some cases it would make sense to have them in filesystem instead of description/metadata for faster access
  * Cleanup and remove references to GPGME
  * Replace all encrypt/decrypt operations with encrypt_to_file and decrypt_from_file
  * Think how commands could be batched together

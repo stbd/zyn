@@ -3,7 +3,7 @@ use std::path::{ PathBuf };
 extern crate tempdir;
 use self::tempdir::{ TempDir };
 
-use node::file_handle::{ FileHandle, FileAccess, FileLock, FileProperties };
+use node::file_handle::{ FileHandle, FileAccess, FileLock, FileProperties, CachedFileProperties };
 use node::common::{ Buffer, FileRevision, NodeId, FileType };
 use node::user_authority::{ Id };
 use node::test_util;
@@ -42,14 +42,22 @@ impl State {
         let user = Id::User(1);
         let user_2 = Id::User(2);
         let parent: NodeId = 123;
-        FileHandle::create(
+        let file_type = FileType::RandomAccess;
+        let mut file_handle = FileHandle::create(
             path_file.clone(),
             & test_util::create_crypto(),
             user.clone(),
             parent,
-            FileType::RandomAccess,
+            file_type,
             block_size).unwrap();
-        let file_handle = FileHandle::init(path_file.clone()).unwrap();
+
+        let properties = file_handle.cached_properties().unwrap();
+        let file_handle = FileHandle::init(
+            path_file.clone(),
+            properties.file_type.clone(),
+            properties.revision.clone(),
+            properties.size.clone(),
+        ).unwrap();
 
         State {
             _dir: dir,
@@ -62,7 +70,13 @@ impl State {
     }
 
     fn recreate_file_handle(& mut self) {
-        self.file_handle = FileHandle::init(self.path_file.clone()).unwrap();
+        let properties = self.file_handle.cached_properties().unwrap();
+        self.file_handle = FileHandle::init(
+            self.path_file.clone(),
+            properties.file_type.clone(),
+            properties.revision.clone(),
+            properties.size.clone(),
+        ).unwrap();
     }
 
     fn open(& mut self) -> FileAccess {
@@ -87,6 +101,10 @@ impl State {
 
     fn properties(& mut self) -> FileProperties {
         self.file_handle.properties(& test_util::create_crypto()).unwrap()
+    }
+
+    fn cached_properties(& mut self) -> CachedFileProperties {
+        self.file_handle.cached_properties().unwrap()
     }
 }
 
@@ -328,14 +346,14 @@ fn test_multiple_accesses() {
 }
 
 #[test]
-fn test_reading_metadata_when_thread_is_not_running() {
+fn test_reading_properties_when_thread_is_not_running() {
     let mut state = State::init();
     assert!(state.is_open() == false);
     let _ = state.properties();
 }
 
 #[test]
-fn test_reading_metadata_when_thread_is_running() {
+fn test_reading_properties_when_thread_is_running() {
     let mut state = State::init();
     let mut _access = state.open();
     assert!(state.is_open() == true);
@@ -343,7 +361,7 @@ fn test_reading_metadata_when_thread_is_running() {
 }
 
 #[test]
-fn test_metadata_size_is_updated() {
+fn test_properties_size_is_updated() {
     let mut state = State::init();
     let mut access = state.open();
     let buffer_1: Buffer = vec![4, 5, 6, 7, 8];
@@ -359,6 +377,24 @@ fn test_metadata_size_is_updated() {
     let _ = access.insert(revision, 0, buffer_2.clone()).unwrap();
     size += buffer_2.len() as u64;
     assert!(state.properties().size == size);
+}
+
+#[test]
+fn test_cached_properties_are_updated() {
+    let mut state = State::init();
+    let mut access = state.open();
+    let buffer_1: Buffer = vec![4, 5, 6, 7, 8];
+
+    access.write(0, 0, buffer_1.clone()).unwrap();
+    assert!(state.cached_properties().size == state.properties().size);
+    assert!(state.cached_properties().revision == state.properties().revision);
+    assert!(state.cached_properties().file_type == state.properties().file_type);
+
+    state.file_handle.close();
+
+    assert!(state.cached_properties().size == state.properties().size);
+    assert!(state.cached_properties().revision == state.properties().revision);
+    assert!(state.cached_properties().file_type == state.properties().file_type);
 }
 
 #[test]

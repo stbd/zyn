@@ -75,6 +75,23 @@ impl FileProperties {
     }
 }
 
+#[derive(Clone)]
+pub struct CachedFileProperties {
+    pub revision: FileRevision,
+    pub size: u64,
+    pub file_type: FileType,
+}
+
+impl CachedFileProperties {
+    fn from_properties(properties: FileProperties) -> CachedFileProperties {
+        CachedFileProperties {
+            revision: properties.revision,
+            size: properties.size,
+            file_type: properties.file_type,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub enum FileLock {
     LockedBySystemForBlobWrite { user: Id },
@@ -94,6 +111,7 @@ struct FileServiceHandle {
 pub struct FileHandle {
     path: PathBuf,
     file_service: Option<FileServiceHandle>,
+    cached_properties: CachedFileProperties,
 }
 
 impl FileHandle {
@@ -127,15 +145,20 @@ impl FileHandle {
         }
 
         let root_file = FileHandle::root_path(& path);
-        FileService::create(& root_file, context, user, parent, file_type, page_size) ? ;
+        let metadata = FileService::create(& root_file, context, user, parent, file_type, page_size) ? ;
 
         Ok(FileHandle{
             path: path,
             file_service: None,
+            cached_properties: CachedFileProperties {
+                revision: metadata.revision,
+                size: metadata.size(),
+                file_type: metadata.file_type,
+            },
         })
     }
 
-    pub fn init(path: PathBuf) -> Result<FileHandle, ()> {
+    pub fn init(path: PathBuf, file_type: FileType, revision: FileRevision, size: u64) -> Result<FileHandle, ()> {
         if path.is_file() {
             return Err(());
         }
@@ -149,6 +172,11 @@ impl FileHandle {
         Ok(FileHandle{
             path: path,
             file_service: None,
+            cached_properties: CachedFileProperties {
+                revision: revision,
+                size: size,
+                file_type: file_type,
+            },
         })
     }
 
@@ -170,6 +198,20 @@ impl FileHandle {
             let path_root_file = FileHandle::root_path(& self.path);
             let metadata = Metadata::load(& path_root_file, & context) ? ;
             Ok(FileProperties::from_closed_file(metadata))
+        }
+    }
+
+    pub fn cached_properties(& mut self) -> Result<CachedFileProperties, ()> {
+        self.update();
+
+        if let Some(ref mut file_service) = self.file_service {
+            let properties = file_service.access.properties()
+                .map_err(| _ | error!("Failed to get metadata from file service"))
+                ? ;
+
+            Ok(CachedFileProperties::from_properties(properties))
+        } else {
+            Ok(self.cached_properties.clone())
         }
     }
 
@@ -208,7 +250,15 @@ impl FileHandle {
             return ;
         }
 
-        let file_service = self.file_service.take().unwrap();
+        let mut file_service = self.file_service.take().unwrap();
+        match file_service.access.properties() {
+            Ok(properties) => {
+                self.cached_properties = CachedFileProperties::from_properties(properties);
+            },
+            Err(_) => {
+                error!("Failed to get properties from file service when closing file")
+            }
+        };
         let _ = file_service.access.channel_send.send(FileRequestProtocol::Close);
         let _ = file_service.thread.join()  // todo: Somekind of timeout should be used here
             .map_err(| error | warn!("Failed to join file thread, error={:?}", error))

@@ -72,6 +72,17 @@ pub enum FilesystemElement {
     },
 }
 
+pub enum FileSystemListElement {
+    File {
+        name: String,
+        node_id: NodeId,
+    },
+    Directory {
+        name: String,
+        node_id: NodeId,
+    },
+}
+
 pub struct Counters {
     pub active_connections: u32,
 }
@@ -92,7 +103,7 @@ pub enum ClientProtocol {
     Shutdown { reason: ShutdownReason },
     CountersResponse { result: Result<Counters, ErrorResponse> },
     QuerySystemResponse { result: Result<SystemInformation, ErrorResponse> },
-    QueryListResponse { result: Result<Vec<(String, NodeId, FilesystemElementType)>, ErrorResponse> },
+    QueryListResponse { result: Result<Vec<FileSystemListElement>, ErrorResponse> },
     QueryFilesystemResponse { result: Result<FilesystemElement, ErrorResponse> },
     DeleteResponse { result: Result<(), ErrorResponse> },
     AddUserGroupResponse { result: Result<(), ErrorResponse> },
@@ -215,7 +226,7 @@ impl Node {
             .map_err(| error | error!("failed to create data dir, error=\"{}\"", error))
             ? ;
 
-        let fs = Filesystem::new(crypto, & path_data_dir);
+        let mut fs = Filesystem::new(crypto, & path_data_dir);
         fs.store(& Node::path_filesystem(path_workdir))
             .map_err(| () | error!("Failed to store filesystem"))
             ? ;
@@ -841,7 +852,7 @@ impl Node {
         auth: & mut UserAuthority,
         user: Id,
         file_descriptor: FileDescriptor,
-    ) -> Result<Vec<(String, NodeId, FilesystemElementType)>, ErrorResponse> {
+    ) -> Result<Vec<FileSystemListElement>, ErrorResponse> {
 
         let node_id = Node::resolve_file_descriptor(
             node_id_buffer,
@@ -863,13 +874,24 @@ impl Node {
 
         let mut result = Vec::with_capacity(folder.number_of_children());
         for ref child in folder.children() {
-            let type_of = match *fs.node(& child.node_id).unwrap() {
-                FsNode::Folder { .. } => FilesystemElementType::Folder,
-                FsNode::File { .. } => FilesystemElementType::File,
+            match *fs.node(& child.node_id).unwrap() {
+                FsNode::Folder { .. } => {
+                    result.push(
+                        FileSystemListElement::Directory {
+                            name: child.name.clone(),
+                            node_id: child.node_id.clone(),
+                        })
+
+                },
+                FsNode::File { .. } => {
+                    result.push(
+                        FileSystemListElement::File {
+                            name: child.name.clone(),
+                            node_id: child.node_id.clone(),
+                        })
+                }
                 FsNode::NotSet { .. } => panic!(),
             };
-
-            result.push((child.name.clone(), child.node_id.clone(), type_of))
         }
 
         Ok(result)

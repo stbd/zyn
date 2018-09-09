@@ -266,7 +266,7 @@ impl FileService {
         parent: NodeId,
         file_type: FileType,
         max_block_size: usize,
-    ) -> Result<(), ()> {
+    ) -> Result<Metadata, ()> {
         FileImpl::create(& path_basename, crypto_context, user, parent, file_type, max_block_size)
     }
 
@@ -594,7 +594,7 @@ impl FileImpl {
         parent: NodeId,
         file_type: FileType,
         max_block_size: usize,
-    ) -> Result<(), ()> {
+    ) -> Result<Metadata, ()> {
 
         let mut file = FileImpl {
             buffer: Buffer::with_capacity(DEFAULT_BUFFER_SIZE_BYTES as usize),
@@ -605,7 +605,7 @@ impl FileImpl {
             lock: None,
         };
         file.store();
-        Ok(())
+        Ok(file.metadata)
     }
 
     fn get_lock(& self) -> Option<FileLock> {

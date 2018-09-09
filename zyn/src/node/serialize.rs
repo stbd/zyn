@@ -177,6 +177,9 @@ impl SerializedNodeSettings {
 pub type SerializedFilesystemFile = (
     NodeId,
     PathBuf,
+    FileType,
+    FileRevision,
+    u64,
 );
 
 pub type SerializedFilesystemFolder = (

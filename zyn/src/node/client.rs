@@ -11,7 +11,7 @@ use node::common::{ NodeId, Buffer, OpenMode, FileType, Timestamp };
 use node::connection::{ Connection };
 use node::file_handle::{ FileAccess, FileError, Notification, FileLock, FileProperties };
 use node::filesystem::{ FilesystemError };
-use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, FilesystemElementType, ErrorResponse, NodeError, ShutdownReason };
+use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, ErrorResponse, NodeError, ShutdownReason, FileSystemListElement };
 use node::user_authority::{ Id };
 
 /*
@@ -1556,22 +1556,30 @@ fn handle_query_list_req(client: & mut Client) -> Result<(), ()>
                     let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
 
                     try_in_receive_loop!(client, buffer.write_list_start(list_of_elements.len()), Status::FailedToWriteToSendBuffer);
-                    for (name, node_id, type_of) in list_of_elements.into_iter() {
+                    for element in list_of_elements.into_iter() {
 
                         try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+                        match element {
+                            FileSystemListElement::File {
+                                name,
+                                node_id,
+                            } => {
+                                try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_node_id(FILE), Status::FailedToWriteToSendBuffer);
 
-                        try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, buffer.write_unsigned(
-                            match type_of {
-                                FilesystemElementType::Folder => FOLDER,
-                                FilesystemElementType::File => FILE,
-                            }
-                        ), Status::FailedToWriteToSendBuffer);
-
+                            },
+                            FileSystemListElement::Directory {
+                                name,
+                                node_id,
+                            } => {
+                                try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_node_id(FOLDER), Status::FailedToWriteToSendBuffer);
+                            },
+                        }
                         try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
                     }
-
                     try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);

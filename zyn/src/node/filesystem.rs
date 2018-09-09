@@ -115,13 +115,22 @@ impl Filesystem {
         Filesystem::new_with_capacity(crypto, path_storage_folder, DEFAULT_MAX_NUMBER_OF_NODES)
     }
 
-    pub fn store(& self, path_basename: & Path) -> Result<(), ()> {
+    pub fn store(& mut self, path_basename: & Path) -> Result<(), ()> {
 
         let mut fs = SerializedFilesystem::new(self.nodes.capacity());
-        for (index, node) in self.nodes.iter().enumerate() {
+        for (index, node) in self.nodes.iter_mut().enumerate() {
             match *node {
-                Node::File { ref file } => {
-                    fs.files.push((index as NodeId, file.path().to_path_buf()));
+                Node::File { ref mut file } => {
+                    let p = file.cached_properties()
+                        .map_err(| () | error!("Failed to get cached properties when storing") )
+                        ? ;
+                    fs.files.push((
+                        index as NodeId,
+                        file.path().to_path_buf(),
+                        p.file_type,
+                        p.revision,
+                        p.size,
+                    ));
                 },
                 Node::Folder { ref folder } => {
                     fs.folders.push((
@@ -159,9 +168,14 @@ impl Filesystem {
 
         let mut fs = Filesystem::empty_with_capacity(crypto, & path_storage_folder, deserialized.capacity);
 
-        for & (ref node_id, ref path) in deserialized.files.iter() {
+        for & (ref node_id, ref path, ref file_type, ref revision, ref size) in deserialized.files.iter() {
 
-            let file = FileHandle::init(path.to_path_buf())
+            let file = FileHandle::init(
+                path.to_path_buf(),
+                file_type.clone(),
+                revision.clone(),
+                size.clone()
+            )
                 .map_err(| () | error!("Failed to init file, path=\"{}\"", path.display()))
                 ? ;
             fs.nodes[*node_id as usize] = Node::File{ file: file };
