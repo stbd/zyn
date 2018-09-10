@@ -1566,7 +1566,7 @@ fn handle_query_list_req(client: & mut Client) -> Result<(), ()>
                             } => {
                                 try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
                                 try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                                try_in_receive_loop!(client, buffer.write_node_id(FILE), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_unsigned(FILE), Status::FailedToWriteToSendBuffer);
 
                             },
                             FileSystemListElement::Directory {
@@ -1575,7 +1575,7 @@ fn handle_query_list_req(client: & mut Client) -> Result<(), ()>
                             } => {
                                 try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
                                 try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                                try_in_receive_loop!(client, buffer.write_node_id(FOLDER), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_unsigned(FOLDER), Status::FailedToWriteToSendBuffer);
                             },
                         }
                         try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);

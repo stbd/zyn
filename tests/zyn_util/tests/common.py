@@ -36,6 +36,9 @@ class TestZyn(unittest.TestCase):
         self._password = 'admin'
         self._work_dir = self._temp_dir()
 
+    def _path_server_workdir(self, server_workdir=DEFAULT_SERVER_WORKDIR):
+        return '{}/{}'.format(self._work_dir.name, server_workdir)
+
     def _start_server_process(self, args=[]):
         enviroment_variables = os.environ.copy()
         enviroment_variables['RUST_LOG'] = 'trace'
@@ -144,8 +147,29 @@ class TestCommon(TestZyn):
         with self.assertRaises(zyn_util.exception.ZynConnectionLost):
             connection.read_message()
 
+    def _get_files_in_server_workdir(
+            self,
+            server_workdir=DEFAULT_SERVER_WORKDIR,
+            filter_directories=[]
+    ):
+        server_workdir = self._path_server_workdir(server_workdir)
+        elements = {}
+        for root, dirs, files in os.walk(server_workdir):
+            root = root.replace(server_workdir, '')
+            if not root.startswith('/'):
+                root = '/' + root
+
+            if root in filter_directories:
+                continue
+
+            elements[root] = []
+            for f in files:
+                elements[root].append(f)
+
+        return elements
+
     def _start_node(self, server_workdir=DEFAULT_SERVER_WORKDIR, init=True):
-        server_workdir = '{}/{}'.format(self._work_dir.name, server_workdir)
+        server_workdir = self._path_server_workdir(server_workdir)
         os.mkdir(server_workdir)
         self._process = self._start_server(
             server_workdir,

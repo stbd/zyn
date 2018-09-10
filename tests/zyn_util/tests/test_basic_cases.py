@@ -58,6 +58,16 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         self._validate_response(rsp, c)
         rsp.as_create_rsp()
 
+    def test_create_file_with_same_name_under_different_parent(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        rsp = c.create_file_random_access('file', parent_node_id=0)
+        self._validate_response(rsp, c)
+        rsp = c.create_folder('folder', parent_node_id=0)
+        self._validate_response(rsp, c)
+        rsp = rsp.as_create_rsp()
+        rsp = c.create_file_random_access('file', parent_node_id=rsp.node_id)
+        self._validate_response(rsp, c)
+
     def test_create_folder_parent_node_id(self):
         c = self._start_and_connect_to_node_and_handle_auth()
         rsp = c.create_folder('folder-1', parent_node_id=0)
@@ -210,6 +220,40 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         rsp = c.delete(path='/folder')
         self._validate_response(rsp, c)
         self._validate_fs_element_does_not_exist(c, create_rsp.node_id)
+
+    def test_files_created_on_server_workdir(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        files_1 = self._get_files_in_server_workdir()
+
+        # After startup, system has two folders, root has three files
+        self.assertEqual(len(files_1), 2)
+        self.assertEqual(len(files_1['/']), 3)
+
+        # Creating directory does not cause new fs element
+        c.create_folder('folder', parent_path='/').as_create_rsp()
+        files_2 = self._get_files_in_server_workdir(filter_directories=files_1.keys())
+        self.assertEqual(len(files_2), 0)
+
+        c.create_file_random_access('file', parent_path='/').as_create_rsp()
+        files_3 = self._get_files_in_server_workdir(filter_directories=files_1.keys())
+
+        # Creating file creates one folder with two files
+        self.assertEqual(len(files_3), 1)
+        self.assertEqual(len(files_3[list(files_3)[0]]), 2)
+
+        # todo: validate blob creates new block file
+
+    def test_delete_file_deletes_elements_on_disk(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        files_1 = self._get_files_in_server_workdir()
+
+        rsp = c.create_file_random_access('file', parent_path='/').as_create_rsp()
+        files_2 = self._get_files_in_server_workdir(filter_directories=files_1.keys())
+        self.assertEqual(len(files_2), 1)
+
+        c.delete(node_id=rsp.node_id)
+        files_3 = self._get_files_in_server_workdir(filter_directories=files_1.keys())
+        self.assertEqual(len(files_3), 0)
 
 
 class TestBasicEditFile(zyn_util.tests.common.TestCommon):

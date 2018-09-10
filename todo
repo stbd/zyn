@@ -30,9 +30,6 @@
  * It is possible to create file/folder with name that already exists under parent
  * Think about how to handle reopening file
   * Could user promote file from read mode to write mode?
- * Creating file with same name in different folder fails
-  * self._create_file(cli, '/dir-1/file-1', '-ra')
-  * self._create_file(cli, '/dir-2/file-1', '-ra')
  * Deleting/moving files on remote should be notified on client
 
 ## Security
