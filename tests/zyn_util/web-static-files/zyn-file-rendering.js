@@ -14,6 +14,7 @@ function zyn_render_file_content(content_element, current_file) {
     if (current_file.file_extension() == 'md') {
         var converter = new showdown.Converter({
             'simplifiedAutoLink': true,
+            'tables': true,
         });
         var html = converter.makeHtml(current_file.decoded());
         content_element.innerHTML = html;

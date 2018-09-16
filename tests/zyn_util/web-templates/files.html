@@ -9,7 +9,7 @@
     <script type="text/javascript" src="{{ static_url('zyn.js') }}"></script>
     <script type="text/javascript" src="{{ static_url('files.js') }}"></script>
     <script type="text/javascript" src="{{ static_url('zyn-file-rendering.js') }}"></script>
-    <script type="text/javascript" src="{{ static_url('utf8.js') }}"></script>
+    <script type="text/javascript" src="{{ static_url('3pp/utf8.js') }}"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
 
@@ -782,10 +782,16 @@
                '<pre id="zyn-edit-content" contenteditable="true" '
                + 'class="w3-pale-green" '
                + 'onkeyup="_handle_file_keypressed_on_file_content()"'
-               + '>'
-               + _current_file.decoded()
-               + '</pre>'
+               + '></pre>'
            ;
+           var editor = document.getElementById('zyn-edit-content');
+           editor.innerText = _current_file.decoded();
+           // Drop formating when text is pasted to editor area
+           editor.addEventListener("paste", function(e) {
+               e.preventDefault();
+               var text = e.clipboardData.getData("text/plain");
+               document.execCommand("insertHTML", false, text);
+           });
 
        } else if (_current_file.mode() === CurrentFile.mode_view) {
            var content_element = document.getElementById('zyn-document-content');
