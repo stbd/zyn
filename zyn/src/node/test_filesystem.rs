@@ -38,7 +38,7 @@ impl State {
         init_logging();
         let dir: TempDir = create_temp_folder();
         State {
-            fs: Filesystem::new_with_capacity(create_crypto(), dir.path(), State::number_of_files()),
+            fs: Filesystem::new_with_capacity(create_crypto(), dir.path(), State::number_of_files(), 500),
             dir: dir,
         }
     }
@@ -145,6 +145,8 @@ fn test_serialization() {
     let node_id_folder = state.fs.create_folder(& NODE_ID_ROOT, folder_name, State::user_1()).unwrap();
     let node_id_file_1 = state.fs.create_file(& node_id_folder, filename_1, State::user_1(), FileType::RandomAccess, State::page_size()).unwrap();
     let node_id_file_2 = state.fs.create_file(& node_id_folder, filename_2, State::user_1(), FileType::RandomAccess, State::page_size()).unwrap();
+    let number_of_files = state.fs.number_of_files();
+    let max_number_of_files_per_dir = state.fs.max_number_of_files_per_directory();
 
     let revision_1;
     {
@@ -164,4 +166,6 @@ fn test_serialization() {
     let resolved_ids = state.resolve_from_root(& format!("/{}/{}", folder_name, filename_2), 3);
     assert!(resolved_ids[1] == node_id_folder);
     assert!(resolved_ids[2] == node_id_file_2);
+    assert!(number_of_files == state.fs.number_of_files());
+    assert!(max_number_of_files_per_dir == state.fs.max_number_of_files_per_directory());
 }

@@ -196,6 +196,7 @@ pub type SerializedFilesystemFolder = (
 #[derive(Serialize, Deserialize)]
 pub struct SerializedFilesystem {
     pub capacity: usize,
+    pub max_number_of_files_per_directory: usize,
     pub files: Vec<SerializedFilesystemFile>,
     pub folders: Vec<SerializedFilesystemFolder>,
 }
@@ -205,9 +206,10 @@ impl SerializedFilesystem {
         1
     }
 
-    pub fn new(capacity: usize) -> SerializedFilesystem {
+    pub fn new(capacity: usize, max_number_of_files_per_directory: usize) -> SerializedFilesystem {
         SerializedFilesystem {
             capacity: capacity,
+            max_number_of_files_per_directory: max_number_of_files_per_directory,
             files: Vec::new(),
             folders: Vec::new(),
         }

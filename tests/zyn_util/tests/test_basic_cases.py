@@ -234,12 +234,22 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         files_2 = self._get_files_in_server_workdir(filter_directories=files_1.keys())
         self.assertEqual(len(files_2), 0)
 
-        c.create_file_random_access('file', parent_path='/').as_create_rsp()
+        c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
         files_3 = self._get_files_in_server_workdir(filter_directories=files_1.keys())
 
-        # Creating file creates one folder with two files
-        self.assertEqual(len(files_3), 1)
-        self.assertEqual(len(files_3[list(files_3)[0]]), 2)
+        # Creating file should create containing directory and directory for file content which is
+        # split into two files by default
+        self.assertEqual(len(files_3), 2)
+        self.assertEqual(len(files_3[list(files_3)[0]]), 0)
+        self.assertEqual(len(files_3[list(files_3)[1]]), 2)
+
+        # Containing file exists so new file should only create one directory
+        c.create_file_random_access('file-2', parent_path='/').as_create_rsp()
+        files_4 = self._get_files_in_server_workdir(
+            filter_directories=list(files_1) + list(files_3)
+        )
+        self.assertEqual(len(files_4), 1)
+        self.assertEqual(len(files_4[list(files_4)[0]]), 2)
 
         # todo: validate blob creates new block file
 
@@ -248,12 +258,14 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         files_1 = self._get_files_in_server_workdir()
 
         rsp = c.create_file_random_access('file', parent_path='/').as_create_rsp()
-        files_2 = self._get_files_in_server_workdir(filter_directories=files_1.keys())
-        self.assertEqual(len(files_2), 1)
+        files_2 = self._get_files_in_server_workdir(filter_directories=list(files_1))
+        self.assertEqual(len(files_2), 2)
 
+        # Deleting file deletes the directory for file content, but leaves the
+        # parent directory intact
         c.delete(node_id=rsp.node_id)
-        files_3 = self._get_files_in_server_workdir(filter_directories=files_1.keys())
-        self.assertEqual(len(files_3), 0)
+        files_3 = self._get_files_in_server_workdir(filter_directories=list(files_1))
+        self.assertEqual(len(files_3), 1)
 
 
 class TestBasicEditFile(zyn_util.tests.common.TestCommon):

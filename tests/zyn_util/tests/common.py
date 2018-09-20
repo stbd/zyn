@@ -1,3 +1,4 @@
+import collections
 import datetime
 import logging
 import os
@@ -153,7 +154,7 @@ class TestCommon(TestZyn):
             filter_directories=[]
     ):
         server_workdir = self._path_server_workdir(server_workdir)
-        elements = {}
+        elements = collections.OrderedDict()
         for root, dirs, files in os.walk(server_workdir):
             root = root.replace(server_workdir, '')
             if not root.startswith('/'):

@@ -78,8 +78,11 @@ impl Node {
 }
 
 pub const DEFAULT_MAX_NUMBER_OF_NODES: usize = 5000;
+pub const DEFAULT_MAX_NUMBER_OF_FILES_PER_DIRECTORY: usize = 5000;
 
 pub struct Filesystem {
+    number_of_files: usize,
+    max_number_of_files_per_dir: usize,
     nodes: Vec<Node>,
     crypto: Crypto,
     path_storage_folder: PathBuf,
@@ -87,10 +90,20 @@ pub struct Filesystem {
 
 impl Filesystem {
 
-    pub fn empty_with_capacity(crypto: Crypto, path_storage_folder: & Path, capacity: usize)
+    pub fn number_of_files(& self) -> usize {
+        self.number_of_files
+    }
+
+    pub fn max_number_of_files_per_directory(& self) -> usize {
+        self.max_number_of_files_per_dir
+    }
+
+    pub fn empty_with_capacity(crypto: Crypto, path_storage_folder: & Path, capacity: usize, max_number_of_files_per_direcotry: usize)
                              -> Filesystem {
 
         let mut fs = Filesystem {
+            number_of_files: 0,
+            max_number_of_files_per_dir: max_number_of_files_per_direcotry,
             nodes: Vec::with_capacity(capacity),
             crypto: crypto,
             path_storage_folder: path_storage_folder.to_path_buf(),
@@ -101,10 +114,10 @@ impl Filesystem {
         fs
     }
 
-    pub fn new_with_capacity(crypto: Crypto, path_storage_folder: & Path, capacity: usize)
+    pub fn new_with_capacity(crypto: Crypto, path_storage_folder: & Path, capacity: usize, max_number_of_files_per_direcotry: usize)
                              -> Filesystem {
 
-        let mut fs = Filesystem::empty_with_capacity(crypto, path_storage_folder, capacity);
+        let mut fs = Filesystem::empty_with_capacity(crypto, path_storage_folder, capacity, max_number_of_files_per_direcotry);
         fs.nodes[NODE_ID_ROOT as usize] = Node::Folder{
             folder: Folder::create(ADMIN_GROUP.clone(), NODE_ID_ROOT)
         };
@@ -112,12 +125,12 @@ impl Filesystem {
     }
 
     pub fn new(crypto: Crypto, path_storage_folder: & Path) -> Filesystem {
-        Filesystem::new_with_capacity(crypto, path_storage_folder, DEFAULT_MAX_NUMBER_OF_NODES)
+        Filesystem::new_with_capacity(crypto, path_storage_folder, DEFAULT_MAX_NUMBER_OF_NODES, DEFAULT_MAX_NUMBER_OF_FILES_PER_DIRECTORY)
     }
 
     pub fn store(& mut self, path_basename: & Path) -> Result<(), ()> {
 
-        let mut fs = SerializedFilesystem::new(self.nodes.capacity());
+        let mut fs = SerializedFilesystem::new(self.nodes.capacity(), self.max_number_of_files_per_dir);
         for (index, node) in self.nodes.iter_mut().enumerate() {
             match *node {
                 Node::File { ref mut file } => {
@@ -166,7 +179,12 @@ impl Filesystem {
             .map_err(| () | error!("Failed to deserialized filesystem"))
             ? ;
 
-        let mut fs = Filesystem::empty_with_capacity(crypto, & path_storage_folder, deserialized.capacity);
+        let mut fs = Filesystem::empty_with_capacity(
+            crypto,
+            & path_storage_folder,
+            deserialized.capacity,
+            deserialized.max_number_of_files_per_directory,
+        );
 
         for & (ref node_id, ref path, ref file_type, ref revision, ref size) in deserialized.files.iter() {
 
@@ -179,6 +197,7 @@ impl Filesystem {
                 .map_err(| () | error!("Failed to init file, path=\"{}\"", path.display()))
                 ? ;
             fs.nodes[*node_id as usize] = Node::File{ file: file };
+            fs.number_of_files += 1;
         }
 
         for & (ref node_id, ref parent, ref created, ref modified, ref read, ref write, ref children)
@@ -283,9 +302,9 @@ impl Filesystem {
                 .map_err(| _ | FilesystemError::ParentIsNotFolder)
                 ? ;
 
-            let path_file_root = self.path_storage_folder.join(
-                Filesystem::hash_filename(parent_node_id, filename)
-            );
+            let path_file_root = self.generate_physical_file_path(parent_node_id, filename)
+                .map_err(| _ | FilesystemError::HostFilesystemError)
+                ? ;
 
             create_dir(& path_file_root)
                 .map_err(| _ | FilesystemError::HostFilesystemError)
@@ -323,6 +342,7 @@ impl Filesystem {
         };
 
         self.nodes[node_id as usize] = Node::File { file: file };
+        self.number_of_files += 1;
         Ok(node_id)
     }
 
@@ -379,6 +399,7 @@ impl Filesystem {
                 }
             }
             if let Node::File { ref mut file } = *element {
+                self.number_of_files -= 1;
                 file.close();
                 remove_dir_all(file.path())
                     .map_err(| _error | FilesystemError::HostFilesystemError)
@@ -401,12 +422,24 @@ impl Filesystem {
         Ok(())
     }
 
-    fn hash_filename(parent_node_id: & NodeId, name: & str) -> PathBuf {
+    fn generate_physical_file_path(& self, parent_node_id: & NodeId, name: & str) -> Result<PathBuf, ()> {
+        let parent_dir = self.path_storage_folder.join(
+            PathBuf::from(
+                format!("{}", self.number_of_files / self.max_number_of_files_per_dir)
+            )
+        );
+
+        if ! parent_dir.exists() {
+            create_dir(& parent_dir)
+                .map_err(| error | error!("Failed to create dir, parent_dir=\"{}\", error=\"{}\"", parent_dir.display(), error))
+                ? ;
+        }
+
         let f = format!("{}-{}-{}", utc_timestamp(), parent_node_id, name);
         let mut hasher = DefaultHasher::new();
         f.hash(& mut hasher);
         let filename = hasher.finish().to_string();
-        PathBuf::from(filename)
+        Ok(parent_dir.join(filename))
     }
 
     fn allocate_node_id(& self) -> Result<NodeId, ()> {
