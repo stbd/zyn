@@ -37,6 +37,7 @@ pub enum FileResponseProtocol {
     LockFile { result: Result<(), FileError> },
     UnlockFile { result: Result<(), FileError> },
     Notification { notification: Notification },
+    CloseNotification { metadata: Metadata },
 }
 
 struct ConnectedAccess {
@@ -296,6 +297,7 @@ impl FileService {
             channel_send: tx_file,
             channel_receive: rx_user,
             unhandled_notitifications: Vec::with_capacity(5),
+            close_notification: None,
         }
     }
 
@@ -525,8 +527,8 @@ impl FileService {
 
             if self.users.len() <= 1 {
                 debug!("Closing file as it has no users, file={}", self.file.display());
-                let _ = send_response(& self.users[0], FileResponseProtocol::Notification {
-                    notification: Notification::FileClosing { }
+                let _ = send_response(& self.users[0], FileResponseProtocol::CloseNotification {
+                    metadata: self.file.metadata.clone(),
                 });
                 exit = true;
             }
@@ -689,8 +691,8 @@ impl FileImpl {
     }
 
     fn store(& mut self) {
-        let _ = self.write_block();
         let _ = self.metadata.store(& self.path_basename, & self.crypto_context);
+        let _ = self.write_block();
     }
 
     fn update_current_block_size(& mut self) {
