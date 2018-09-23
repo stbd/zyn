@@ -354,6 +354,39 @@ class TestBasicEditFile(zyn_util.tests.common.TestCommon):
         rsp, data = self._read(c, create_rsp_2.node_id, 0, 100, rsp_2.revision, data_2)
 
 
+class TestArguments(zyn_util.tests.common.TestCommon):
+    def test_filesystem_capacity(self):
+        self._start_node(filesystem_capacity=1)
+        c = self._connect_to_node_and_handle_auth()
+        self.assertFalse(c.create_file_random_access('file-1', parent_path='/').is_error())
+        self.assertTrue(c.create_file_random_access('file-2', parent_path='/').is_error())
+
+    def test_max_number_of_files_per_directory(self):
+        self._start_node(max_number_of_files_per_directory=2)
+        c = self._connect_to_node_and_handle_auth()
+
+        files_1 = self._get_files_in_server_workdir()
+        c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
+
+        # Creating one file should create two directories, one for file and one for its parent
+        files_2 = self._get_files_in_server_workdir(filter_directories=list(files_1))
+        self.assertEqual(len(files_2), 2)
+
+        # Creating second file should only create one directory for file
+        c.create_file_random_access('file-2', parent_path='/').as_create_rsp()
+        files_3 = self._get_files_in_server_workdir(
+            filter_directories=list(files_1) + list(files_2)
+        )
+        self.assertEqual(len(files_3), 1)
+
+        # Creating third file should again create two directories, one for file and for its parent
+        c.create_file_random_access('file-2', parent_path='/').as_create_rsp()
+        files_4 = self._get_files_in_server_workdir(
+            filter_directories=list(files_1) + list(files_2) + list(files_3)
+        )
+        self.assertEqual(len(files_4), 2)
+
+
 class TestUserAuthority(zyn_util.tests.common.TestCommon):
     def test_create_user(self):
         username = 'user-1'

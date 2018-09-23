@@ -98,13 +98,15 @@ impl Filesystem {
         self.max_number_of_files_per_dir
     }
 
-    pub fn empty_with_capacity(crypto: Crypto, path_storage_folder: & Path, capacity: usize, max_number_of_files_per_direcotry: usize)
+    pub fn empty_with_capacity(crypto: Crypto, path_storage_folder: & Path, capacity: usize, max_number_of_files_per_directory: usize)
                              -> Filesystem {
+
+        info!("Creating fileystem: cpacity={}, max_number_of_files_per_directory={}", capacity, max_number_of_files_per_directory);
 
         let mut fs = Filesystem {
             number_of_files: 0,
-            max_number_of_files_per_dir: max_number_of_files_per_direcotry,
-            nodes: Vec::with_capacity(capacity),
+            max_number_of_files_per_dir: max_number_of_files_per_directory,
+            nodes: Vec::with_capacity(capacity + 1), // Root dir takes one place, so add one
             crypto: crypto,
             path_storage_folder: path_storage_folder.to_path_buf(),
         };
@@ -114,10 +116,10 @@ impl Filesystem {
         fs
     }
 
-    pub fn new_with_capacity(crypto: Crypto, path_storage_folder: & Path, capacity: usize, max_number_of_files_per_direcotry: usize)
+    pub fn new_with_capacity(crypto: Crypto, path_storage_folder: & Path, capacity: usize, max_number_of_files_per_directory: usize)
                              -> Filesystem {
 
-        let mut fs = Filesystem::empty_with_capacity(crypto, path_storage_folder, capacity, max_number_of_files_per_direcotry);
+        let mut fs = Filesystem::empty_with_capacity(crypto, path_storage_folder, capacity, max_number_of_files_per_directory);
         fs.nodes[NODE_ID_ROOT as usize] = Node::Folder{
             folder: Folder::create(ADMIN_GROUP.clone(), NODE_ID_ROOT)
         };
@@ -310,6 +312,13 @@ impl Filesystem {
                 .map_err(| _ | FilesystemError::HostFilesystemError)
                ? ;
 
+            let node_id = self.allocate_node_id()
+                .map_err(| () | {
+                    warn!("Failed to allocate NodeId, user={}, filename={}", user, filename);
+                    FilesystemError::AllNodesInUse
+                })
+                ? ;
+
             let file = FileHandle::create(
                 path_file_root,
                 & self.crypto.clone(),
@@ -321,13 +330,6 @@ impl Filesystem {
                 .map_err(| () | {
                     warn!("Failed to create file, user={}, filename={}", user, filename);
                     FilesystemError::HostFilesystemError
-                })
-                ? ;
-
-            let node_id = self.allocate_node_id()
-                .map_err(| () | {
-                    warn!("Failed to allocate NodeId, user={}, filename={}", user, filename);
-                    FilesystemError::AllNodesInUse
                 })
                 ? ;
 

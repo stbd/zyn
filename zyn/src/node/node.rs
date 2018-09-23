@@ -17,7 +17,7 @@ use node::crypto::{ Crypto };
 use node::file_handle::{ FileAccess, FileProperties };
 use node::filesystem::{ Filesystem, FilesystemError, Node as FsNode };
 use node::user_authority::{ UserAuthority, Id };
-use node::serialize::{ SerializedNodeSettings };
+use node::serialize::{ SerializedNode };
 
 pub enum NodeError {
     InvalidUsernamePassword,
@@ -165,9 +165,11 @@ struct ClientInfo {
 }
 
 pub struct NodeSettings {
-    pub page_size_random_access_file: usize,
-    pub page_size_blob_file: usize,
-    pub socket_buffer_size: usize,
+    pub max_page_size_random_access_file: usize,
+    pub max_page_size_blob_file: usize,
+    pub max_number_of_files_per_directory: usize,
+    pub filesystem_capacity: u64,
+    pub socket_buffer_size: u64,
 }
 
 pub struct Node {
@@ -175,11 +177,13 @@ pub struct Node {
     clients: Vec<ClientInfo>,
     filesystem: Filesystem,
     auth: UserAuthority,
-    settings: NodeSettings,
     path_workdir: PathBuf,
     crypto: Crypto,
     started_at: Timestamp,
     server_id: u64,
+    max_page_size_random_access_file: usize,
+    max_page_size_blob_file: usize,
+    client_socket_buffer_size: usize,
 }
 
 impl Node {
@@ -226,15 +230,20 @@ impl Node {
             .map_err(| error | error!("failed to create data dir, error=\"{}\"", error))
             ? ;
 
-        let mut fs = Filesystem::new(crypto, & path_data_dir);
+        let mut fs = Filesystem::new_with_capacity(
+            crypto,
+            & path_data_dir,
+            settings.filesystem_capacity as usize,
+            settings.max_number_of_files_per_directory as usize
+        );
         fs.store(& Node::path_filesystem(path_workdir))
             .map_err(| () | error!("Failed to store filesystem"))
             ? ;
 
-        let serialized_node_settings = SerializedNodeSettings {
+        let serialized_node_settings = SerializedNode {
             client_input_buffer_size: settings.socket_buffer_size as u64,
-            page_size_for_random_access_files: settings.page_size_random_access_file as u64,
-            page_size_for_blob_files: settings.page_size_blob_file as u64,
+            page_size_for_random_access_files: settings.max_page_size_random_access_file as u64,
+            page_size_for_blob_files: settings.max_page_size_blob_file as u64,
         };
 
         serialized_node_settings.write(context_node_settings, & Node::path_node(path_workdir))
@@ -264,10 +273,10 @@ impl Node {
             .map_err(| () | error!("Failed to store filesystem"))
             ? ;
 
-        let serialized_node_settings = SerializedNodeSettings {
-            client_input_buffer_size: self.settings.socket_buffer_size as u64,
-            page_size_for_random_access_files: self.settings.page_size_random_access_file as u64,
-            page_size_for_blob_files: self.settings.page_size_blob_file as u64,
+        let serialized_node_settings = SerializedNode {
+            client_input_buffer_size: self.client_socket_buffer_size as u64,
+            page_size_for_random_access_files: self.max_page_size_random_access_file as u64,
+            page_size_for_blob_files: self.max_page_size_blob_file as u64,
         };
 
         serialized_node_settings.write(context_node_settings, & Node::path_node(& self.path_workdir))
@@ -297,7 +306,7 @@ impl Node {
             .map_err(| () | error!("Failed to load filesystem"))
             ? ;
 
-        let settings = SerializedNodeSettings::read(context_node_settings, & Node::path_node(path_workdir))
+        let settings = SerializedNode::read(context_node_settings, & Node::path_node(path_workdir))
             .map_err(| () | error!("Failed to load node settings"))
             ? ;
 
@@ -308,11 +317,9 @@ impl Node {
             auth: auth,
             path_workdir: path_workdir.to_path_buf(),
             crypto: crypto,
-            settings: NodeSettings {
-                page_size_random_access_file: settings.page_size_for_random_access_files as usize,
-                page_size_blob_file: settings.page_size_for_blob_files as usize,
-                socket_buffer_size: settings.client_input_buffer_size as usize,
-            },
+            max_page_size_random_access_file: settings.page_size_for_random_access_files as usize,
+            max_page_size_blob_file: settings.page_size_for_blob_files as usize,
+            client_socket_buffer_size: settings.client_input_buffer_size as usize,
             started_at: utc_timestamp(),
             server_id: random::<u64>(),
         })
@@ -388,7 +395,8 @@ impl Node {
                                     & mut node_id_buffer,
                                     & mut self.filesystem,
                                     & mut self.auth,
-                                    & self.settings,
+                                    self.max_page_size_random_access_file,
+                                    self.max_page_size_blob_file,
                                     parent,
                                     type_of_file,
                                     name,
@@ -656,7 +664,7 @@ impl Node {
 
                     let (tx_node, rx_node) = channel::<ClientProtocol>();
                     let (tx_client, rx_client) = channel::<NodeProtocol>();
-                    let buffer_size = self.settings.socket_buffer_size;
+                    let buffer_size = self.client_socket_buffer_size;
 
                     let handle = spawn( move || {
                         let mut client = Client::new(
@@ -708,7 +716,8 @@ impl Node {
         node_id_buffer: & mut [NodeId],
         filesystem: & mut Filesystem,
         auth: & mut UserAuthority,
-        settings: & NodeSettings,
+        max_page_size_random_access_file: usize,
+        max_page_size_blob_file: usize,
         parent_fd: FileDescriptor,
         type_of_file: FileType,
         name: String,
@@ -733,8 +742,8 @@ impl Node {
         }
 
         let page_size = match type_of_file {
-            FileType::RandomAccess => settings.page_size_random_access_file,
-            FileType::Blob => settings.page_size_blob_file,
+            FileType::RandomAccess => max_page_size_random_access_file,
+            FileType::Blob => max_page_size_blob_file,
         };
 
         filesystem.create_file(

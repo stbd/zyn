@@ -69,6 +69,8 @@ class TestZyn(unittest.TestCase):
             gpg_fingerprint=None,
             default_username=None,
             default_password=None,
+            filesystem_capacity=None,
+            max_number_of_files_per_directory=None,
             init=False
     ):
         params = []
@@ -102,6 +104,14 @@ class TestZyn(unittest.TestCase):
 
         params.append('--default-user-password')
         params.append(default_password or self._password)
+
+        if filesystem_capacity is not None:
+            params.append('--filesystem-capacity')
+            params.append(str(filesystem_capacity))
+
+        if max_number_of_files_per_directory is not None:
+            params.append('--max-number-of-files-per-directory')
+            params.append(str(max_number_of_files_per_directory))
 
         process = self._start_server_process(params)
         time.sleep(.1)  # Give some time for the process to start up
@@ -169,12 +179,13 @@ class TestCommon(TestZyn):
 
         return elements
 
-    def _start_node(self, server_workdir=DEFAULT_SERVER_WORKDIR, init=True):
+    def _start_node(self, server_workdir=DEFAULT_SERVER_WORKDIR, init=True, **kwargs):
         server_workdir = self._path_server_workdir(server_workdir)
         os.mkdir(server_workdir)
         self._process = self._start_server(
             server_workdir,
             init=init,
+            **kwargs
         )
 
     def _connect_to_node(self):

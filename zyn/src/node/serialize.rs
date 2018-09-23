@@ -96,13 +96,13 @@ impl<'de> Deserialize<'de> for FileType {
 ////////////////////////////////////////////////////////////////////
 
 #[derive(Serialize, Deserialize)]
-pub struct SerializedNodeSettings {
+pub struct SerializedNode {
     pub client_input_buffer_size: u64,
     pub page_size_for_random_access_files: u64,
     pub page_size_for_blob_files: u64,
 }
 
-impl SerializedNodeSettings {
+impl SerializedNode {
     fn current_version() -> u32 {
         1
     }
@@ -110,7 +110,7 @@ impl SerializedNodeSettings {
     pub fn write(& self, crypto_context: Context, path_basename: & Path)
                  -> Result<(), ()> {
 
-        let path = path_with_version(path_basename, SerializedNodeSettings::current_version());
+        let path = path_with_version(path_basename, SerializedNode::current_version());
 
         debug!("Serializing node settings to path={}", path.display());
 
@@ -130,12 +130,12 @@ impl SerializedNodeSettings {
     }
 
     pub fn read(crypto_context: Context, path_basename: & Path)
-                -> Result<SerializedNodeSettings, ()> {
+                -> Result<SerializedNode, ()> {
 
 
         let (version, path) = find_serialized_file_version(
             path_basename,
-            SerializedNodeSettings::current_version()
+            SerializedNode::current_version()
         )
             .map_err(|()| error!("Failed to find any version of serialized node settings"))
             ? ;
@@ -160,7 +160,7 @@ impl SerializedNodeSettings {
             let serialized = str::from_utf8(& decrypted)
                 .map_err(log_utf_error)
                 .and_then(
-                    |utf| serde_json::from_str::<SerializedNodeSettings>(utf)
+                    |utf| serde_json::from_str::<SerializedNode>(utf)
                         .map_err(log_serde_error)
                 )
                 ? ;
