@@ -62,21 +62,21 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         c = self._start_and_connect_to_node_and_handle_auth()
         rsp = c.create_file_random_access('file', parent_node_id=0)
         self._validate_response(rsp, c)
-        rsp = c.create_folder('folder', parent_node_id=0)
+        rsp = c.create_directory('folder', parent_node_id=0)
         self._validate_response(rsp, c)
         rsp = rsp.as_create_rsp()
         rsp = c.create_file_random_access('file', parent_node_id=rsp.node_id)
         self._validate_response(rsp, c)
 
-    def test_create_folder_parent_node_id(self):
+    def test_create_directory_parent_node_id(self):
         c = self._start_and_connect_to_node_and_handle_auth()
-        rsp = c.create_folder('folder-1', parent_node_id=0)
+        rsp = c.create_directory('folder-1', parent_node_id=0)
         self._validate_response(rsp, c)
         rsp.as_create_rsp()
 
-    def test_create_folder_with_file(self):
+    def test_create_directory_with_file(self):
         c = self._start_and_connect_to_node_and_handle_auth()
-        rsp = c.create_folder('folder-1', parent_node_id=0)
+        rsp = c.create_directory('folder-1', parent_node_id=0)
         self._validate_response(rsp, c)
         create_rsp = rsp.as_create_rsp()
         rsp = c.create_file_random_access('file-1', parent_node_id=create_rsp.node_id)
@@ -120,7 +120,7 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
     def test_open_write_with_node_id_and_close_file(self):
         self._open_close(use_node_id=True, write=True)
 
-    def _validate_query_list_response(
+    def _validate_query_fs_children_response(
             self,
             element,
             expected_name,
@@ -131,15 +131,15 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         self.assertEqual(element.node_id, expected_node_id)
         self.assertEqual(element.type_of_element, expected_element_type)
 
-    def test_query_list(self):
+    def test_query_fs_children(self):
         c = self._start_and_connect_to_node_and_handle_auth()
         create_rsp_file_1 = c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
-        create_rsp_folder = c.create_folder('folder-1', parent_path='/').as_create_rsp()
-        create_rsp_file_2 = c.create_file_random_access('file-2', parent_path='/').as_create_rsp()
+        create_rsp_folder = c.create_directory('folder-1', parent_path='/').as_create_rsp()
+        create_rsp_file_2 = c.create_file_blob('file-2', parent_path='/').as_create_rsp()
 
-        rsp = c.query_list(path='/')
+        rsp = c.query_fs_children(path='/')
         self._validate_response(rsp, c)
-        query_rsp = rsp.as_query_list_rsp()
+        query_rsp = rsp.as_query_fs_children_rsp()
 
         self.assertEqual(query_rsp.number_of_elements(), 3)
         names = [e.name for e in query_rsp.elements]
@@ -147,53 +147,70 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         index_file_2 = names.index('file-2')
         index_folder = names.index('folder-1')
 
-        self._validate_query_list_response(
+        self._validate_query_fs_children_response(
             query_rsp.elements[index_file_1],
             'file-1',
             create_rsp_file_1.node_id,
-            zyn_util.connection.FILE_TYPE_FILE
+            zyn_util.connection.FILESYSTEM_ELEMENT_FILE
         )
-        self._validate_query_list_response(
+        self.assertEqual(query_rsp.elements[index_file_1].revision, 0)
+        self.assertEqual(
+            query_rsp.elements[index_file_1].file_type,
+            zyn_util.connection.FILE_TYPE_RANDOM_ACCESS
+        )
+        self.assertEqual(query_rsp.elements[index_file_1].size, 0)
+
+        self._validate_query_fs_children_response(
             query_rsp.elements[index_file_2],
             'file-2',
             create_rsp_file_2.node_id,
-            zyn_util.connection.FILE_TYPE_FILE
+            zyn_util.connection.FILESYSTEM_ELEMENT_FILE
         )
-        self._validate_query_list_response(
+        self.assertEqual(query_rsp.elements[index_file_2].revision, 0)
+        self.assertEqual(
+            query_rsp.elements[index_file_2].file_type,
+            zyn_util.connection.FILE_TYPE_BLOB
+        )
+        self.assertEqual(query_rsp.elements[index_file_1].size, 0)
+
+        self._validate_query_fs_children_response(
             query_rsp.elements[index_folder],
             'folder-1',
             create_rsp_folder.node_id,
-            zyn_util.connection.FILE_TYPE_FOLDER
+            zyn_util.connection.FILESYSTEM_ELEMENT_DIRECTORY
         )
 
-    def test_query_filesystem_random_access_file(self):
+    def test_query_fs_element_random_access_file(self):
         c = self._start_and_connect_to_node_and_handle_auth()
         create_rsp = c.create_file_random_access('file-1', parent_path='/').as_create_rsp()
-        rsp = c.query_filesystem(node_id=create_rsp.node_id)
+        rsp = c.query_fs_element(node_id=create_rsp.node_id)
         self._validate_response(rsp, c)
-        query_rsp = rsp.as_query_filesystem_rsp()
-        self.assertEqual(query_rsp.type_of_element, zyn_util.connection.FILE_TYPE_FILE)
+        query_rsp = rsp.as_query_fs_element_rsp()
+        self.assertEqual(query_rsp.type_of_element, zyn_util.connection.FILESYSTEM_ELEMENT_FILE)
         self.assertEqual(query_rsp.node_id, create_rsp.node_id)
         self.assertNotEqual(query_rsp.block_size, 0)
         self.assertTrue(query_rsp.is_random_access_file())
         self.assertFalse(query_rsp.is_blob_file())
 
-    def test_query_filesystem_blob_file(self):
+    def test_query_fs_element_blob_file(self):
         c = self._start_and_connect_to_node_and_handle_auth()
         create_rsp = c.create_file_blob('file-1', parent_path='/').as_create_rsp()
-        rsp = c.query_filesystem(node_id=create_rsp.node_id)
+        rsp = c.query_fs_element(node_id=create_rsp.node_id)
         self._validate_response(rsp, c)
-        query_rsp = rsp.as_query_filesystem_rsp()
+        query_rsp = rsp.as_query_fs_element_rsp()
         self.assertFalse(query_rsp.is_random_access_file())
         self.assertTrue(query_rsp.is_blob_file())
 
-    def test_query_filesystem_folder(self):
+    def test_query_fs_element_folder(self):
         c = self._start_and_connect_to_node_and_handle_auth()
-        create_rsp = c.create_folder('folder-1', parent_path='/').as_create_rsp()
-        rsp = c.query_filesystem(node_id=create_rsp.node_id)
+        create_rsp = c.create_directory('folder-1', parent_path='/').as_create_rsp()
+        rsp = c.query_fs_element(node_id=create_rsp.node_id)
         self._validate_response(rsp, c)
-        query_rsp = rsp.as_query_filesystem_rsp()
-        self.assertEqual(query_rsp.type_of_element, zyn_util.connection.FILE_TYPE_FOLDER)
+        query_rsp = rsp.as_query_fs_element_rsp()
+        self.assertEqual(
+            query_rsp.type_of_element,
+            zyn_util.connection.FILESYSTEM_ELEMENT_DIRECTORY
+        )
         self.assertEqual(query_rsp.node_id, create_rsp.node_id)
 
     def _validate_fs_element_does_not_exist(self, connection, node_id=None, path=None):
@@ -214,9 +231,9 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         self._validate_response(rsp, c)
         self._validate_fs_element_does_not_exist(c, create_rsp.node_id)
 
-    def test_delete_folder_with_path(self):
+    def test_delete_directory_with_path(self):
         c = self._start_and_connect_to_node_and_handle_auth()
-        create_rsp = c.create_folder('folder', parent_path='/').as_create_rsp()
+        create_rsp = c.create_directory('folder', parent_path='/').as_create_rsp()
         rsp = c.delete(path='/folder')
         self._validate_response(rsp, c)
         self._validate_fs_element_does_not_exist(c, create_rsp.node_id)
@@ -230,7 +247,7 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         self.assertEqual(len(files_1['/']), 3)
 
         # Creating directory does not cause new fs element
-        c.create_folder('folder', parent_path='/').as_create_rsp()
+        c.create_directory('folder', parent_path='/').as_create_rsp()
         files_2 = self._get_files_in_server_workdir(filter_directories=files_1.keys())
         self.assertEqual(len(files_2), 0)
 
@@ -380,11 +397,41 @@ class TestArguments(zyn_util.tests.common.TestCommon):
         self.assertEqual(len(files_3), 1)
 
         # Creating third file should again create two directories, one for file and for its parent
-        c.create_file_random_access('file-2', parent_path='/').as_create_rsp()
+        c.create_file_random_access('file-3', parent_path='/').as_create_rsp()
         files_4 = self._get_files_in_server_workdir(
             filter_directories=list(files_1) + list(files_2) + list(files_3)
         )
         self.assertEqual(len(files_4), 2)
+
+    def test_create_file_page_size_random_access(self):
+        max_page_size = 1024
+        self._start_node(max_page_size_random_access=max_page_size)
+        c = self._connect_to_node_and_handle_auth()
+        self.assertFalse(c.create_file_random_access(
+            'file-1',
+            parent_path='/',
+            page_size=max_page_size - 100
+        ).is_error())
+        self.assertTrue(c.create_file_random_access(
+            'file-2',
+            parent_path='/',
+            page_size=max_page_size + 100
+        ).is_error())
+
+    def test_create_file_page_size_blob(self):
+        max_page_size = 1024
+        self._start_node(max_page_size_blob=max_page_size)
+        c = self._connect_to_node_and_handle_auth()
+        self.assertFalse(c.create_file_blob(
+            'file-1',
+            parent_path='/',
+            page_size=max_page_size - 100
+        ).is_error())
+        self.assertTrue(c.create_file_blob(
+            'file-2',
+            parent_path='/',
+            page_size=max_page_size + 100
+        ).is_error())
 
 
 class TestUserAuthority(zyn_util.tests.common.TestCommon):

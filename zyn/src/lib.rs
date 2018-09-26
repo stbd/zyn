@@ -1,5 +1,3 @@
-extern crate gpgme_sys;
-extern crate libgpg_error_sys;
 extern crate libc;
 extern crate tls_sys;
 extern crate chrono;

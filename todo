@@ -1,14 +1,11 @@
 # todo
 ## Server
  * Think about when to close connection to client
- * Go trough client.rs to make sure trace levels are consistent
  * Make sure naming of blocks is consistent around system (not pages)
  * Cleanup responsibilities between file impl and metadata, who owns the data and who does the action
   * Cleanup file properties
  * Possibility to store protocol messages to file, to make debugging easier?
   * When debugging protocol, passwords are vissible in logs
- * Replace anything that mentions folder to directory
- * Open response should include block size
  * Cleanup and remove references to GPGME
  * Replace all encrypt/decrypt operations with encrypt_to_file and decrypt_from_file
  * Think how commands could be batched together
@@ -27,7 +24,6 @@
  * Are files closed when user disconnects, system test case
 
 ## Issues
- * It is possible to create file/folder with name that already exists under parent
  * Think about how to handle reopening file
   * Could user promote file from read mode to write mode?
  * Deleting/moving files on remote should be notified on client

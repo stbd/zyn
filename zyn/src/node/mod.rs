@@ -1,7 +1,7 @@
 pub mod node;
 pub mod client;
 pub mod filesystem;
-pub mod folder;
+pub mod directory;
 pub mod file_handle;
 pub mod file;
 pub mod crypto;

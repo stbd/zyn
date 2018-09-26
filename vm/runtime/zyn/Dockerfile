@@ -23,7 +23,6 @@ workdir /workdir
 
 run apt-get update && apt-get install \
        wget \
-       libgpgme11-dev \
        build-essential \
        -y
 
@@ -57,7 +56,6 @@ copy --from=build_zyn /zyn /zyn
 
 run apt-get update \
     && apt-get install \
-       libgpgme11-dev \
        expect \
        haveged \
        -y

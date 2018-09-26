@@ -8,8 +8,8 @@ import certifi
 import zyn_util.exception
 
 
-FILE_TYPE_FILE = 0  # todo: Rename FILESYSTEM_ELEMENT_FILE
-FILE_TYPE_FOLDER = 1
+FILESYSTEM_ELEMENT_FILE = 0  # todo: Rename FILESYSTEM_ELEMENT_FILE
+FILESYSTEM_ELEMENT_DIRECTORY = 1
 FILE_TYPE_RANDOM_ACCESS = 0
 FILE_TYPE_BLOB = 1
 TYPE_USER = 0
@@ -94,6 +94,7 @@ class ZynConnection:
             file_type=None,
             parent_node_id=None,
             parent_path=None,
+            page_size=None,
             transaction_id=None
     ):
         parent = self.file_descriptor(parent_node_id, parent_path)
@@ -103,7 +104,13 @@ class ZynConnection:
             + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
             + parent \
             + self.field_string(name) \
-            + self.field_unsigned(file_type) \
+            + self.field_unsigned(file_type)
+
+        if page_size is not None:
+            req += self.field_unsigned(page_size)
+
+        req = \
+            req \
             + ';' \
             + self.field_end_of_message() \
 
@@ -114,6 +121,7 @@ class ZynConnection:
             name,
             parent_node_id=None,
             parent_path=None,
+            page_size=None,
             transaction_id=None
     ):
         return self.create_file(
@@ -121,6 +129,7 @@ class ZynConnection:
             FILE_TYPE_RANDOM_ACCESS,
             parent_node_id,
             parent_path,
+            page_size,
             transaction_id
         )
 
@@ -129,15 +138,23 @@ class ZynConnection:
             name,
             parent_node_id=None,
             parent_path=None,
+            page_size=None,
             transaction_id=None
     ):
-        return self.create_file(name, FILE_TYPE_BLOB, parent_node_id, parent_path, transaction_id)
+        return self.create_file(
+            name,
+            FILE_TYPE_BLOB,
+            parent_node_id,
+            parent_path,
+            page_size,
+            transaction_id
+        )
 
-    def create_folder(self, name, parent_node_id=None, parent_path=None, transaction_id=None):
+    def create_directory(self, name, parent_node_id=None, parent_path=None, transaction_id=None):
         parent = self.file_descriptor(parent_node_id, parent_path)
         req = \
             self.field_version() \
-            + 'CREATE-FOLDER:' \
+            + 'CREATE-DIRECTORY:' \
             + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
             + parent \
             + self.field_string(name) \
@@ -296,10 +313,10 @@ class ZynConnection:
             data = self.read_data(read_size)
         return rsp, data
 
-    def query_list(self, node_id=None, path=None, transaction_id=None):
+    def query_fs_children(self, node_id=None, path=None, transaction_id=None):
         req = \
             self.field_version() \
-            + 'Q-LIST:' \
+            + 'Q-FS-C:' \
             + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
             + self.file_descriptor(node_id, path) \
             + ';' \
@@ -309,10 +326,10 @@ class ZynConnection:
         rsp = self.read_response()
         return rsp
 
-    def query_filesystem(self, node_id=None, path=None, transaction_id=None):
+    def query_fs_element(self, node_id=None, path=None, transaction_id=None):
         req = \
             self.field_version() \
-            + 'Q-FILESYSTEM:' \
+            + 'Q-FS-E:' \
             + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
             + self.file_descriptor(node_id, path) \
             + ';' \
@@ -712,6 +729,27 @@ TAG_KEY_VALUE = 'KVP'
 TAG_LIST_ELEMENT = 'LE'
 TAG_TRANSACTION_ID = 'T'
 TAG_PROTOCOL_VERSION = 'V'
+TAG_AUTHORITY = 'AUTHORITY'
+
+
+class Authority:
+    def __init__(self, type_of, name):
+        _validate_authority_type(type_of)
+        self.type = type_of
+        self.name = name
+
+    def is_group(self):
+        return self.type == TYPE_GROUP
+
+    def is_user(self):
+        return self.type == TYPE_USER
+
+    def __str__(self):
+        if self.type == TYPE_GROUP:
+            t = 'GROUP'
+        elif self.type == TYPE_USER:
+            t = 'USER'
+        return '{}:{}'.format(t, self.name)
 
 
 class Field:
@@ -722,6 +760,13 @@ class Field:
         if self._content[0] != TAG_UINT:
             _malfomed_message()
         return int(self._content[1])
+
+    def as_authority(self):
+        if self._content[0] != TAG_AUTHORITY:
+            _malfomed_message()
+        authority_type = Field(self._content[1]).as_uint()
+        name = Field(self._content[2]).as_string()
+        return Authority(authority_type, name)
 
     def as_node_id(self):
         if self._content[0] != TAG_NODE_ID:
@@ -798,12 +843,17 @@ def _malfomed_message():
 
 
 def _validate_file_system_element_type(type_of_element):
-    if type_of_element not in [FILE_TYPE_FILE, FILE_TYPE_FOLDER]:
+    if type_of_element not in [FILESYSTEM_ELEMENT_FILE, FILESYSTEM_ELEMENT_DIRECTORY]:
         _malfomed_message()
 
 
 def _validate_file_type(type_of_file):
     if type_of_file not in [FILE_TYPE_RANDOM_ACCESS, FILE_TYPE_BLOB]:
+        _malfomed_message()
+
+
+def _validate_authority_type(authority_type):
+    if authority_type not in [TYPE_GROUP, TYPE_USER]:
         _malfomed_message()
 
 
@@ -890,35 +940,39 @@ class OpenResponse:
 
 
 class QueryElement:
-    def __init__(self, name, node_id, type_of_element):
-        self.name = name
-        self.node_id = node_id
-        self.type_of_element = type_of_element
+    def __init__(self, msg):
+        self.type_of_element = msg[0].as_uint()
         _validate_file_system_element_type(self.type_of_element)
 
+        if self.is_file():
+            self.name = msg[1].as_string()
+            self.node_id = msg[2].as_node_id()
+            self.revision = msg[3].as_uint()
+            self.file_type = msg[4].as_uint()
+            self.size = msg[5].as_uint()
+
+        elif self.is_directory():
+            self.name = msg[1].as_string()
+            self.node_id = msg[2].as_node_id()
+            self.read = msg[3].as_authority()
+            self.write = msg[4].as_authority()
+
     def is_file(self):
-        return self.type_of_element == FILE_TYPE_FILE
+        return self.type_of_element == FILESYSTEM_ELEMENT_FILE
 
     def is_directory(self):
-        return self.type_of_element == FILE_TYPE_FOLDER
+        return self.type_of_element == FILESYSTEM_ELEMENT_DIRECTORY
 
 
-class QueryListResponse:
+class QueryFilesystemChildrenResponse:
     def __init__(self, response):
         self._rsp = response
         if response.number_of_fields() != 1:
             _malfomed_message()
 
         self.elements = []
-
         for e in response.field(0).as_list():
-            self.elements.append(
-                QueryElement(
-                    e[0].as_string(),
-                    e[1].as_node_id(),
-                    e[2].as_uint(),
-                )
-            )
+            self.elements.append(QueryElement(e))
 
     def number_of_elements(self):
         return len(self.elements)
@@ -926,18 +980,18 @@ class QueryListResponse:
 
 class QueryFilesystemElementResponse:
     def is_file(self):
-        return self.type_of_element == FILE_TYPE_FILE
+        return self.type_of_element == FILESYSTEM_ELEMENT_FILE
 
     def is_directory(self):
-        return self.type_of_element == FILE_TYPE_FOLDER
+        return self.type_of_element == FILESYSTEM_ELEMENT_DIRECTORY
 
     def is_random_access_file(self):
-        if self.type_of_element != FILE_TYPE_FILE:
+        if self.type_of_element != FILESYSTEM_ELEMENT_FILE:
             raise RuntimeError('Element is not file')
         return self.type_of_file == FILE_TYPE_RANDOM_ACCESS
 
     def is_blob_file(self):
-        if self.type_of_element != FILE_TYPE_FILE:
+        if self.type_of_element != FILESYSTEM_ELEMENT_FILE:
             raise RuntimeError('Element is not file')
         return self.type_of_file == FILE_TYPE_BLOB
 
@@ -949,20 +1003,30 @@ class QueryFilesystemElementResponse:
         self.type_of_element = desc['type'].as_uint()
         _validate_file_system_element_type(self.type_of_element)
 
-        if self.type_of_element == FILE_TYPE_FILE and len(desc) == 8:
-            self.block_size = desc['block-size'].as_uint()
+        self.node_id = desc['node-id'].as_uint()
+        self.created = desc['created-at'].as_uint()
+        self.modified = desc['modified-at'].as_uint()
+
+        if self.type_of_element == FILESYSTEM_ELEMENT_FILE:
+            if len(desc) != 12:
+                print('Unhandled file fields in QueryFilesystemElementResponse')
+
+            self.created_by = desc['created-by'].as_authority()
+            self.modified_by = desc['modified-by'].as_authority()
+            self.write_access = desc['parent-write-authority'].as_authority()
+            self.read_access = desc['parent-read-authority'].as_authority()
+            self.block_size = desc['page-size'].as_uint()
+            self.size = desc['size'].as_uint()
+            self.revision = desc['revision'].as_uint()
             self.type_of_file = desc['file-type'].as_uint()
             _validate_file_type(self.type_of_file)
-        elif self.type_of_element == FILE_TYPE_FOLDER and len(desc) == 6:
-            pass
-        else:
-            _malfomed_message()
 
-        self.node_id = desc['node-id'].as_uint()
-        self.write_access = desc['write-access'].as_string()
-        self.read_access = desc['read-access'].as_string()
-        self.created = desc['created'].as_uint()
-        self.modified = desc['modified'].as_uint()
+        elif self.type_of_element == FILESYSTEM_ELEMENT_DIRECTORY:
+            if len(desc) != 6:
+                print('Unhandled file fields in QueryFilesystemElementResponse')
+
+            self.write_access = desc['write-authority'].as_authority()
+            self.read_access = desc['read-authority'].as_authority()
 
 
 class QueryCountersResponse:
@@ -1031,13 +1095,13 @@ class Response(Message):
     def as_read_rsp(self):
         return ReadResponse(self)
 
-    def as_query_list_rsp(self):
-        return QueryListResponse(self)
+    def as_query_fs_children_rsp(self):
+        return QueryFilesystemChildrenResponse(self)
 
     def as_query_counters_rsp(self):
         return QueryCountersResponse(self)
 
-    def as_query_filesystem_rsp(self):
+    def as_query_fs_element_rsp(self):
         return QueryFilesystemElementResponse(self)
 
     def as_query_system_rsp(self):

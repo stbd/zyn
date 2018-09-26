@@ -72,7 +72,7 @@ impl State {
     fn find_child_index(& self, child_name: & str, path_parent: & str, parent_depth: usize) -> usize {
         let resolved_ids = self.resolve_from_root(path_parent, parent_depth);
         let node = self.fs.node(& resolved_ids[resolved_ids.len() - 1]).unwrap();
-        let parent = node.to_folder().unwrap();
+        let parent = node.to_directory().unwrap();
         let (_, index) = parent.child_with_name(child_name).unwrap();
         index
     }
@@ -91,10 +91,10 @@ fn test_resolve_root() {
 }
 
 #[test]
-fn test_create_folder() {
+fn test_to_directory() {
     let name = "folder-1";
     let mut state = State::empty();
-    let node_id = state.fs.create_folder(& NODE_ID_ROOT, name, State::user_1()).unwrap();
+    let node_id = state.fs.to_directory(& NODE_ID_ROOT, name, State::user_1()).unwrap();
     let resolved_ids = state.resolve_from_root(& format!("/{}", name), 2);
     assert!(resolved_ids[1] == node_id);
 }
@@ -104,13 +104,22 @@ fn test_create_subfolder() {
     let name_1 = "folder-1";
     let name_2 = "folder-2";
     let mut state = State::empty();
-    let node_id_1 = state.fs.create_folder(& NODE_ID_ROOT, name_1, State::user_1()).unwrap();
-    let node_id_2 = state.fs.create_folder(& node_id_1, name_2, State::user_1()).unwrap();
+    let node_id_1 = state.fs.to_directory(& NODE_ID_ROOT, name_1, State::user_1()).unwrap();
+    let node_id_2 = state.fs.to_directory(& node_id_1, name_2, State::user_1()).unwrap();
     let resolved_ids = state.resolve_from_root(& format!("/{}/{}", name_1, name_2), 3);
     assert!(resolved_ids[1] == node_id_1);
     assert!(resolved_ids[2] == node_id_2);
-    assert!(state.fs.node(& node_id_1).unwrap().to_folder().is_ok());
-    assert!(state.fs.node(& node_id_2).unwrap().to_folder().is_ok());
+    assert!(state.fs.node(& node_id_1).unwrap().to_directory().is_ok());
+    assert!(state.fs.node(& node_id_2).unwrap().to_directory().is_ok());
+}
+
+#[test]
+fn test_create_multiple_elements_with_same_path() {
+    let mut state = State::empty();
+    assert!(state.fs.to_directory(& NODE_ID_ROOT, "folder", State::user_1()).is_ok());
+    assert!(state.fs.to_directory(& NODE_ID_ROOT, "folder", State::user_1()).is_err());
+    assert!(state.fs.create_file(& NODE_ID_ROOT, "file", State::user_1(), FileType::RandomAccess, State::page_size()).is_ok());
+    assert!(state.fs.create_file(& NODE_ID_ROOT, "file", State::user_1(), FileType::RandomAccess, State::page_size()).is_err());
 }
 
 #[test]
@@ -142,7 +151,7 @@ fn test_serialization() {
     let written = vec![1, 2 ,3, 4, 5];
     let mut state = State::empty();
 
-    let node_id_folder = state.fs.create_folder(& NODE_ID_ROOT, folder_name, State::user_1()).unwrap();
+    let node_id_folder = state.fs.to_directory(& NODE_ID_ROOT, folder_name, State::user_1()).unwrap();
     let node_id_file_1 = state.fs.create_file(& node_id_folder, filename_1, State::user_1(), FileType::RandomAccess, State::page_size()).unwrap();
     let node_id_file_2 = state.fs.create_file(& node_id_folder, filename_2, State::user_1(), FileType::RandomAccess, State::page_size()).unwrap();
     let number_of_files = state.fs.number_of_files();

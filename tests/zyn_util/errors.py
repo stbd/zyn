@@ -4,22 +4,25 @@ InternalCommunicationError = 2
 ErrorFileIsNotOpen = 3
 ErrorFileOpenedInReadMode = 4
 InvalidUsernamePassword = 100
-ParentIsNotFolder = 101
+ParentIsNotDirectory = 101
 UnauthorizedOperation = 102
 InternalCommunicationError = 103
 InternalError = 104
 UnknownFile = 105
 UnknownAuthority = 106
 AuthorityError = 107
+InvalidPageSize = 108
+FailedToResolveAuthority = 109
 InvalidNodeId = 200
-FolderIsNotEmpty = 201
+DirectoryIsNotEmpty = 201
 InvalidPathSize = 202
 InvalidPath = 203
 HostFilesystemError = 204
 AllNodesInUse = 205
-ParentIsNotFolder = 206
+ParentIsNotDirectory = 206
 NodeIsNotFile = 207
-NodeIsNotFolder = 208
+NodeIsNotDirectory = 208
+ElementWithNameAlreadyExists = 209
 InternalCommunicationError = 300
 InternalError = 301
 RevisionTooOld = 302
@@ -44,7 +47,7 @@ def error_to_string(error):
     elif error == 100:
         return "InvalidUsernamePassword"
     elif error == 101:
-        return "ParentIsNotFolder"
+        return "ParentIsNotDirectory"
     elif error == 102:
         return "UnauthorizedOperation"
     elif error == 103:
@@ -57,10 +60,14 @@ def error_to_string(error):
         return "UnknownAuthority"
     elif error == 107:
         return "AuthorityError"
+    elif error == 108:
+        return "InvalidPageSize"
+    elif error == 109:
+        return "FailedToResolveAuthority"
     elif error == 200:
         return "InvalidNodeId"
     elif error == 201:
-        return "FolderIsNotEmpty"
+        return "DirectoryIsNotEmpty"
     elif error == 202:
         return "InvalidPathSize"
     elif error == 203:
@@ -70,11 +77,13 @@ def error_to_string(error):
     elif error == 205:
         return "AllNodesInUse"
     elif error == 206:
-        return "ParentIsNotFolder"
+        return "ParentIsNotDirectory"
     elif error == 207:
         return "NodeIsNotFile"
     elif error == 208:
-        return "NodeIsNotFolder"
+        return "NodeIsNotDirectory"
+    elif error == 209:
+        return "ElementWithNameAlreadyExists"
     elif error == 300:
         return "InternalCommunicationError"
     elif error == 301:

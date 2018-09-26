@@ -71,6 +71,8 @@ class TestZyn(unittest.TestCase):
             default_password=None,
             filesystem_capacity=None,
             max_number_of_files_per_directory=None,
+            max_page_size_random_access=None,
+            max_page_size_blob=None,
             init=False
     ):
         params = []
@@ -112,6 +114,14 @@ class TestZyn(unittest.TestCase):
         if max_number_of_files_per_directory is not None:
             params.append('--max-number-of-files-per-directory')
             params.append(str(max_number_of_files_per_directory))
+
+        if max_page_size_random_access is not None:
+            params.append('--max-page-size-for-random-access')
+            params.append(str(max_page_size_random_access))
+
+        if max_page_size_blob is not None:
+            params.append('--max-page-size-for-blob')
+            params.append(str(max_page_size_blob))
 
         process = self._start_server_process(params)
         time.sleep(.1)  # Give some time for the process to start up

@@ -619,7 +619,7 @@ class ZynFilesystemClient:
         self._log.debug('Creating directory: dirname="{}", dir_name="{}"'.format(
             dirname, dir_name))
 
-        rsp = self._connection.create_folder(dir_name, parent_path=dirname)
+        rsp = self._connection.create_directory(dir_name, parent_path=dirname)
         zyn_util.util.check_server_response(rsp)
         return rsp.as_create_rsp()
 
@@ -657,14 +657,14 @@ class ZynFilesystemClient:
         self._local_files[path_remote] = dir
 
     def _query_element(self, path):
-        rsp = self._connection.query_filesystem(path=path)
+        rsp = self._connection.query_fs_element(path=path)
         zyn_util.util.check_server_response(rsp)
-        return rsp.as_query_filesystem_rsp()
+        return rsp.as_query_fs_element_rsp()
 
-    def _query_list(self, path_remote_parent):
-        rsp = self._connection.query_list(path=path_remote_parent)
+    def _query_fs_children(self, path_remote_parent):
+        rsp = self._connection.query_fs_children(path=path_remote_parent)
         zyn_util.util.check_server_response(rsp)
-        return rsp.as_query_list_rsp()
+        return rsp.as_query_fs_children_rsp()
 
     def fetch(self, path_in_remote, stop_on_error):
 
@@ -686,8 +686,8 @@ class ZynFilesystemClient:
                 if not dirs:
                     break
                 dir = dirs.pop()
-                query_list = self._query_list(dir)
-                for element in query_list.elements:
+                query_fs_children = self._query_fs_children(dir)
+                for element in query_fs_children.elements:
                     path_remote_element = zyn_util.util.join_paths([dir, element.name])
 
                     print('Processing element "{}"'.format(
@@ -837,7 +837,7 @@ class ZynFilesystemClient:
 
         # todo: handle case where node id is used
 
-        rsp = self._query_list(path_parent)
+        rsp = self._query_fs_children(path_parent)
         local_files = [
             os.path.basename(p)
             for p in glob.glob(zyn_util.util.join_paths([self._path_data, path_parent, '*']))
@@ -890,7 +890,7 @@ class ZynFilesystemClient:
         if not element.exists_locally(self._path_data):
             raise ZynClientException('"{}" does not exist'.format(element.path_remote()))
 
-        rsp = self._connection.query_list(path=element.path_remote())
+        rsp = self._connection.query_fs_children(path=element.path_remote())
         if rsp.error_code() == zyn_util.errors.InvalidPath:
             exists = False
         else:
@@ -946,8 +946,8 @@ class ZynFilesystemClient:
             elements.append((path_in_remote, query_element.node_id))
 
         elif query_element.is_directory():
-            query_list = self._query_list(path_in_remote)
-            for element in query_list.elements:
+            query_fs_children = self._query_fs_children(path_in_remote)
+            for element in query_fs_children.elements:
                 element_path = zyn_util.util.join_paths([path_in_remote, element.name])
                 if element.is_file():
                     elements.append((element_path, element.node_id))
