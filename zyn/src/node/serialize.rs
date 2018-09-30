@@ -96,13 +96,13 @@ impl<'de> Deserialize<'de> for FileType {
 ////////////////////////////////////////////////////////////////////
 
 #[derive(Serialize, Deserialize)]
-pub struct SerializedNodeSettings {
+pub struct SerializedNode {
     pub client_input_buffer_size: u64,
     pub page_size_for_random_access_files: u64,
     pub page_size_for_blob_files: u64,
 }
 
-impl SerializedNodeSettings {
+impl SerializedNode {
     fn current_version() -> u32 {
         1
     }
@@ -110,7 +110,7 @@ impl SerializedNodeSettings {
     pub fn write(& self, crypto_context: Context, path_basename: & Path)
                  -> Result<(), ()> {
 
-        let path = path_with_version(path_basename, SerializedNodeSettings::current_version());
+        let path = path_with_version(path_basename, SerializedNode::current_version());
 
         debug!("Serializing node settings to path={}", path.display());
 
@@ -130,12 +130,12 @@ impl SerializedNodeSettings {
     }
 
     pub fn read(crypto_context: Context, path_basename: & Path)
-                -> Result<SerializedNodeSettings, ()> {
+                -> Result<SerializedNode, ()> {
 
 
         let (version, path) = find_serialized_file_version(
             path_basename,
-            SerializedNodeSettings::current_version()
+            SerializedNode::current_version()
         )
             .map_err(|()| error!("Failed to find any version of serialized node settings"))
             ? ;
@@ -160,7 +160,7 @@ impl SerializedNodeSettings {
             let serialized = str::from_utf8(& decrypted)
                 .map_err(log_utf_error)
                 .and_then(
-                    |utf| serde_json::from_str::<SerializedNodeSettings>(utf)
+                    |utf| serde_json::from_str::<SerializedNode>(utf)
                         .map_err(log_serde_error)
                 )
                 ? ;
@@ -177,6 +177,9 @@ impl SerializedNodeSettings {
 pub type SerializedFilesystemFile = (
     NodeId,
     PathBuf,
+    FileType,
+    FileRevision,
+    u64,
 );
 
 pub type SerializedFilesystemFolder = (
@@ -193,6 +196,7 @@ pub type SerializedFilesystemFolder = (
 #[derive(Serialize, Deserialize)]
 pub struct SerializedFilesystem {
     pub capacity: usize,
+    pub max_number_of_files_per_directory: usize,
     pub files: Vec<SerializedFilesystemFile>,
     pub folders: Vec<SerializedFilesystemFolder>,
 }
@@ -202,9 +206,10 @@ impl SerializedFilesystem {
         1
     }
 
-    pub fn new(capacity: usize) -> SerializedFilesystem {
+    pub fn new(capacity: usize, max_number_of_files_per_directory: usize) -> SerializedFilesystem {
         SerializedFilesystem {
             capacity: capacity,
+            max_number_of_files_per_directory: max_number_of_files_per_directory,
             files: Vec::new(),
             folders: Vec::new(),
         }
@@ -397,8 +402,6 @@ pub struct SerializedMetadata {
     pub modified_by: Id,
     pub revision: FileRevision,
     pub segments: Vec<FileSegment>,
-    pub read: Id,
-    pub write: Id,
     pub parent: NodeId,
     pub file_type: FileType,
     pub max_block_size: usize,
@@ -415,8 +418,6 @@ impl SerializedMetadata {
         modified: Timestamp,
         modified_by: Id,
         revision: FileRevision,
-        read: Id,
-        write: Id,
         parent: NodeId,
         file_type: FileType,
         max_block_size: usize
@@ -429,8 +430,6 @@ impl SerializedMetadata {
             modified_by: modified_by,
             revision: revision,
             segments: Vec::new(),
-            read: read,
-            write: write,
             parent: parent,
             file_type: file_type,
             max_block_size: max_block_size,

@@ -3,9 +3,13 @@ use std::path::{ PathBuf };
 use std::vec::{ Vec };
 
 use node::common::{ Buffer, NodeId, FileDescriptor };
+use node::node::{ Authority };
 
 // todo: collect all static str to constants
 pub static FIELD_END_MARKER: & 'static str = "E:;";
+
+const TYPE_USER: u64 = 0;
+const TYPE_GROUP: u64 = 1;
 
 pub struct ReceiveBuffer {
     pub buffer: Buffer,
@@ -279,6 +283,21 @@ impl SendBuffer {
         self.write_unsigned(value.len() as u64) ? ;
         write!(self.buffer, "B:").map_err(| _ | ()) ? ;
         write!(self.buffer, "{};;", value).map_err(| _ | ())
+    }
+
+    pub fn write_authority(& mut self, value: Authority) -> Result<(), ()> {
+        write!(self.buffer, "AUTHORITY:").map_err(| _ | ()) ? ;
+        match value {
+            Authority::User(name) => {
+                self.write_unsigned(TYPE_USER) ? ;
+                 self.write_string(name) ? ;
+            },
+            Authority::Group(name) => {
+                self.write_unsigned(TYPE_GROUP) ? ;
+                self.write_string(name) ? ;
+            }
+        };
+        write!(self.buffer, ";").map_err(| _ | ())
     }
 
     pub fn write_list_start(& mut self, number_of_elements: usize) -> Result<(), ()> {

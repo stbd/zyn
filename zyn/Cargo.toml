@@ -21,10 +21,6 @@ serde = "=1.*"
 serde_derive = "=1.*"
 serde_json = "=1.*"
 
-# Requires libgpgme: sudo apt-get install libgpgme11-dev
-gpgme-sys = "=0.2.0"
-libgpg-error-sys = "=0.1.2"
-
 # Requires libssl: see env/scripts/install-libsll-debian.sh
 tls-sys = "=0.1.0"
 

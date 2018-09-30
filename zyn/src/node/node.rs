@@ -11,23 +11,26 @@ use libc::{ sigwait, sigemptyset, sigaddset, SIGTERM, SIGINT, c_int, size_t, sig
 use rand::{ random };
 
 use node::client::{ Client };
-use node::common::{ NodeId, FileDescriptor, OpenMode, ADMIN_GROUP, Timestamp, FileType, log_crypto_context_error, utc_timestamp };
+use node::common::{ NodeId, FileDescriptor, OpenMode, ADMIN_GROUP, Timestamp, FileType, FileRevision, log_crypto_context_error, utc_timestamp };
 use node::connection::{ Server };
 use node::crypto::{ Crypto };
 use node::file_handle::{ FileAccess, FileProperties };
 use node::filesystem::{ Filesystem, FilesystemError, Node as FsNode };
+use node::directory::{ Child };
 use node::user_authority::{ UserAuthority, Id };
-use node::serialize::{ SerializedNodeSettings };
+use node::serialize::{ SerializedNode };
 
 pub enum NodeError {
     InvalidUsernamePassword,
-    ParentIsNotFolder,
+    ParentIsNotDirectory,
     UnknownAuthority,
     AuthorityError,
     UnauthorizedOperation,
     InternalCommunicationError,
     InternalError,
     UnknownFile,
+    InvalidPageSize,
+    FailedToResolveAuthority,
 }
 
 pub enum ErrorResponse {
@@ -49,26 +52,46 @@ fn node_error_to_rsp(error: NodeError) -> ErrorResponse {
 
 pub enum FilesystemElementType {
     File,
-    Folder,
+    Directory,
 }
 
-pub struct FilesystemElementAuthority {
-    pub read: String,
-    pub write: String,
+pub enum Authority {
+    User(String),
+    Group(String),
 }
 
 pub enum FilesystemElement {
     File {
         properties: FileProperties,
-        authority: FilesystemElementAuthority,
+        created_by: Authority,
+        modified_by: Authority,
+        read: Authority,
+        write: Authority,
         node_id: NodeId,
 
     },
-    Folder {
+    Directory {
         created_at: Timestamp,
         modified_at: Timestamp,
-        authority: FilesystemElementAuthority,
+        read: Authority,
+        write: Authority,
         node_id: NodeId,
+    },
+}
+
+pub enum FileSystemListElement {
+    File {
+        name: String,
+        node_id: NodeId,
+        revision: FileRevision,
+        file_type: FileType,
+        size: u64,
+    },
+    Directory {
+        name: String,
+        node_id: NodeId,
+        read: Authority,
+        write: Authority,
     },
 }
 
@@ -92,8 +115,8 @@ pub enum ClientProtocol {
     Shutdown { reason: ShutdownReason },
     CountersResponse { result: Result<Counters, ErrorResponse> },
     QuerySystemResponse { result: Result<SystemInformation, ErrorResponse> },
-    QueryListResponse { result: Result<Vec<(String, NodeId, FilesystemElementType)>, ErrorResponse> },
-    QueryFilesystemResponse { result: Result<FilesystemElement, ErrorResponse> },
+    QueryFsChildrenResponse { result: Result<Vec<FileSystemListElement>, ErrorResponse> },
+    QueryFsElementResponse { result: Result<FilesystemElement, ErrorResponse> },
     DeleteResponse { result: Result<(), ErrorResponse> },
     AddUserGroupResponse { result: Result<(), ErrorResponse> },
     ModifyUserGroupResponse { result: Result<(), ErrorResponse> },
@@ -101,13 +124,13 @@ pub enum ClientProtocol {
 
 pub enum NodeProtocol {
     AuthenticateRequest { username: String, password: String },
-    CreateFileRequest { parent: FileDescriptor, type_of_file: FileType, name: String, user: Id },
-    CreateFolderRequest { parent: FileDescriptor, name: String, user: Id },
+    CreateFileRequest { parent: FileDescriptor, type_of_file: FileType, name: String, user: Id, page_size: Option<u64> },
+    CreateDirecotryRequest { parent: FileDescriptor, name: String, user: Id },
     OpenFileRequest { mode: OpenMode, file_descriptor: FileDescriptor, user: Id },
     CountersRequest { user: Id, },
     QuerySystemRequest { user: Id, },
-    QueryListRequest { user: Id, fd: FileDescriptor, },
-    QueryFilesystemRequest { user: Id, fd: FileDescriptor, },
+    QueryFsChildrenRequest { user: Id, fd: FileDescriptor, },
+    QueryFsElementRequest { user: Id, fd: FileDescriptor, },
     DeleteRequest { user: Id, fd: FileDescriptor },
     AddUserRequest { user: Id, name: String },
     ModifyUser { user: Id, name: String, password: Option<String>, expiration: Option<Option<Timestamp>> },
@@ -154,9 +177,11 @@ struct ClientInfo {
 }
 
 pub struct NodeSettings {
-    pub page_size_random_access_file: usize,
-    pub page_size_blob_file: usize,
-    pub socket_buffer_size: usize,
+    pub max_page_size_random_access_file: usize,
+    pub max_page_size_blob_file: usize,
+    pub max_number_of_files_per_directory: usize,
+    pub filesystem_capacity: u64,
+    pub socket_buffer_size: u64,
 }
 
 pub struct Node {
@@ -164,11 +189,13 @@ pub struct Node {
     clients: Vec<ClientInfo>,
     filesystem: Filesystem,
     auth: UserAuthority,
-    settings: NodeSettings,
     path_workdir: PathBuf,
     crypto: Crypto,
     started_at: Timestamp,
     server_id: u64,
+    max_page_size_random_access_file: usize,
+    max_page_size_blob_file: usize,
+    client_socket_buffer_size: usize,
 }
 
 impl Node {
@@ -215,15 +242,20 @@ impl Node {
             .map_err(| error | error!("failed to create data dir, error=\"{}\"", error))
             ? ;
 
-        let fs = Filesystem::new(crypto, & path_data_dir);
+        let mut fs = Filesystem::new_with_capacity(
+            crypto,
+            & path_data_dir,
+            settings.filesystem_capacity as usize,
+            settings.max_number_of_files_per_directory as usize
+        );
         fs.store(& Node::path_filesystem(path_workdir))
             .map_err(| () | error!("Failed to store filesystem"))
             ? ;
 
-        let serialized_node_settings = SerializedNodeSettings {
+        let serialized_node_settings = SerializedNode {
             client_input_buffer_size: settings.socket_buffer_size as u64,
-            page_size_for_random_access_files: settings.page_size_random_access_file as u64,
-            page_size_for_blob_files: settings.page_size_blob_file as u64,
+            page_size_for_random_access_files: settings.max_page_size_random_access_file as u64,
+            page_size_for_blob_files: settings.max_page_size_blob_file as u64,
         };
 
         serialized_node_settings.write(context_node_settings, & Node::path_node(path_workdir))
@@ -253,10 +285,10 @@ impl Node {
             .map_err(| () | error!("Failed to store filesystem"))
             ? ;
 
-        let serialized_node_settings = SerializedNodeSettings {
-            client_input_buffer_size: self.settings.socket_buffer_size as u64,
-            page_size_for_random_access_files: self.settings.page_size_random_access_file as u64,
-            page_size_for_blob_files: self.settings.page_size_blob_file as u64,
+        let serialized_node_settings = SerializedNode {
+            client_input_buffer_size: self.client_socket_buffer_size as u64,
+            page_size_for_random_access_files: self.max_page_size_random_access_file as u64,
+            page_size_for_blob_files: self.max_page_size_blob_file as u64,
         };
 
         serialized_node_settings.write(context_node_settings, & Node::path_node(& self.path_workdir))
@@ -286,7 +318,7 @@ impl Node {
             .map_err(| () | error!("Failed to load filesystem"))
             ? ;
 
-        let settings = SerializedNodeSettings::read(context_node_settings, & Node::path_node(path_workdir))
+        let settings = SerializedNode::read(context_node_settings, & Node::path_node(path_workdir))
             .map_err(| () | error!("Failed to load node settings"))
             ? ;
 
@@ -297,11 +329,9 @@ impl Node {
             auth: auth,
             path_workdir: path_workdir.to_path_buf(),
             crypto: crypto,
-            settings: NodeSettings {
-                page_size_random_access_file: settings.page_size_for_random_access_files as usize,
-                page_size_blob_file: settings.page_size_for_blob_files as usize,
-                socket_buffer_size: settings.client_input_buffer_size as usize,
-            },
+            max_page_size_random_access_file: settings.page_size_for_random_access_files as usize,
+            max_page_size_blob_file: settings.page_size_for_blob_files as usize,
+            client_socket_buffer_size: settings.client_input_buffer_size as usize,
             started_at: utc_timestamp(),
             server_id: random::<u64>(),
         })
@@ -369,6 +399,7 @@ impl Node {
                                 type_of_file,
                                 name,
                                 user,
+                                page_size,
                             } => {
 
                                 trace!("Create file request, user={}", user);
@@ -377,11 +408,13 @@ impl Node {
                                     & mut node_id_buffer,
                                     & mut self.filesystem,
                                     & mut self.auth,
-                                    & self.settings,
+                                    self.max_page_size_random_access_file,
+                                    self.max_page_size_blob_file,
                                     parent,
                                     type_of_file,
                                     name,
-                                    user
+                                    user,
+                                    page_size
                                 );
 
                                 send_failed = client.transmit.send(
@@ -391,15 +424,15 @@ impl Node {
                                 ).is_err();
                             }
 
-                            NodeProtocol::CreateFolderRequest {
+                            NodeProtocol::CreateDirecotryRequest {
                                 parent,
                                 name,
                                 user,
                             } => {
 
-                                trace!("Create folder request, user={}", user);
+                                trace!("Create directory request, user={}", user);
 
-                                let result = Node::handle_create_folder_req(
+                                let result = Node::handle_create_directory_req(
                                     & mut node_id_buffer,
                                     & mut self.filesystem,
                                     & mut self.auth,
@@ -471,36 +504,36 @@ impl Node {
                                 ).is_err();
                             },
 
-                            NodeProtocol::QueryListRequest {
+                            NodeProtocol::QueryFsChildrenRequest {
                                 user,
                                 fd,
                             } => {
 
-                                trace!("Query list request, user={}", user);
+                                trace!("Query fs children request, user={}", user);
 
-                                let result = Node::handle_query_list_request(
+                                let result = Node::handle_query_fs_children_request(
                                     & mut node_id_buffer,
-                                    & self.filesystem,
+                                    & mut self.filesystem,
                                     & mut self.auth,
                                     user,
                                     fd,
                                 );
 
                                 send_failed = client.transmit.send(
-                                    ClientProtocol::QueryListResponse {
+                                    ClientProtocol::QueryFsChildrenResponse {
                                         result: result
                                     },
                                 ).is_err();
                             },
 
-                            NodeProtocol::QueryFilesystemRequest {
+                            NodeProtocol::QueryFsElementRequest {
                                 user,
                                 fd,
                             } => {
 
-                                trace!("Query filessytem, user={}", user);
+                                trace!("Query fs element, user={}", user);
 
-                                let result = Node::handle_query_filesystem_request(
+                                let result = Node::handle_query_fs_element_request(
                                     & mut node_id_buffer,
                                     & mut self.filesystem,
                                     & mut self.auth,
@@ -510,7 +543,7 @@ impl Node {
                                 );
 
                                 send_failed = client.transmit.send(
-                                    ClientProtocol::QueryFilesystemResponse {
+                                    ClientProtocol::QueryFsElementResponse {
                                         result: result,
                                     },
                                 ).is_err();
@@ -645,7 +678,7 @@ impl Node {
 
                     let (tx_node, rx_node) = channel::<ClientProtocol>();
                     let (tx_client, rx_client) = channel::<NodeProtocol>();
-                    let buffer_size = self.settings.socket_buffer_size;
+                    let buffer_size = self.client_socket_buffer_size;
 
                     let handle = spawn( move || {
                         let mut client = Client::new(
@@ -697,11 +730,13 @@ impl Node {
         node_id_buffer: & mut [NodeId],
         filesystem: & mut Filesystem,
         auth: & mut UserAuthority,
-        settings: & NodeSettings,
+        max_page_size_random_access_file: usize,
+        max_page_size_blob_file: usize,
         parent_fd: FileDescriptor,
         type_of_file: FileType,
         name: String,
-        user: Id
+        user: Id,
+        requested_page_size: Option<u64>,
     ) -> Result<NodeId, ErrorResponse> {
 
         let parent_id = Node::resolve_file_descriptor(
@@ -712,8 +747,8 @@ impl Node {
 
         {
             let ref parent = filesystem.node(& parent_id).unwrap();
-            let parent = parent.to_folder()
-                .map_err(| _ | node_error_to_rsp(NodeError::ParentIsNotFolder))
+            let parent = parent.to_directory()
+                .map_err(| _ | node_error_to_rsp(NodeError::ParentIsNotDirectory))
                 ? ;
 
             auth.is_authorized(parent.write(), & user, utc_timestamp())
@@ -721,9 +756,24 @@ impl Node {
                 ? ;
         }
 
-        let page_size = match type_of_file {
-            FileType::RandomAccess => settings.page_size_random_access_file,
-            FileType::Blob => settings.page_size_blob_file,
+        let page_size = match requested_page_size {
+            Some(value) => {
+                let value = value as usize;
+                let max_page_size = match type_of_file {
+                    FileType::RandomAccess => max_page_size_random_access_file,
+                    FileType::Blob => max_page_size_blob_file,
+                };
+                if value > max_page_size {
+                    return Err(node_error_to_rsp(NodeError::InvalidPageSize));
+                }
+                value
+            },
+            None => {
+                match type_of_file {
+                    FileType::RandomAccess => max_page_size_random_access_file,
+                    FileType::Blob => max_page_size_blob_file,
+                }
+            }
         };
 
         filesystem.create_file(
@@ -735,7 +785,7 @@ impl Node {
         ).map_err(fs_error_to_rsp)
     }
 
-    fn handle_create_folder_req(
+    fn handle_create_directory_req(
         node_id_buffer: & mut [NodeId],
         filesystem: & mut Filesystem,
         auth: & mut UserAuthority,
@@ -752,8 +802,8 @@ impl Node {
 
         {
             let ref parent = filesystem.node(& parent_id).unwrap();
-            let parent = parent.to_folder()
-                .map_err(| _ | node_error_to_rsp(NodeError::ParentIsNotFolder))
+            let parent = parent.to_directory()
+                .map_err(| _ | node_error_to_rsp(NodeError::ParentIsNotDirectory))
                 ? ;
 
             auth.is_authorized(parent.write(), & user, utc_timestamp())
@@ -761,7 +811,7 @@ impl Node {
                 ? ;
         }
 
-        filesystem.create_folder(
+        filesystem.to_directory(
             & parent_id,
             & name,
             user
@@ -835,13 +885,13 @@ impl Node {
         })
     }
 
-    fn handle_query_list_request(
+    fn handle_query_fs_children_request(
         node_id_buffer: & mut [NodeId],
-        fs: & Filesystem,
+        fs: & mut Filesystem,
         auth: & mut UserAuthority,
         user: Id,
         file_descriptor: FileDescriptor,
-    ) -> Result<Vec<(String, NodeId, FilesystemElementType)>, ErrorResponse> {
+    ) -> Result<Vec<FileSystemListElement>, ErrorResponse> {
 
         let node_id = Node::resolve_file_descriptor(
             node_id_buffer,
@@ -849,33 +899,66 @@ impl Node {
             file_descriptor
         ) ? ;
 
-        let node = fs.node(& node_id)
-            .map_err(fs_error_to_rsp)
-            ? ;
+        let children: Vec<Child> = {
+            let node = fs.node(& node_id)
+                .map_err(fs_error_to_rsp)
+                ? ;
 
-        let folder = node.to_folder()
-            .map_err(fs_error_to_rsp)
-            ? ;
+            let directory = node.to_directory()
+                .map_err(fs_error_to_rsp)
+                ? ;
 
-        auth.is_authorized(& folder.read(), & user, utc_timestamp())
-            .map_err(| () | node_error_to_rsp(NodeError::UnauthorizedOperation))
-            ? ;
+            auth.is_authorized(& directory.read(), & user, utc_timestamp())
+                .map_err(| () | node_error_to_rsp(NodeError::UnauthorizedOperation))
+                ? ;
 
-        let mut result = Vec::with_capacity(folder.number_of_children());
-        for ref child in folder.children() {
-            let type_of = match *fs.node(& child.node_id).unwrap() {
-                FsNode::Folder { .. } => FilesystemElementType::Folder,
-                FsNode::File { .. } => FilesystemElementType::File,
-                FsNode::NotSet { .. } => panic!(),
-            };
+            directory.clone_children()
+        };
 
-            result.push((child.name.clone(), child.node_id.clone(), type_of))
+        let mut result = Vec::with_capacity(children.len());
+        for ref child in children {
+            if fs.node(& child.node_id).unwrap().is_not_set() {
+                panic!();
+            }
+
+            let is_file = fs.node(& child.node_id).unwrap().is_file();
+            if is_file {
+                let file = fs.mut_file(& child.node_id).unwrap();
+                let properties = file.cached_properties().unwrap();
+                result.push(
+                    FileSystemListElement::File {
+                        name: child.name.clone(),
+                        node_id: child.node_id.clone(),
+                        revision: properties.revision,
+                        file_type: properties.file_type,
+                        size: properties.revision,
+                    })
+            } else {
+                let dir = fs.node(& child.node_id)
+                    .unwrap()
+                    .to_directory()
+                    .unwrap()
+                    ;
+
+                let read = Node::resolve_id(auth, dir.read())
+                    .map_err(| () | node_error_to_rsp(NodeError::FailedToResolveAuthority))
+                    ? ;
+                let write = Node::resolve_id(auth, dir.write())
+                    .map_err(| () | node_error_to_rsp(NodeError::FailedToResolveAuthority))
+                    ? ;
+                result.push(
+                    FileSystemListElement::Directory {
+                        name: child.name.clone(),
+                        node_id: child.node_id.clone(),
+                        read: read,
+                        write: write,
+                    })
+            }
         }
-
         Ok(result)
     }
 
-    fn handle_query_filesystem_request(
+    fn handle_query_fs_element_request(
         node_id_buffer: & mut [NodeId],
         fs: & mut Filesystem,
         auth: & mut UserAuthority,
@@ -890,70 +973,75 @@ impl Node {
             file_descriptor
         ) ? ;
 
-        // Currently files and folders are handled separately
-        // as file needs to load metadata which requires
-        // mutable access
+        let is_file = fs.node(& node_id).unwrap().is_file();
+        if is_file {
 
-        {
+            let (properties, file_auth) = Node::resolve_file_properties(& node_id, fs, crypto) ? ;
+            let read = Node::resolve_id(auth, & file_auth.read)
+                .map_err(| () | node_error_to_rsp(NodeError::FailedToResolveAuthority))
+                ? ;
+
+            let write = Node::resolve_id(auth, & file_auth.write)
+                .map_err(| () | node_error_to_rsp(NodeError::FailedToResolveAuthority))
+                ? ;
+
+            let created_by = Node::resolve_id(auth, & properties.created_by)
+                .map_err(| () | node_error_to_rsp(NodeError::FailedToResolveAuthority))
+                ? ;
+
+            let modified_by = Node::resolve_id(auth, & properties.modified_by)
+                .map_err(| () | node_error_to_rsp(NodeError::FailedToResolveAuthority))
+                ? ;
+
+            let desc = FilesystemElement::File {
+                properties: properties,
+                created_by: created_by,
+                modified_by: modified_by,
+                read: read,
+                write: write,
+                node_id: node_id,
+            };
+
+            auth.is_authorized(& file_auth.read, & user, utc_timestamp())
+                .map_err(| () | node_error_to_rsp(NodeError::UnauthorizedOperation))
+                ? ;
+
+            Ok(desc)
+
+        } else {
+
             let node = fs.node(& node_id)
                 .map_err(fs_error_to_rsp)
                 ? ;
 
             match *node {
-                FsNode::Folder { ref folder } => {
-
-                    let read = auth.resolve_name(folder.read())
-                        .map_err(| () | node_error_to_rsp(NodeError::InternalError))
-                        ? ;
-                    let write = auth.resolve_name(folder.write())
-                        .map_err(| () | node_error_to_rsp(NodeError::InternalError))
+                FsNode::Directory { ref directory } => {
+                    let read = Node::resolve_id(auth, directory.read())
+                        .map_err(| () | node_error_to_rsp(NodeError::FailedToResolveAuthority))
                         ? ;
 
-                    let desc = FilesystemElement::Folder {
-                        created_at: folder.created(),
-                        modified_at: folder.modified(),
-                        authority: FilesystemElementAuthority {
-                            read: read,
-                            write: write,
-                        },
+                    let write = Node::resolve_id(auth, directory.write())
+                        .map_err(| () | node_error_to_rsp(NodeError::FailedToResolveAuthority))
+                        ? ;
+
+                    let desc = FilesystemElement::Directory {
+                        created_at: directory.created(),
+                        modified_at: directory.modified(),
+                        read: read,
+                        write: write,
                         node_id: node_id,
                     };
 
-                    auth.is_authorized(& folder.read(), & user, utc_timestamp())
+                    auth.is_authorized(& directory.read(), & user, utc_timestamp())
                         .map_err(| () | node_error_to_rsp(NodeError::UnauthorizedOperation))
                         ? ;
 
                     return Ok(desc);
                 },
-                FsNode::File { .. } => (),
+                FsNode::File { .. } => panic!(),
                 FsNode::NotSet { } => panic!(),
-            };
+            }
         }
-
-        let (properties, file_auth) = Node::resolve_file_properties(& node_id, fs, crypto) ? ;
-
-        let read = auth.resolve_name(& file_auth.read)
-            .map_err(| () | node_error_to_rsp(NodeError::InternalError))
-            ? ;
-
-        let write = auth.resolve_name(& file_auth.write)
-            .map_err(| () | node_error_to_rsp(NodeError::InternalError))
-            ? ;
-
-        let desc = FilesystemElement::File {
-            properties: properties,
-            authority: FilesystemElementAuthority {
-                read: read,
-                write: write,
-            },
-            node_id: node_id,
-        };
-
-        auth.is_authorized(& file_auth.read, & user, utc_timestamp())
-            .map_err(| () | node_error_to_rsp(NodeError::UnauthorizedOperation))
-            ? ;
-
-        Ok(desc)
     }
 
     fn handle_delete_request(
@@ -977,7 +1065,7 @@ impl Node {
             if ! is_file {
                 fs.node(& node_id)
                     .unwrap()
-                    .to_folder()
+                    .to_directory()
                     .unwrap()
                     .parent()
             } else {
@@ -994,15 +1082,15 @@ impl Node {
                 .map_err(fs_error_to_rsp)
                 ? ;
 
-            let folder = node.to_folder()
-                .map_err(| _ | node_error_to_rsp(NodeError::ParentIsNotFolder))
+            let directory = node.to_directory()
+                .map_err(| _ | node_error_to_rsp(NodeError::ParentIsNotDirectory))
                 ? ;
 
-            auth.is_authorized(& folder.write(), & user, utc_timestamp())
+            auth.is_authorized(& directory.write(), & user, utc_timestamp())
                 .map_err(| () | node_error_to_rsp(NodeError::UnauthorizedOperation))
                 ? ;
 
-            let index = folder.child_with_node_id(& node_id)
+            let index = directory.child_with_node_id(& node_id)
                 .map_err(| () | node_error_to_rsp(NodeError::UnknownFile))
                 ? ;
 
@@ -1139,17 +1227,28 @@ impl Node {
             .map_err(fs_error_to_rsp)
             ? ;
 
-        let folder = parent.to_folder()
-            .map_err(| _ | node_error_to_rsp(NodeError::ParentIsNotFolder))
+        let directory = parent.to_directory()
+            .map_err(| _ | node_error_to_rsp(NodeError::ParentIsNotDirectory))
             ? ;
 
         Ok((
             properties,
             FilesystemElementAuthorityId {
-                read: folder.read().clone(),
-                write: folder.write().clone(),
+                read: directory.read().clone(),
+                write: directory.write().clone(),
             }
         ))
+    }
+
+    fn resolve_id(
+        auth: & UserAuthority,
+        id: & Id,
+    ) -> Result<Authority, ()> {
+        let name = auth.resolve_id_name(id) ? ;
+        match *id {
+            Id::User(_) => Ok(Authority::User(name)),
+            Id::Group(_) => Ok(Authority::Group(name)),
+        }
     }
 
     fn resolve_file_descriptor(

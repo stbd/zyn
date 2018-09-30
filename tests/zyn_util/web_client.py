@@ -228,7 +228,7 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 else:
                     raise NotImplementedError()
             elif element_type == ELEMENT_TYPE_DIRECTORY:
-                rsp = self._connection.zyn_connection().create_folder(
+                rsp = self._connection.zyn_connection().create_directory(
                     element_name,
                     parent_path=parent
                 )
@@ -250,11 +250,11 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
             path = content['path']
             self._log.debug('{}: path={}'.format(msg_type, path))
-            rsp = self._connection.zyn_connection().query_filesystem(path=path)
+            rsp = self._connection.zyn_connection().query_fs_element(path=path)
 
             desc = {}
             if not rsp.is_error():
-                rsp = rsp.as_query_filesystem_rsp()
+                rsp = rsp.as_query_fs_element_rsp()
                 desc['node-id'] = rsp.node_id
                 desc['write-access'] = rsp.write_access
                 desc['read-access'] = rsp.read_access
@@ -277,13 +277,13 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             path = content['path']
             self._log.debug('{}: path={}'.format(msg_type, path))
 
-            rsp = self._connection.zyn_connection().query_list(path=path)
+            rsp = self._connection.zyn_connection().query_fs_children(path=path)
             if rsp.is_error():
                 self._send_error_response(msg_type, None, rsp.error_code())
                 return
 
             elements = []
-            rsp = rsp.as_query_list_rsp()
+            rsp = rsp.as_query_fs_children_rsp()
             for element in rsp.elements:
 
                 if element.is_file():

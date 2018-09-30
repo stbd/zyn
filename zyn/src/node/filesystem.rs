@@ -6,33 +6,31 @@ use std::result::{ Result };
 use std::str;
 use std::vec::{ Vec };
 
-use chrono::datetime::{ DateTime };
-use chrono::{ UTC, NaiveDateTime };
-
 use node::file_handle::{ FileHandle };
-use node::folder::{ Folder };
+use node::directory::{ Directory };
 use node::crypto::{ Crypto };
 use node::user_authority::{ Id };
 use node::serialize::{ SerializedFilesystem };
 use node::common::{ NodeId, NODE_ID_ROOT, ADMIN_GROUP, FileType,
-                    log_crypto_context_error };
+                    log_crypto_context_error, utc_timestamp };
 
 #[derive(Debug)]
 pub enum FilesystemError {
     InvalidNodeId,
-    FolderIsNotEmpty, // Delete
+    DirectoryIsNotEmpty, // Delete
     InvalidPathSize, // Resolve
     InvalidPath, // Resolve
     HostFilesystemError,
     AllNodesInUse,
-    ParentIsNotFolder,
+    ParentIsNotDirectory,
     NodeIsNotFile,
-    NodeIsNotFolder,
+    NodeIsNotDirectory,
+    ElementWithNameAlreadyExists,
 }
 
 pub enum Node {
     File { file: FileHandle },
-    Folder { folder: Folder },
+    Directory { directory: Directory },
     NotSet,
 }
 
@@ -51,18 +49,18 @@ impl Node {
         Err(FilesystemError::NodeIsNotFile)
     }
 
-    pub fn to_mut_folder(& mut self) -> Result<& mut Folder, FilesystemError> {
-        if let Node::Folder { ref mut folder } = *self {
-            return Ok(folder);
+    pub fn to_mut_directory(& mut self) -> Result<& mut Directory, FilesystemError> {
+        if let Node::Directory { ref mut directory } = *self {
+            return Ok(directory);
         }
-        Err(FilesystemError::NodeIsNotFolder)
+        Err(FilesystemError::NodeIsNotDirectory)
     }
 
-    pub fn to_folder(& self) -> Result<& Folder, FilesystemError> {
-        if let Node::Folder { ref folder } = *self {
-            return Ok(folder);
+    pub fn to_directory(& self) -> Result<& Directory, FilesystemError> {
+        if let Node::Directory { ref directory } = *self {
+            return Ok(directory);
         }
-        Err(FilesystemError::NodeIsNotFolder)
+        Err(FilesystemError::NodeIsNotDirectory)
     }
 
     pub fn is_not_set(& self) -> bool {
@@ -81,22 +79,37 @@ impl Node {
 }
 
 pub const DEFAULT_MAX_NUMBER_OF_NODES: usize = 5000;
+pub const DEFAULT_MAX_NUMBER_OF_FILES_PER_DIRECTORY: usize = 5000;
 
 pub struct Filesystem {
+    number_of_files: usize,
+    max_number_of_files_per_dir: usize,
     nodes: Vec<Node>,
     crypto: Crypto,
-    path_storage_folder: PathBuf,
+    path_storage_directory: PathBuf,
 }
 
 impl Filesystem {
 
-    pub fn empty_with_capacity(crypto: Crypto, path_storage_folder: & Path, capacity: usize)
+    pub fn number_of_files(& self) -> usize {
+        self.number_of_files
+    }
+
+    pub fn max_number_of_files_per_directory(& self) -> usize {
+        self.max_number_of_files_per_dir
+    }
+
+    pub fn empty_with_capacity(crypto: Crypto, path_storage_directory: & Path, capacity: usize, max_number_of_files_per_directory: usize)
                              -> Filesystem {
 
+        info!("Creating fileystem: cpacity={}, max_number_of_files_per_directory={}", capacity, max_number_of_files_per_directory);
+
         let mut fs = Filesystem {
-            nodes: Vec::with_capacity(capacity),
+            number_of_files: 0,
+            max_number_of_files_per_dir: max_number_of_files_per_directory,
+            nodes: Vec::with_capacity(capacity + 1), // Root dir takes one place, so add one
             crypto: crypto,
-            path_storage_folder: path_storage_folder.to_path_buf(),
+            path_storage_directory: path_storage_directory.to_path_buf(),
         };
         for _ in 0 .. capacity {
             fs.nodes.push(Node::NotSet);
@@ -104,37 +117,46 @@ impl Filesystem {
         fs
     }
 
-    pub fn new_with_capacity(crypto: Crypto, path_storage_folder: & Path, capacity: usize)
+    pub fn new_with_capacity(crypto: Crypto, path_storage_directory: & Path, capacity: usize, max_number_of_files_per_directory: usize)
                              -> Filesystem {
 
-        let mut fs = Filesystem::empty_with_capacity(crypto, path_storage_folder, capacity);
-        fs.nodes[NODE_ID_ROOT as usize] = Node::Folder{
-            folder: Folder::create(ADMIN_GROUP.clone(), NODE_ID_ROOT)
+        let mut fs = Filesystem::empty_with_capacity(crypto, path_storage_directory, capacity, max_number_of_files_per_directory);
+        fs.nodes[NODE_ID_ROOT as usize] = Node::Directory{
+            directory: Directory::create(ADMIN_GROUP.clone(), NODE_ID_ROOT)
         };
         fs
     }
 
-    pub fn new(crypto: Crypto, path_storage_folder: & Path) -> Filesystem {
-        Filesystem::new_with_capacity(crypto, path_storage_folder, DEFAULT_MAX_NUMBER_OF_NODES)
+    pub fn new(crypto: Crypto, path_storage_directory: & Path) -> Filesystem {
+        Filesystem::new_with_capacity(crypto, path_storage_directory, DEFAULT_MAX_NUMBER_OF_NODES, DEFAULT_MAX_NUMBER_OF_FILES_PER_DIRECTORY)
     }
 
-    pub fn store(& self, path_basename: & Path) -> Result<(), ()> {
+    pub fn store(& mut self, path_basename: & Path) -> Result<(), ()> {
 
-        let mut fs = SerializedFilesystem::new(self.nodes.capacity());
-        for (index, node) in self.nodes.iter().enumerate() {
+        let mut fs = SerializedFilesystem::new(self.nodes.capacity(), self.max_number_of_files_per_dir);
+        for (index, node) in self.nodes.iter_mut().enumerate() {
             match *node {
-                Node::File { ref file } => {
-                    fs.files.push((index as NodeId, file.path().to_path_buf()));
+                Node::File { ref mut file } => {
+                    let p = file.cached_properties()
+                        .map_err(| () | error!("Failed to get cached properties when storing") )
+                        ? ;
+                    fs.files.push((
+                        index as NodeId,
+                        file.path().to_path_buf(),
+                        p.file_type,
+                        p.revision,
+                        p.size,
+                    ));
                 },
-                Node::Folder { ref folder } => {
+                Node::Directory { ref directory } => {
                     fs.folders.push((
                         index as NodeId,
-                        folder.parent(),
-                        folder.created(),
-                        folder.modified(),
-                        folder.read().clone(),
-                        folder.write().clone(),
-                        folder.children().map(| element | {
+                        directory.parent(),
+                        directory.created(),
+                        directory.modified(),
+                        directory.read().clone(),
+                        directory.write().clone(),
+                        directory.children().map(| element | {
                             (element.node_id, element.name.clone())
                         }).collect(),
                     ));
@@ -150,7 +172,7 @@ impl Filesystem {
         fs.write(context, path_basename)
     }
 
-    pub fn load(crypto: Crypto, path_storage_folder: & Path, path_basename: & Path)
+    pub fn load(crypto: Crypto, path_storage_directory: & Path, path_basename: & Path)
                 -> Result<Filesystem, ()> {
 
 
@@ -160,23 +182,34 @@ impl Filesystem {
             .map_err(| () | error!("Failed to deserialized filesystem"))
             ? ;
 
-        let mut fs = Filesystem::empty_with_capacity(crypto, & path_storage_folder, deserialized.capacity);
+        let mut fs = Filesystem::empty_with_capacity(
+            crypto,
+            & path_storage_directory,
+            deserialized.capacity,
+            deserialized.max_number_of_files_per_directory,
+        );
 
-        for & (ref node_id, ref path) in deserialized.files.iter() {
+        for & (ref node_id, ref path, ref file_type, ref revision, ref size) in deserialized.files.iter() {
 
-            let file = FileHandle::init(path.to_path_buf())
+            let file = FileHandle::init(
+                path.to_path_buf(),
+                file_type.clone(),
+                revision.clone(),
+                size.clone()
+            )
                 .map_err(| () | error!("Failed to init file, path=\"{}\"", path.display()))
                 ? ;
             fs.nodes[*node_id as usize] = Node::File{ file: file };
+            fs.number_of_files += 1;
         }
 
         for & (ref node_id, ref parent, ref created, ref modified, ref read, ref write, ref children)
             in deserialized.folders.iter() {
-                let mut folder = Folder::from(parent.clone(), created.clone(), modified.clone(), read.clone(), write.clone());
+                let mut directory = Directory::from(parent.clone(), created.clone(), modified.clone(), read.clone(), write.clone());
                 for & (id, ref name) in children.iter() {
-                    folder.add_child(id, name);
+                    directory.add_child(id, name);
                 }
-                fs.nodes[*node_id as usize] = Node::Folder{ folder: folder };
+                fs.nodes[*node_id as usize] = Node::Directory{ directory: directory };
             }
 
         Ok(fs)
@@ -230,7 +263,7 @@ impl Filesystem {
                 Component::Normal(field) => {
                     if let Some(element) = field.to_str() {
 
-                        let folder = self.nodes[parent_node_id as usize].to_folder()
+                        let directory = self.nodes[parent_node_id as usize].to_directory()
                             ? ;
 
                         if node_id_list.len() <= list_index {
@@ -239,7 +272,7 @@ impl Filesystem {
                         node_id_list[list_index] = parent_node_id.clone();
                         list_index += 1;
 
-                        let (node_id, _) = folder.child_with_name(element)
+                        let (node_id, _) = directory.child_with_name(element)
                             .map_err(| () | FilesystemError::InvalidPath)
                             ? ;
                         parent_node_id = node_id;
@@ -268,17 +301,30 @@ impl Filesystem {
 
         let (file, node_id) = {
 
-            self.nodes[*parent_node_id as usize].to_folder()
-                .map_err(| _ | FilesystemError::ParentIsNotFolder)
-                ? ;
+            {
+                let parent = self.nodes[*parent_node_id as usize].to_directory()
+                    .map_err(| _ | FilesystemError::ParentIsNotDirectory)
+                    ? ;
 
-            let path_file_root = self.path_storage_folder.join(
-                Filesystem::hash_filename(filename)
-            );
+                if parent.child_with_name(filename).is_ok() {
+                    return Err(FilesystemError::ElementWithNameAlreadyExists);
+                }
+            }
+
+            let path_file_root = self.generate_physical_file_path(parent_node_id, filename)
+                .map_err(| _ | FilesystemError::HostFilesystemError)
+                ? ;
 
             create_dir(& path_file_root)
                 .map_err(| _ | FilesystemError::HostFilesystemError)
                ? ;
+
+            let node_id = self.allocate_node_id()
+                .map_err(| () | {
+                    warn!("Failed to allocate NodeId, user={}, filename={}", user, filename);
+                    FilesystemError::AllNodesInUse
+                })
+                ? ;
 
             let file = FileHandle::create(
                 path_file_root,
@@ -294,16 +340,9 @@ impl Filesystem {
                 })
                 ? ;
 
-            let node_id = self.allocate_node_id()
-                .map_err(| () | {
-                    warn!("Failed to allocate NodeId, user={}, filename={}", user, filename);
-                    FilesystemError::AllNodesInUse
-                })
-                ? ;
-
             let mut parent = self.nodes.get_mut(*parent_node_id as usize)
                 .unwrap()
-                .to_mut_folder()
+                .to_mut_directory()
                 .unwrap();
 
             parent.add_child(node_id, filename);
@@ -312,40 +351,47 @@ impl Filesystem {
         };
 
         self.nodes[node_id as usize] = Node::File { file: file };
+        self.number_of_files += 1;
         Ok(node_id)
     }
 
-    pub fn create_folder(
+    pub fn to_directory(
         & mut self,
         parent_node_id: & NodeId,
-        foldername: & str,
+        directoryname: & str,
         user: Id,
     ) -> Result<NodeId, FilesystemError> {
 
         let node_id = {
-            self.nodes[*parent_node_id as usize].to_folder()
-                .map_err(| _ | FilesystemError::ParentIsNotFolder)
-                ? ;
+            {
+                let parent = self.nodes[*parent_node_id as usize].to_directory()
+                    .map_err(| _ | FilesystemError::ParentIsNotDirectory)
+                    ? ;
+
+                if parent.child_with_name(directoryname).is_ok() {
+                    return Err(FilesystemError::ElementWithNameAlreadyExists);
+                }
+            }
 
             let node_id = self.allocate_node_id()
                 .map_err(| () | {
-                    warn!("Failed to allocate NodeId, user={}, foldername=\"{}\"",
-                          user, foldername);
+                    warn!("Failed to allocate NodeId, user={}, directoryname=\"{}\"",
+                          user, directoryname);
                     FilesystemError::AllNodesInUse
                 })
                 ? ;
 
             let mut parent = self.nodes.get_mut(*parent_node_id as usize)
                 .unwrap()
-                .to_mut_folder()
+                .to_mut_directory()
                 .unwrap();
 
-            parent.add_child(node_id, foldername);
+            parent.add_child(node_id, directoryname);
             node_id
         };
 
-        let folder = Folder::create(user.clone(), *parent_node_id);
-        self.nodes[node_id as usize] = Node::Folder { folder: folder };
+        let directory = Directory::create(user.clone(), *parent_node_id);
+        self.nodes[node_id as usize] = Node::Directory { directory: directory };
         Ok(node_id)
     }
 
@@ -362,12 +408,13 @@ impl Filesystem {
                 return Err(FilesystemError::InvalidNodeId);
             }
 
-            if let Node::Folder { ref folder } = *element {
-                if ! folder.is_empty() {
-                    return Err(FilesystemError::FolderIsNotEmpty)
+            if let Node::Directory { ref directory } = *element {
+                if ! directory.is_empty() {
+                    return Err(FilesystemError::DirectoryIsNotEmpty)
                 }
             }
             if let Node::File { ref mut file } = *element {
+                self.number_of_files -= 1;
                 file.close();
                 remove_dir_all(file.path())
                     .map_err(| _error | FilesystemError::HostFilesystemError)
@@ -378,7 +425,7 @@ impl Filesystem {
         {
             let mut parent = self.nodes.get_mut(*parent_node_id as usize)
                 .unwrap()
-                .to_mut_folder()
+                .to_mut_directory()
                 .unwrap();
 
             parent.remove_child(index_in_parent, & node_id)
@@ -390,13 +437,24 @@ impl Filesystem {
         Ok(())
     }
 
-    fn hash_filename(name: & str) -> PathBuf {
-        let dt = DateTime::<UTC>::from_utc(NaiveDateTime::from_timestamp(0, 0), UTC);
-        let f = dt.format("").to_string() + name;
+    fn generate_physical_file_path(& self, parent_node_id: & NodeId, name: & str) -> Result<PathBuf, ()> {
+        let parent_dir = self.path_storage_directory.join(
+            PathBuf::from(
+                format!("{}", self.number_of_files / self.max_number_of_files_per_dir)
+            )
+        );
+
+        if ! parent_dir.exists() {
+            create_dir(& parent_dir)
+                .map_err(| error | error!("Failed to create dir, parent_dir=\"{}\", error=\"{}\"", parent_dir.display(), error))
+                ? ;
+        }
+
+        let f = format!("{}-{}-{}", utc_timestamp(), parent_node_id, name);
         let mut hasher = DefaultHasher::new();
         f.hash(& mut hasher);
         let filename = hasher.finish().to_string();
-        PathBuf::from(filename)
+        Ok(parent_dir.join(filename))
     }
 
     fn allocate_node_id(& self) -> Result<NodeId, ()> {

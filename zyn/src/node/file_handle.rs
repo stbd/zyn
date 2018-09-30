@@ -25,7 +25,7 @@ pub enum FileError {
 
 #[derive(Clone, Debug)]
 pub enum Notification {
-    FileClosing {  }, // todo: Add reason
+    FileClosing { }, // todo: Add reason
     PartOfFileModified { revision: FileRevision, offset: u64, size: u64 },
     PartOfFileInserted { revision: FileRevision, offset: u64, size: u64 },
     PartOfFileDeleted { revision: FileRevision, offset: u64, size: u64 },
@@ -75,6 +75,33 @@ impl FileProperties {
     }
 }
 
+#[derive(Clone)]
+pub struct CachedFileProperties {
+    pub revision: FileRevision,
+    pub size: u64,
+    pub file_type: FileType,
+}
+
+impl CachedFileProperties {
+    fn from_properties(properties: FileProperties) -> CachedFileProperties {
+        CachedFileProperties {
+            revision: properties.revision,
+            size: properties.size,
+            file_type: properties.file_type,
+        }
+    }
+
+    fn from_metadata(metadata: Metadata) -> CachedFileProperties {
+        let size = metadata.size();
+        CachedFileProperties {
+            revision: metadata.revision,
+            size: size,
+            file_type: metadata.file_type,
+        }
+    }
+
+}
+
 #[derive(Clone, PartialEq)]
 pub enum FileLock {
     LockedBySystemForBlobWrite { user: Id },
@@ -94,6 +121,7 @@ struct FileServiceHandle {
 pub struct FileHandle {
     path: PathBuf,
     file_service: Option<FileServiceHandle>,
+    cached_properties: CachedFileProperties,
 }
 
 impl FileHandle {
@@ -127,15 +155,20 @@ impl FileHandle {
         }
 
         let root_file = FileHandle::root_path(& path);
-        FileService::create(& root_file, context, user, parent, file_type, page_size) ? ;
+        let metadata = FileService::create(& root_file, context, user, parent, file_type, page_size) ? ;
 
         Ok(FileHandle{
             path: path,
             file_service: None,
+            cached_properties: CachedFileProperties {
+                revision: metadata.revision,
+                size: metadata.size(),
+                file_type: metadata.file_type,
+            },
         })
     }
 
-    pub fn init(path: PathBuf) -> Result<FileHandle, ()> {
+    pub fn init(path: PathBuf, file_type: FileType, revision: FileRevision, size: u64) -> Result<FileHandle, ()> {
         if path.is_file() {
             return Err(());
         }
@@ -149,6 +182,11 @@ impl FileHandle {
         Ok(FileHandle{
             path: path,
             file_service: None,
+            cached_properties: CachedFileProperties {
+                revision: revision,
+                size: size,
+                file_type: file_type,
+            },
         })
     }
 
@@ -156,21 +194,63 @@ impl FileHandle {
 
         self.update();
 
-        if let Some(ref mut file_service) = self.file_service {
-            let properties = file_service.access.properties()
-                .map_err(| _ | error!("Failed to get metadata from file service"))
-                ? ;
-
-            Ok(properties)
-        } else {
+        if self.file_service.is_none() {
             let context = crypto.create_context()
                 .map_err(| () | log_crypto_context_error())
                 ? ;
 
             let path_root_file = FileHandle::root_path(& self.path);
             let metadata = Metadata::load(& path_root_file, & context) ? ;
-            Ok(FileProperties::from_closed_file(metadata))
+            return Ok(FileProperties::from_closed_file(metadata));
         }
+
+        if let Some(ref mut file_service) = self.file_service {
+            let result = file_service.access.properties();
+            if result.is_ok() {
+                return Ok(result.unwrap());
+
+            }
+            warn!("There was a problem getting properties from file service");
+        }
+
+        self.update();
+
+        if self.file_service.is_some() {
+            error!("Failed to get properties from file service for");
+            return Err(());
+        }
+
+        let context = crypto.create_context()
+            .map_err(| () | log_crypto_context_error())
+            ? ;
+
+        let path_root_file = FileHandle::root_path(& self.path);
+        let metadata = Metadata::load(& path_root_file, & context) ? ;
+        Ok(FileProperties::from_closed_file(metadata))
+    }
+
+    pub fn cached_properties(& mut self) -> Result<CachedFileProperties, ()> {
+        self.update();
+
+        if self.file_service.is_none() {
+            return Ok(self.cached_properties.clone());
+        }
+
+        if let Some(ref mut file_service) = self.file_service {
+            let result = file_service.access.properties();
+            if result.is_ok() {
+                return Ok(CachedFileProperties::from_properties(result.unwrap()))
+            }
+            warn!("There was a problem receiving properties from open file");
+        }
+
+        self.update();
+        if self.file_service.is_some() {
+            error!("Failed to get properties from file service for cached properties");
+            return Err(());
+        }
+
+        Ok(self.cached_properties.clone())
     }
 
     pub fn open(& mut self, crypto: & Crypto, user: Id) -> Result<FileAccess, ()> {
@@ -198,23 +278,6 @@ impl FileHandle {
         }
     }
 
-    pub fn is_open(& mut self) -> bool {
-        self.update();
-        self.file_service.is_some()
-    }
-
-    pub fn close(& mut self) {
-        if !self.is_open() {
-            return ;
-        }
-
-        let file_service = self.file_service.take().unwrap();
-        let _ = file_service.access.channel_send.send(FileRequestProtocol::Close);
-        let _ = file_service.thread.join()  // todo: Somekind of timeout should be used here
-            .map_err(| error | warn!("Failed to join file thread, error={:?}", error))
-            ;
-    }
-
     fn start_file_service(& mut self, crypto_context: Context, user: Id)
                          -> Result<FileAccess, ()>
     {
@@ -237,24 +300,47 @@ impl FileHandle {
         Ok(access_2)
     }
 
-    fn update(& mut self) {
+    pub fn is_open(& mut self) -> bool {
+        self.update();
+        self.file_service.is_some()
+    }
 
-        let mut close = false;
-        if let Some(ref mut handle) = self.file_service {
-            loop {
-                let notification = handle.access.pop_notification();
-                match notification {
-                    Some(Notification::FileClosing {  }) => close = true,
-                    Some(Notification::PartOfFileModified { .. }) => (),
-                    Some(Notification::PartOfFileInserted { .. }) => (),
-                    Some(Notification::PartOfFileDeleted { .. }) => (),
-                    None => break,
-                };
+    pub fn close(& mut self) {
+        if !self.is_open() {
+            return ;
+        }
+        if let Some(ref mut file_service) = self.file_service {
+            let result = file_service.access.properties();
+            if result.is_ok() {
+                self.cached_properties = CachedFileProperties::from_properties(result.unwrap());
+            } else {
+                error!("Failed to received properties on closing file");
             }
         }
+        self.close_file_service();
+    }
 
-        if close {
-            self.close();
+    fn close_file_service(& mut self) {
+        debug!("Closing file service, path=\"{}\"", self.path.display());
+        let file_service = self.file_service.take().unwrap();
+        let _ = file_service.access.channel_send.send(FileRequestProtocol::Close);
+        let _ = file_service.thread.join()  // todo: Somekind of timeout should be used here
+            .map_err(| error | warn!("Failed to join file thread, error={:?}", error))
+            ;
+    }
+
+    fn update(& mut self) {
+
+        let mut close: Option<Metadata> = None;
+        if let Some(ref mut handle) = self.file_service {
+            handle.access.process_messages();
+            close = handle.access.close_notification.take();
+        }
+
+        if close.is_some() {
+            debug!("Received close notification from file service, path=\"{}\"", self.path.display());
+            self.cached_properties = CachedFileProperties::from_metadata(close.unwrap());
+            self.close_file_service();
         }
     }
 }
@@ -265,11 +351,11 @@ impl Drop for FileHandle {
     }
 }
 
-#[derive(Debug)]
 pub struct FileAccess {
     pub channel_send: Sender<FileRequestProtocol>,
     pub channel_receive: Receiver<FileResponseProtocol>,
     pub unhandled_notitifications: Vec<Notification>,
+    pub close_notification: Option<Metadata>,
 }
 
 impl FileAccess {
@@ -284,6 +370,12 @@ impl FileAccess {
             }
         }
         self.unhandled_notitifications.pop()
+    }
+
+    pub fn process_messages(& mut self) {
+        if let Ok(msg) = self.channel_receive.try_recv() {
+            self.handle_unexpected_message(msg);
+        }
     }
 
     pub fn write(& mut self, revision: u64, offset: u64, buffer: Buffer)
@@ -457,8 +549,11 @@ impl FileAccess {
             FileResponseProtocol::Notification { notification } => {
                 self.unhandled_notitifications.push(notification);
             },
+            FileResponseProtocol::CloseNotification { metadata } => {
+                self.close_notification = Some(metadata);
+            },
             _other => {
-                warn!("Received unexpedted message");
+                warn!("Received unexpected message");
             },
         }
     }

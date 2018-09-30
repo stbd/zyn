@@ -37,6 +37,7 @@ pub enum FileResponseProtocol {
     LockFile { result: Result<(), FileError> },
     UnlockFile { result: Result<(), FileError> },
     Notification { notification: Notification },
+    CloseNotification { metadata: Metadata },
 }
 
 struct ConnectedAccess {
@@ -73,8 +74,6 @@ pub struct Metadata {
     pub created: FileEvent,
     pub modified: FileEvent,
     pub revision: FileRevision,
-    pub read: Id, // todo: remove
-    pub write: Id, // todo: remove
     pub parent: NodeId,
     pub max_block_size: usize,
     pub file_type: FileType,
@@ -100,8 +99,6 @@ impl Metadata {
                 timestamp: timestamp,
             },
             revision: 0,
-            read: user.clone(),
-            write: user,
             parent: parent,
             file_type: file_type,
             max_block_size: max_block_size,
@@ -198,8 +195,6 @@ impl Metadata {
             self.modified.timestamp,
             self.modified.user.clone(),
             self.revision,
-            self.read.clone(),
-            self.write.clone(),
             self.parent.clone(),
             self.file_type.clone(),
             self.max_block_size,
@@ -231,8 +226,6 @@ impl Metadata {
             },
             revision: serialized.revision,
             block_descriptions: Vec::new(),
-            read: serialized.read,
-            write: serialized.write,
             parent: serialized.parent,
             file_type: serialized.file_type,
             max_block_size: serialized.max_block_size,
@@ -274,7 +267,7 @@ impl FileService {
         parent: NodeId,
         file_type: FileType,
         max_block_size: usize,
-    ) -> Result<(), ()> {
+    ) -> Result<Metadata, ()> {
         FileImpl::create(& path_basename, crypto_context, user, parent, file_type, max_block_size)
     }
 
@@ -304,6 +297,7 @@ impl FileService {
             channel_send: tx_file,
             channel_receive: rx_user,
             unhandled_notitifications: Vec::with_capacity(5),
+            close_notification: None,
         }
     }
 
@@ -533,8 +527,8 @@ impl FileService {
 
             if self.users.len() <= 1 {
                 debug!("Closing file as it has no users, file={}", self.file.display());
-                let _ = send_response(& self.users[0], FileResponseProtocol::Notification {
-                    notification: Notification::FileClosing { }
+                let _ = send_response(& self.users[0], FileResponseProtocol::CloseNotification {
+                    metadata: self.file.metadata.clone(),
                 });
                 exit = true;
             }
@@ -602,7 +596,7 @@ impl FileImpl {
         parent: NodeId,
         file_type: FileType,
         max_block_size: usize,
-    ) -> Result<(), ()> {
+    ) -> Result<Metadata, ()> {
 
         let mut file = FileImpl {
             buffer: Buffer::with_capacity(DEFAULT_BUFFER_SIZE_BYTES as usize),
@@ -613,7 +607,7 @@ impl FileImpl {
             lock: None,
         };
         file.store();
-        Ok(())
+        Ok(file.metadata)
     }
 
     fn get_lock(& self) -> Option<FileLock> {
@@ -697,8 +691,8 @@ impl FileImpl {
     }
 
     fn store(& mut self) {
-        let _ = self.write_block();
         let _ = self.metadata.store(& self.path_basename, & self.crypto_context);
+        let _ = self.write_block();
     }
 
     fn update_current_block_size(& mut self) {

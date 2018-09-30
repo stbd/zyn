@@ -1,3 +1,4 @@
+import collections
 import datetime
 import logging
 import os
@@ -36,6 +37,9 @@ class TestZyn(unittest.TestCase):
         self._password = 'admin'
         self._work_dir = self._temp_dir()
 
+    def _path_server_workdir(self, server_workdir=DEFAULT_SERVER_WORKDIR):
+        return '{}/{}'.format(self._work_dir.name, server_workdir)
+
     def _start_server_process(self, args=[]):
         enviroment_variables = os.environ.copy()
         enviroment_variables['RUST_LOG'] = 'trace'
@@ -65,6 +69,10 @@ class TestZyn(unittest.TestCase):
             gpg_fingerprint=None,
             default_username=None,
             default_password=None,
+            filesystem_capacity=None,
+            max_number_of_files_per_directory=None,
+            max_page_size_random_access=None,
+            max_page_size_blob=None,
             init=False
     ):
         params = []
@@ -98,6 +106,22 @@ class TestZyn(unittest.TestCase):
 
         params.append('--default-user-password')
         params.append(default_password or self._password)
+
+        if filesystem_capacity is not None:
+            params.append('--filesystem-capacity')
+            params.append(str(filesystem_capacity))
+
+        if max_number_of_files_per_directory is not None:
+            params.append('--max-number-of-files-per-directory')
+            params.append(str(max_number_of_files_per_directory))
+
+        if max_page_size_random_access is not None:
+            params.append('--max-page-size-for-random-access')
+            params.append(str(max_page_size_random_access))
+
+        if max_page_size_blob is not None:
+            params.append('--max-page-size-for-blob')
+            params.append(str(max_page_size_blob))
 
         process = self._start_server_process(params)
         time.sleep(.1)  # Give some time for the process to start up
@@ -144,12 +168,34 @@ class TestCommon(TestZyn):
         with self.assertRaises(zyn_util.exception.ZynConnectionLost):
             connection.read_message()
 
-    def _start_node(self, server_workdir=DEFAULT_SERVER_WORKDIR, init=True):
-        server_workdir = '{}/{}'.format(self._work_dir.name, server_workdir)
+    def _get_files_in_server_workdir(
+            self,
+            server_workdir=DEFAULT_SERVER_WORKDIR,
+            filter_directories=[]
+    ):
+        server_workdir = self._path_server_workdir(server_workdir)
+        elements = collections.OrderedDict()
+        for root, dirs, files in os.walk(server_workdir):
+            root = root.replace(server_workdir, '')
+            if not root.startswith('/'):
+                root = '/' + root
+
+            if root in filter_directories:
+                continue
+
+            elements[root] = []
+            for f in files:
+                elements[root].append(f)
+
+        return elements
+
+    def _start_node(self, server_workdir=DEFAULT_SERVER_WORKDIR, init=True, **kwargs):
+        server_workdir = self._path_server_workdir(server_workdir)
         os.mkdir(server_workdir)
         self._process = self._start_server(
             server_workdir,
             init=init,
+            **kwargs
         )
 
     def _connect_to_node(self):

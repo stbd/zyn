@@ -4,12 +4,13 @@ use std::vec::{ Vec };
 use node::common::{ NodeId, Timestamp, utc_timestamp };
 use node::user_authority::{ Id };
 
+#[derive(Clone)]
 pub struct Child {
     pub node_id: NodeId,
     pub name: String,
 }
 
-pub struct Folder {
+pub struct Directory {
     children: Vec<Child>,
     parent: NodeId,  // todo: This may be problem for root, should be optional
     created: Timestamp,
@@ -18,10 +19,10 @@ pub struct Folder {
     write: Id,
 }
 
-impl Folder {
-    pub fn create(user: Id, parent: NodeId) -> Folder {
+impl Directory {
+    pub fn create(user: Id, parent: NodeId) -> Directory {
         let ts = utc_timestamp();
-        Folder {
+        Directory {
             children: Vec::with_capacity(5),
             parent: parent,
             created: ts.clone(),
@@ -31,8 +32,8 @@ impl Folder {
         }
     }
 
-    pub fn from(parent: NodeId, created: Timestamp, modified: Timestamp, read: Id, write: Id) -> Folder {
-        Folder {
+    pub fn from(parent: NodeId, created: Timestamp, modified: Timestamp, read: Id, write: Id) -> Directory {
+        Directory {
             children: Vec::with_capacity(5),
             parent: parent,
             created: created,
@@ -93,5 +94,9 @@ impl Folder {
 
     pub fn children(& self) -> Iter<Child> {
         self.children.iter()
+    }
+
+    pub fn clone_children(& self) -> Vec<Child> {
+        self.children.clone()
     }
 }

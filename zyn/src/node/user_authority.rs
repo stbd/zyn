@@ -82,17 +82,17 @@ impl UserAuthority {
         }
     }
 
-    pub fn resolve_name(& self, id: & Id) -> Result<String, ()> { // todo: Rename resolve_username
+    pub fn resolve_id_name(& self, id: & Id) -> Result<String, ()> { // todo: Rename resolve_username
         match *id {
             Id::User(user_id) => {
                 self.users.get(& user_id)
                     .ok_or(())
-                    .and_then(| element | Ok(format!("User;{}", & element.name)))
+                    .and_then(| element | Ok(element.name.clone()))
             },
             Id::Group(group_id) => {
                 self.groups.get(& group_id)
                     .ok_or(())
-                    .and_then(| element | Ok(format!("Group:{}", & element.name)))
+                    .and_then(| element | Ok(element.name.clone()))
             },
         }
     }

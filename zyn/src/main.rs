@@ -20,6 +20,8 @@ use zyn::node::user_authority::{ UserAuthority };
 const EXIT_STATUS_OK: i32 = 0;
 const EXIT_STATUS_ERROR: i32 = 1;
 
+const MEGABYTE: u64 = 1024 * 1024;
+
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug)]
@@ -104,6 +106,26 @@ impl Arguments {
         "--default-user-password"
     }
 
+    pub fn default_user_disable_expiration() -> & 'static str {
+        "--default-user-disable-expiration"
+    }
+
+    pub fn max_num_files_per_dir() -> & 'static str {
+        "--max-number-of-files-per-directory"
+    }
+
+    pub fn filesystem_capacity() -> & 'static str {
+        "--filesystem-capacity"
+    }
+
+    pub fn max_page_size_random_access() -> & 'static str {
+        "--max-page-size-for-random-access"
+    }
+
+    pub fn max_page_size_blob() -> & 'static str {
+        "--max-page-size-for-blob"
+    }
+
     pub fn defaults() -> Arguments {
         Arguments {
             values: vec![
@@ -143,6 +165,25 @@ impl Arguments {
                  "Password of the default user",
                  Argument::String { value: Some(String::from("admin")) }),
 
+                (Arguments::default_user_disable_expiration(),
+                 "Disable default user expiration",
+                 Argument::Bool { value: Some(false) }),
+
+                (Arguments::max_num_files_per_dir(),
+                 "Maximum number of files per single directory",
+                 Argument::Uint { value: Some(100) }),
+
+                (Arguments::filesystem_capacity(),
+                 "Maximum number of filesystem elements",
+                 Argument::Uint { value: Some(5000) }),
+
+                (Arguments::max_page_size_random_access(),
+                 "Maximum page size for random access files",
+                 Argument::Uint { value: Some(MEGABYTE * 5) }),
+
+                (Arguments::max_page_size_blob(),
+                 "Maximum page size for blob files",
+                 Argument::Uint { value: Some(MEGABYTE * 10) }),
             ],
         }
     }
@@ -321,6 +362,11 @@ fn run() -> Result<(), ()> {
     let username = args.take(Arguments::default_user_name()).take_string();
     let password = args.take(Arguments::default_user_password()).take_string();
     let create = args.take(Arguments::name_init()).take_bool();
+    let max_files_per_dir = args.take(Arguments::max_num_files_per_dir()).take_uint() as usize;
+    let fs_capacity = args.take(Arguments::filesystem_capacity()).take_uint();
+    let max_page_size_random_access = args.take(Arguments::max_page_size_random_access()).take_uint() as usize;
+    let max_page_size_blob = args.take(Arguments::max_page_size_blob()).take_uint() as usize;
+    let disable_expiration = args.take(Arguments::default_user_disable_expiration()).take_bool();
 
     if ! args.is_empty() {
         panic!("Unused arguments");
@@ -331,10 +377,11 @@ fn run() -> Result<(), ()> {
         ? ;
 
     if create {
-        const MEGABYTE: usize = 1024 * 1024;
         let node_settings = NodeSettings {
-            page_size_random_access_file: MEGABYTE * 5,
-            page_size_blob_file: MEGABYTE * 10,
+            max_page_size_random_access_file: max_page_size_random_access,
+            max_page_size_blob_file: max_page_size_blob,
+            max_number_of_files_per_directory: max_files_per_dir,
+            filesystem_capacity: fs_capacity,
             socket_buffer_size: 1024 * 4,
         };
 
@@ -343,8 +390,15 @@ fn run() -> Result<(), ()> {
             .map_err(| () | error!("Failed to configure admin group"))
             ? ;
 
-        let default_user_expiration = utc_timestamp() + 5 * 60;
-        let user = user_authority.add_user(& username, & password, Some(default_user_expiration))
+        let default_user_expiration = {
+            if disable_expiration {
+                None
+            } else {
+                Some(utc_timestamp() + 5 * 60)
+            }
+        };
+
+        let user = user_authority.add_user(& username, & password, default_user_expiration)
             .map_err(| () | error!("Failed to create default user"))
             ? ;
 

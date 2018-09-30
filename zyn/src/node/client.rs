@@ -11,7 +11,7 @@ use node::common::{ NodeId, Buffer, OpenMode, FileType, Timestamp };
 use node::connection::{ Connection };
 use node::file_handle::{ FileAccess, FileError, Notification, FileLock, FileProperties };
 use node::filesystem::{ FilesystemError };
-use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, FilesystemElementType, ErrorResponse, NodeError, ShutdownReason };
+use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, ErrorResponse, NodeError, ShutdownReason, FileSystemListElement, Authority };
 use node::user_authority::{ Id };
 
 /*
@@ -108,27 +108,30 @@ fn map_node_error_to_uint(error: ErrorResponse) -> u64 {
         ErrorResponse::NodeError { error } => {
             match error {
                 NodeError::InvalidUsernamePassword => 100,
-                NodeError::ParentIsNotFolder => 101,
+                NodeError::ParentIsNotDirectory => 101,
                 NodeError::UnauthorizedOperation => 102,
                 NodeError::InternalCommunicationError => 103,
                 NodeError::InternalError => 104,
                 NodeError::UnknownFile => 105,
                 NodeError::UnknownAuthority => 106,
                 NodeError::AuthorityError => 107,
+                NodeError::InvalidPageSize => 108,
+                NodeError::FailedToResolveAuthority => 109,
 
             }
         },
         ErrorResponse::FilesystemError { error } => {
             match error {
                 FilesystemError::InvalidNodeId => 200,
-                FilesystemError::FolderIsNotEmpty => 201,
+                FilesystemError::DirectoryIsNotEmpty => 201,
                 FilesystemError::InvalidPathSize => 202,
                 FilesystemError::InvalidPath => 203,
                 FilesystemError::HostFilesystemError => 204,
                 FilesystemError::AllNodesInUse => 205,
-                FilesystemError::ParentIsNotFolder => 206,
+                FilesystemError::ParentIsNotDirectory => 206,
                 FilesystemError::NodeIsNotFile => 207,
-                FilesystemError::NodeIsNotFolder => 208,
+                FilesystemError::NodeIsNotDirectory => 208,
+                FilesystemError::ElementWithNameAlreadyExists => 209,
             }
         }
     }
@@ -150,7 +153,7 @@ fn map_file_error_to_uint(result: FileError) -> u64 {
 const READ: u64 = 0;
 const READ_WRITE: u64 = 1;
 const FILE: u64 = 0;
-const FOLDER: u64 = 1;
+const DIRECTORY: u64 = 1;
 const FILE_TYPE_RANDOM_ACCESS: u64 = 0;
 const FILE_TYPE_BLOB: u64 = 1;
 const TYPE_USER: u64 = 0;
@@ -403,7 +406,7 @@ impl Client {
 
         let message_handlers: Vec<(& str, fn(& mut Client) -> Result<(), ()>, u64)> = vec![
             ("CREATE-FILE:", handle_create_file_req, 1),
-            ("CREATE-FOLDER:", handle_create_folder_req, 1),
+            ("CREATE-DIRECTORY:", handle_create_directory_req, 1),
             ("O:", handle_open_req, 1),
             ("CLOSE:", handle_close_req, 1),
             ("RA-W:", handle_write_random_access_req, 1),
@@ -413,8 +416,8 @@ impl Client {
             ("R:", handle_read_req, 1),
             ("DELETE:", handle_delete_fs_element_req, 1),
             ("Q-COUNTERS:", handle_query_counters_req, 1),
-            ("Q-LIST:", handle_query_list_req, 1),
-            ("Q-FILESYSTEM:", handle_query_fs_req, 1),
+            ("Q-FS-C:", handle_query_fs_children, 1),
+            ("Q-FS-E:", handle_query_fs_element, 1),
             ("Q-SYSTEM:", handle_query_system, 1),
             ("ADD-USER-GROUP:", handle_add_user_group, 1),
             ("MOD-USER-GROUP:", handle_mod_user_group, 1),
@@ -781,7 +784,7 @@ fn handle_authentication_req(client: & mut Client) -> Result<(), ()>
 
 /*
 Create file request
-<- [Version]CREATE-FILE:[Transaction Id][FileDescriptor: parent][String: name][Uint: type];[End]
+<- [Version]CREATE-FILE:[Transaction Id][FileDescriptor: parent][String: name][Uint: type](Uint: page size);[End]
  * Type: 0: random access,
  * Type: 1: blob,
 -> [Version]RSP:[Transaction Id][Uint: error code];(Node-Id)[End]
@@ -792,6 +795,7 @@ fn handle_create_file_req(client: & mut Client) -> Result<(), ()>
     let parent = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
     let name = try_parse!(client.buffer.parse_string(), client, transaction_id);
     let type_uint = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let page_size: Option<u64> = client.buffer.parse_unsigned().ok();
     try_parse!(client.buffer.expect(";"), client, transaction_id);
     try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
 
@@ -813,6 +817,7 @@ fn handle_create_file_req(client: & mut Client) -> Result<(), ()>
         type_of_file: type_enum,
         name: name,
         user: user,
+        page_size: page_size,
     }) ? ;
 
     node_receive::<()>(
@@ -844,11 +849,11 @@ fn handle_create_file_req(client: & mut Client) -> Result<(), ()>
 }
 
 /*
-Create folder request
-<- [Version]CREATE-FOLDER:[Transaction Id][FileDescriptor: parent][String: name];[End]
+Create directory request
+<- [Version]CREATE-DIRECTORY:[Transaction Id][FileDescriptor: parent][String: name];[End]
 -> [Version]RSP:[Transaction Id][Uint: error code];(Node-Id)[End]
 */
-fn handle_create_folder_req(client: & mut Client) -> Result<(), ()>
+fn handle_create_directory_req(client: & mut Client) -> Result<(), ()>
 {
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let parent = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
@@ -856,11 +861,11 @@ fn handle_create_folder_req(client: & mut Client) -> Result<(), ()>
     try_parse!(client.buffer.expect(";"), client, transaction_id);
     try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
 
-    trace!("Create folder: user={}, parent=\"{}\",  name=\"{}\"",
+    trace!("Create directory: user={}, parent=\"{}\",  name=\"{}\"",
            client, parent, name);
 
     let user = client.user.as_ref().unwrap().clone();
-    client.send_to_node(transaction_id, NodeProtocol::CreateFolderRequest {
+    client.send_to_node(transaction_id, NodeProtocol::CreateDirecotryRequest {
         parent: parent,
         name: name,
         user: user,
@@ -896,7 +901,7 @@ fn handle_create_folder_req(client: & mut Client) -> Result<(), ()>
 
 /*
 Open file file:
-<- [Version]C:[Transaction Id][FileDescriptor][Uint: type];[End]
+<- [Version]O:[Transaction Id][FileDescriptor][Uint: type];[End]
  * Type: 0: read
  * Type, 1: read-write
 -> [Version]RSP:[Transaction Id][Uint: error code](Node-Id)(Uint: revision)(Uint: size)(Uint: type)(Uint: block size);[End]
@@ -1210,7 +1215,7 @@ fn handle_random_access_delete_req(client: & mut Client) -> Result<(), ()>
     }
 
     if ! is_random_access_edit_allowed(open_file.page_size, offset, size) {
-        warn!("Invalid edit, edited block not in fist page, page_size={}, offset={}, size={}",
+        warn!("Invalid edit, edited block does not in fist page, page_size={}, offset={}, size={}",
               open_file.page_size, offset, size);
         try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::InvalidEdit as u64);
         return Err(());
@@ -1462,12 +1467,22 @@ fn write_le_kv_su(buffer: & mut SendBuffer, key: & str, value: u64) -> Result<()
     buffer.write_key_value_pair_end() ? ;
     buffer.write_list_element_end()
 }
-
+/*
 fn write_le_kv_ss(buffer: & mut SendBuffer, key: & str, value: String) -> Result<(), ()> {
     buffer.write_list_element_start() ? ;
     buffer.write_key_value_pair_start() ? ;
     buffer.write_string(String::from(key)) ? ;
     buffer.write_string(value) ? ;
+    buffer.write_key_value_pair_end() ? ;
+    buffer.write_list_element_end()
+}
+*/
+
+fn write_le_kv_sa(buffer: & mut SendBuffer, key: & str, value: Authority) -> Result<(), ()> {
+    buffer.write_list_element_start() ? ;
+    buffer.write_key_value_pair_start() ? ;
+    buffer.write_string(String::from(key)) ? ;
+    buffer.write_authority(value) ? ;
     buffer.write_key_value_pair_end() ? ;
     buffer.write_list_element_end()
 }
@@ -1524,13 +1539,13 @@ fn handle_query_counters_req(client: & mut Client) -> Result<(), ()>
 }
 
 /*
-Query list file system contents
+Query element children
 <- [Version]Q-LIST:[Transaction Id][FileDescriptor];[End]
 -> [Version]RSP:[Transaction Id][List-of-Element-Info];[End]
  * Element-Info: List-of-(String: name, node_id, uint: type-of-element)
  * type-of-element: 0: file, 1: directory
 */
-fn handle_query_list_req(client: & mut Client) -> Result<(), ()>
+fn handle_query_fs_children(client: & mut Client) -> Result<(), ()>
 {
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
     let fd = try_parse!(client.buffer.parse_file_descriptor(), client, 0);
@@ -1540,7 +1555,7 @@ fn handle_query_list_req(client: & mut Client) -> Result<(), ()>
     trace!("Query list: user={}, fd={}", client, fd);
 
     let user = client.user.as_ref().unwrap().clone();
-    client.send_to_node(transaction_id, NodeProtocol::QueryListRequest {
+    client.send_to_node(transaction_id, NodeProtocol::QueryFsChildrenRequest {
         user: user,
         fd: fd,
     }) ? ;
@@ -1549,36 +1564,54 @@ fn handle_query_list_req(client: & mut Client) -> Result<(), ()>
         client,
         & | msg, client | {
             match msg {
-                ClientProtocol::QueryListResponse {
+                ClientProtocol::QueryFsChildrenResponse {
                     result: Ok(list_of_elements),
                 } => {
 
                     let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
 
                     try_in_receive_loop!(client, buffer.write_list_start(list_of_elements.len()), Status::FailedToWriteToSendBuffer);
-                    for (name, node_id, type_of) in list_of_elements.into_iter() {
+                    for element in list_of_elements.into_iter() {
 
                         try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+                        match element {
+                            FileSystemListElement::File {
+                                name,
+                                node_id,
+                                revision,
+                                file_type,
+                                size,
+                            } => {
+                                try_in_receive_loop!(client, buffer.write_unsigned(FILE), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_unsigned(revision as u64), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_unsigned(file_type as u64), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_unsigned(size as u64), Status::FailedToWriteToSendBuffer);
 
-                        try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                        try_in_receive_loop!(client, buffer.write_unsigned(
-                            match type_of {
-                                FilesystemElementType::Folder => FOLDER,
-                                FilesystemElementType::File => FILE,
-                            }
-                        ), Status::FailedToWriteToSendBuffer);
-
+                            },
+                            FileSystemListElement::Directory {
+                                name,
+                                node_id,
+                                read,
+                                write,
+                            } => {
+                                try_in_receive_loop!(client, buffer.write_unsigned(DIRECTORY), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_authority(read), Status::FailedToWriteToSendBuffer);
+                                try_in_receive_loop!(client, buffer.write_authority(write), Status::FailedToWriteToSendBuffer);
+                            },
+                        }
                         try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
                     }
-
                     try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
                     (None, Some(Ok(())))
                 },
 
-                ClientProtocol::QueryListResponse {
+                ClientProtocol::QueryFsChildrenResponse {
                     result: Err(error),
                 } => {
                     try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
@@ -1601,17 +1634,17 @@ Query fileystem element
 -> [Version]RSP:[Transaction Id][Uint: type][List-of-key-value-pairs];[End]
  * Uint type: 0: file, 1: directory
 */
-fn handle_query_fs_req(client: & mut Client) -> Result<(), ()>
+fn handle_query_fs_element(client: & mut Client) -> Result<(), ()>
 {
     let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let fd = try_parse!(client.buffer.parse_file_descriptor(), client, 0); //  todo: user transaction id, check other usages as well
+    let fd = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
     try_parse!(client.buffer.expect(";"), client, 0);
     try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
 
     trace!("Query fs: user={}, fd={}", client, fd);
 
     let user = client.user.as_ref().unwrap().clone();
-    client.send_to_node(transaction_id, NodeProtocol::QueryFilesystemRequest {
+    client.send_to_node(transaction_id, NodeProtocol::QueryFsElementRequest {
         user: user,
         fd: fd,
     }) ? ;
@@ -1620,21 +1653,26 @@ fn handle_query_fs_req(client: & mut Client) -> Result<(), ()>
         client,
         & | msg, client | {
             match msg {
-                ClientProtocol::QueryFilesystemResponse {
+                ClientProtocol::QueryFsElementResponse {
                     result: Ok(desc),
                 } => {
 
                     let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
                     match desc {
-                        FilesystemElement::File { properties, authority, node_id } => {
-                            try_in_receive_loop!(client, buffer.write_list_start(8), Status::FailedToWriteToSendBuffer);
+                        FilesystemElement::File { properties, created_by, modified_by, read, write, node_id } => {
+                            try_in_receive_loop!(client, buffer.write_list_start(12), Status::FailedToWriteToSendBuffer);
                             try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "type", FILE as u64), Status::FailedToWriteToSendBuffer);
                             try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "node-id", node_id as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "created",  properties.created_at as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "modified",  properties.modified_at as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_ss(& mut buffer, "read-access",  authority.read), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_ss(& mut buffer, "write-access",  authority.write), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "block-size",  properties.page_size), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "created-at",  properties.created_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "modified-at",  properties.modified_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_sa(& mut buffer, "created-by",  created_by), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_sa(& mut buffer, "modified-by",  modified_by), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_sa(& mut buffer, "parent-read-authority", read), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_sa(& mut buffer, "parent-write-authority", write), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "page-size",  properties.page_size), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "revision",  properties.revision), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "size",  properties.size), Status::FailedToWriteToSendBuffer);
+
                             match properties.file_type {
                                 FileType::RandomAccess => {
                                     try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "file-type",  FILE_TYPE_RANDOM_ACCESS as u64), Status::FailedToWriteToSendBuffer);
@@ -1646,14 +1684,14 @@ fn handle_query_fs_req(client: & mut Client) -> Result<(), ()>
                             try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
 
                         },
-                        FilesystemElement::Folder { created_at, modified_at, authority, node_id } => {
+                        FilesystemElement::Directory { created_at, modified_at, read, write, node_id } => {
                             try_in_receive_loop!(client, buffer.write_list_start(6), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "type", FOLDER as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "type", DIRECTORY as u64), Status::FailedToWriteToSendBuffer);
                             try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "node-id", node_id as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "created",  created_at as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "modified",  modified_at as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_ss(& mut buffer, "read-access",  authority.read), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_ss(& mut buffer, "write-access",  authority.write), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "created-at",  created_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "modified-at",  modified_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_sa(& mut buffer, "read-authority", read), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, write_le_kv_sa(& mut buffer, "write-authority", write), Status::FailedToWriteToSendBuffer);
                             try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
                         },
                     }
@@ -1663,7 +1701,7 @@ fn handle_query_fs_req(client: & mut Client) -> Result<(), ()>
                     (None, Some(Ok(())))
                 },
 
-                ClientProtocol::QueryFilesystemResponse {
+                ClientProtocol::QueryFsElementResponse {
                     result: Err(error),
                 } => {
                     try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));

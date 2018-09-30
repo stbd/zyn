@@ -83,7 +83,6 @@ class zyn_development_environment(
 
         $packages = [
           'build-essential',
-          'libgpgme11-dev',
           'haveged',            # Used to generate randomness for security operations
           'python3',
           'python3-pip',
