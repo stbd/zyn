@@ -423,7 +423,7 @@ impl Filesystem {
         }
 
         {
-            let mut parent = self.nodes.get_mut(*parent_node_id as usize)
+            let parent = self.nodes.get_mut(*parent_node_id as usize)
                 .unwrap()
                 .to_mut_directory()
                 .unwrap();

@@ -837,7 +837,7 @@ impl Node {
 
         let (properties, file_auth) = Node::resolve_file_properties(& node_id, fs, crypto) ? ;
 
-        let mut file = fs.mut_file(& node_id)
+        let file = fs.mut_file(& node_id)
             .map_err(fs_error_to_rsp)
             ? ;
 
