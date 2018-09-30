@@ -87,6 +87,7 @@ class zyn_development_environment(
           'python3',
           'python3-pip',
           'shellcheck',         # Static analyser for bash scripts
+          'curl',
         ]
 
         package { $packages :
@@ -110,7 +111,10 @@ class zyn_development_environment(
                group => "$developer_name",
                owner => "$developer_name",
                mode => 0776,
-               require => User["$developer_name"],
+               require => [
+                 Package["curl"],
+                 User["$developer_name"],
+               ],
         }
 
         exec { 'install-rust' :

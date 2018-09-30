@@ -27,12 +27,10 @@ run apt-get update && apt-get install \
        -y
 
 run /bin/bash -euc " \
-package_dir=rust-1.18.0-x86_64-unknown-linux-gnu; \
-package_file=\${package_dir}.tar.gz; \
-url=https://static.rust-lang.org/dist/\$package_file; \
-wget \${url} && \
-tar -xf \${package_file} && \
-./\${package_dir}/install.sh \
+curl https://sh.rustup.rs -sSf \
+    | sh -s -- -y \
+         --default-host x86_64-unknown-linux-gnu \
+         --default-toolchain 1.23.0
 "
 
 copy --from=build_libressl /usr/libressl /usr
