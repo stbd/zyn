@@ -88,6 +88,7 @@ class zyn_development_environment(
           'python3-pip',
           'shellcheck',         # Static analyser for bash scripts
           'curl',
+          'gnupg2',
         ]
 
         package { $packages :
@@ -120,9 +121,13 @@ class zyn_development_environment(
         exec { 'install-rust' :
                  command => "${developer_home}/.zyn-install-rust-debian.sh",
                provider => shell,
-               onlyif => 'test ! -e /usr/local/bin/rustc',
+               onlyif => "/usr/bin/test ! -f $developer_home/.cargo/bin/rustup",
+               user => "$developer_name",
                timeout => 600,
-               require => File["zyn-install-rust-debian-script"],
+               require => [
+                 File["zyn-install-rust-debian-script"],
+                 User["$developer_name"],
+               ],
         }
 
         file { 'zyn-install-libressl-debian-script' :
