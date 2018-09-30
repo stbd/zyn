@@ -256,8 +256,8 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             if not rsp.is_error():
                 rsp = rsp.as_query_fs_element_rsp()
                 desc['node-id'] = rsp.node_id
-                desc['write-access'] = rsp.write_access
-                desc['read-access'] = rsp.read_access
+                #desc['write-access'] = rsp.write_access
+                #desc['read-access'] = rsp.read_access
                 desc['created'] = rsp.created
                 desc['modified'] = rsp.modified
                 if rsp.is_file():
