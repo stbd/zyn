@@ -963,6 +963,12 @@ class QueryElement:
     def is_directory(self):
         return self.type_of_element == FILESYSTEM_ELEMENT_DIRECTORY
 
+    def is_random_access(self):
+        return self.file_type == FILE_TYPE_RANDOM_ACCESS
+
+    def is_blob(self):
+        return self.file_type == FILE_TYPE_BLOB
+
 
 class QueryFilesystemChildrenResponse:
     def __init__(self, response):

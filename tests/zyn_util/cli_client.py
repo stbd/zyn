@@ -206,13 +206,29 @@ class ZynCliClient(cmd.Cmd):
         tracked_files, untracked_files = self._client.list(path_remote)
 
         print()
-        print('{:6} {:8} {:14} {}'.format('Type', 'Node Id', 'Local element', 'Name'))
+        print('{:6} {:10} {:8} {:14} {:9} {}'.format(
+            'Type', 'File type', 'Node Id', 'Local element', 'Revision', 'Name'
+        ))
+
         for f in sorted(tracked_files, key=lambda e: e.remote_file.is_file()):
             name = f.remote_file.name
-            type_of = 'file'
-            if f.remote_file.is_directory():
+            revision = '-'
+            type_of_file = '-'
+            if f.remote_file.is_file():
+                type_of = 'file'
+                revision = f.remote_file.revision
+                if f.remote_file.is_random_access():
+                    type_of_file = 'RA'
+                elif f.remote_file.is_blob():
+                    type_of_file = 'Blob'
+                else:
+                    raise NotImplementedError()
+
+            elif f.remote_file.is_directory():
                 name += '/'
                 type_of = 'dir'
+            else:
+                raise NotImplementedError()
 
             state = None
             if f.local_file.exists_locally and f.local_file.tracked:
@@ -229,7 +245,9 @@ class ZynCliClient(cmd.Cmd):
             if state is None:
                 raise RuntimeError()
 
-            print('{:<6} {:<8} {:<14} {}'.format(type_of, f.remote_file.node_id, state, name))
+            print('{:<6} {:<10} {:<8} {:<14} {:<9} {}'.format(
+                type_of, type_of_file, f.remote_file.node_id, state, revision, name
+            ))
 
         if args['hide_untracked_files']:
             return
