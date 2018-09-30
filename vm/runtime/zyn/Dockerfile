@@ -57,6 +57,7 @@ copy --from=build_zyn /zyn /zyn
 run apt-get update \
     && apt-get install \
        expect \
+       gnupg2 \
        haveged \
        -y
 
