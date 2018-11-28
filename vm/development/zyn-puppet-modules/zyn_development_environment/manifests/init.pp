@@ -127,6 +127,7 @@ class zyn_development_environment(
                require => [
                  File["zyn-install-rust-debian-script"],
                  User["$developer_name"],
+                 Exec['prepare-home'],
                ],
         }
 
