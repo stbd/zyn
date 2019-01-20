@@ -7,6 +7,8 @@ fi
 
 username=$1
 path_user_home=$2
+path_scripts_source="$(dirname "$0")"
+path_scripts_dest=$path_user_home/.zyn-scripts
 
 # Make sure home has all files from skeleton
 for path in /etc/skel/.*; do
@@ -16,13 +18,48 @@ for path in /etc/skel/.*; do
         chown "$username:$username" "$path_in_home"
     fi;
 done
-chown -R "$username:$username" "$path_user_home"
 
 tag=ZYN-DEV-ENV
 sed -i "/$tag/,/$tag/d" "$path_user_home/.bashrc"
 cat <<EOF >> "$path_user_home/.bashrc"
 # $tag
 export ZYN_ROOT=$path_user_home/zyn
-source "$path_user_home/.zyn-dev-env.sh"
+function zyn-reload-home() {
+    $(realpath "$0") $username $path_user_home
+}
+PATH=\$PATH:$path_scripts_dest
+echo -e "
+\tZyn - Development environment
+
+Project repository is mounted to $ZYN_ROOT
+
+Use user \"vagrant\" to have sudo access to the machine
+su vagrant  # password: vagrant
+
+Available commands:"
+
+for script in "$path_scripts_dest"/zyn-*; do
+    echo -e "\t\$(basename "\$script")"
+done
 # /$tag
 EOF
+
+declare -a scripts=(
+    "zyn-build.sh"
+    "zyn-unittests.sh"
+    "zyn-system-tests.sh"
+    "zyn-system-tests-slow.sh"
+    "zyn-all-tests.sh"
+    "zyn-run-cli-client.sh"
+    "zyn-run-web-client.sh"
+    "zyn-run-server.sh"
+    "zyn-static-analysis.sh"
+    "common.sh"
+)
+
+mkdir -p "$path_scripts_dest"
+for script in "${scripts[@]}"; do
+    cp "$path_scripts_source/$script" "$path_scripts_dest"
+done
+
+chown -R "$username:$username" "$path_user_home"
