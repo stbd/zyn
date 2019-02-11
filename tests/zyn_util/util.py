@@ -1,10 +1,14 @@
+import datetime
 import difflib
 import logging
-import os.path
 import posixpath
 
 import zyn_util.errors
 import zyn_util.exception
+
+
+def timestamp_to_datetime(timestamp):
+    return datetime.datetime.utcfromtimestamp(timestamp)
 
 
 def verbose_count_to_log_level(verbose_count):
@@ -25,21 +29,42 @@ def check_server_response(rsp):
         raise zyn_util.exception.ZynServerException(rsp.error_code(), desc)
 
 
-def join_paths(list_of_paths):
+def normalized_remote_path(path):
+    if path is None or not path:
+        raise ValueError('Empty path')
+    path = path.replace('\\', '/')
+    remote_path = posixpath.normpath(path)
+    if remote_path.startswith('//'):
+        remote_path = remote_path[1:]
+    return remote_path
+
+
+def split_remote_path(path):
+    if '//' in path:
+        raise ValueError('Split path must be normalized')
+    slash = None
+    if path.endswith('/'):
+        slash = '/'
+        path = path[:-1]
+    path_1, path_2 = posixpath.split(path)
+    if not path_1 or not path_2:
+        raise ValueError('Path could not be split, path="{}"'.format(path))
+    if slash is not None:
+        path_2 += slash
+    return path_1, path_2
+
+
+def join_remote_paths(list_of_paths):
     path = posixpath.normpath('/'.join(list_of_paths))
     if path.startswith('//'):
         path = path[1:]
     return path
 
 
-def to_remote_path(path):
-    path = path.replace('\\', '/')
-    return path
-
-
-def local_path(paths):
-    path_local = zyn_util.util.join_paths(paths)
-    return os.path.normpath(path_local)
+def unhandled(msg=None):
+    if msg is not None:
+        raise RuntimeError(msg)
+    raise RuntimeError()
 
 
 def edit_random_access_file(

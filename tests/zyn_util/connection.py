@@ -2,13 +2,14 @@ import logging
 import socket
 import ssl
 import time
+import os
 
 import certifi
 
 import zyn_util.exception
 
 
-FILESYSTEM_ELEMENT_FILE = 0  # todo: Rename FILESYSTEM_ELEMENT_FILE
+FILESYSTEM_ELEMENT_FILE = 0
 FILESYSTEM_ELEMENT_DIRECTORY = 1
 FILE_TYPE_RANDOM_ACCESS = 0
 FILE_TYPE_BLOB = 1
@@ -121,7 +122,7 @@ class ZynConnection:
             name,
             parent_node_id=None,
             parent_path=None,
-            page_size=None,
+            page_size=None,  # todo: change to block size
             transaction_id=None
     ):
         return self.create_file(
@@ -214,6 +215,7 @@ class ZynConnection:
         return self._send_receive(req)
 
     def blob_write(self, node_id, revision, data, block_size=None, transaction_id=None):
+        # todo: refactor to use stream version
         if block_size is None:
             block_size = len(data)
 
@@ -243,6 +245,44 @@ class ZynConnection:
                 return rsp
 
         return self.read_response()
+
+    def blob_write_stream(self, node_id, revision, stream, block_size=None, transaction_id=None):
+        # If block size is not set, try to use data length as size
+        # also if block size is larger than actual data, use data length
+        if block_size is None or block_size > stream.size():
+            block_size = stream.size()
+
+        size = stream.size()
+        req = \
+            self.field_version() \
+            + 'BLOB-W:' \
+            + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
+            + self.field_node_id(node_id) \
+            + self.field_unsigned(revision) \
+            + self.field_unsigned(size) \
+            + self.field_unsigned(block_size) \
+            + ';' \
+            + self.field_end_of_message() \
+
+        rsp = self._send_receive(req)
+        if rsp.is_error():
+            return rsp
+
+        bytes_send = 0
+        self._socket.settimeout(60)
+        while True:
+            block = stream.get(block_size)
+            if block is None:
+                break
+            self._socket.send(block)
+            bytes_send += len(block)
+            rsp = self.read_response(timeout=60*5)
+            if rsp.is_error():
+                return rsp
+
+        if bytes_send != size:
+            raise RuntimeError('Sent bytes does not match the size of ')
+        return self.read_response(timeout=60*5)
 
     def ra_write(self, node_id, revision, offset, data, transaction_id=None):
         req = \
@@ -293,6 +333,9 @@ class ZynConnection:
         return self.read_response()
 
     def read_file(self, node_id, offset, size, transaction_id=None):
+        if size == 0:
+            return
+
         req = \
             self.field_version() \
             + 'R:' \
@@ -312,6 +355,27 @@ class ZynConnection:
         if read_size > 0:
             data = self.read_data(read_size)
         return rsp, data
+
+    def read_file_stream(self, node_id, offset, size, block_size, stream):
+        offset_start = offset
+        offset_block_start = offset_start
+        offset_end = offset_start + size
+        while True:
+            if offset_block_start >= offset_end:
+                break
+            bytes_remaining = offset_end - offset_block_start
+            block_size = min(block_size, bytes_remaining)
+            rsp, d = self.read_file(
+                node_id,
+                offset_block_start,
+                block_size,
+                stream.transaction_id(),
+            )
+            if rsp.is_error():
+                stream.handle_error(rsp)
+                break
+            stream.handle_data(offset_block_start, d)
+            offset_block_start += len(d)
 
     def query_fs_children(self, node_id=None, path=None, transaction_id=None):
         req = \
@@ -714,6 +778,57 @@ class ZynConnection:
         # print (root.str())
 
         return root.to_list()
+
+
+class DataStream:
+    def __init__(self, data):
+        self._data = data
+        self._index = 0
+
+    def size(self):
+        return len(self._data)
+
+    def get(self, size):
+        d = self._data[self._index:self._index + size]
+        if len(d) == 0:
+            return None
+        self._index += len(d)
+        return d
+
+
+class FileStream:
+    def __init__(self, path):
+        self._fp = open(path, 'rb')
+
+    def size(self):
+        return os.stat(self._fp.name).st_size
+
+    def get(self, size):
+        d = self._fp.read(size)
+        if len(d) == 0:
+            return None
+        return d
+
+
+class InputFileStream():
+    def __init__(self, fp):
+        self._fp = fp
+        self._rsp = None
+
+    def is_error(self):
+        return self._rsp is not None
+
+    def error_rsp(self):
+        return self._rsp
+
+    def transaction_id(self):
+        return None
+
+    def handle_error(self, rsp):
+        self._rsp = rsp
+
+    def handle_data(self, _, data):
+        self._fp.write(data)
 
 
 TAG_RESPONSE = 'RSP'

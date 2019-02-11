@@ -162,7 +162,15 @@ class TestCommon(TestZyn):
             assert ret == expected_return_code
         else:
             logging.info('Process {} was still alive, stopping'.format(process.pid))
-            process.kill()
+            while True:
+                process.terminate()
+                if process.poll() is None:
+                    process.kill()
+                time.sleep(1)
+                if process.poll() is None:
+                    print('Failed to kill server, trying again')
+                else:
+                    break
 
     def _validate_socket_is_disconnected(self, connection):
         with self.assertRaises(zyn_util.exception.ZynConnectionLost):
@@ -191,7 +199,8 @@ class TestCommon(TestZyn):
 
     def _start_node(self, server_workdir=DEFAULT_SERVER_WORKDIR, init=True, **kwargs):
         server_workdir = self._path_server_workdir(server_workdir)
-        os.mkdir(server_workdir)
+        if not os.path.exists(server_workdir):
+            os.mkdir(server_workdir)
         self._process = self._start_server(
             server_workdir,
             init=init,
@@ -233,13 +242,4 @@ class TestCommon(TestZyn):
 
     def _start_and_connect_to_node_and_handle_auth(self, server_workdir=DEFAULT_SERVER_WORKDIR):
         self._start_node(server_workdir)
-        return self._connect_to_node_and_handle_auth()
-
-    def _restart_node_and_connect_and_handle_auth(
-            self,
-            init=False,
-            server_workdir=DEFAULT_SERVER_WORKDIR
-    ):
-        self._stop_node(self._process)
-        self._start_node(server_workdir, init=init)
         return self._connect_to_node_and_handle_auth()

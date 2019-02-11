@@ -1,5 +1,6 @@
 import zyn_util.tests.common
 import zyn_util.errors
+from zyn_util.connection import DataStream
 
 
 class TestBasicUsage(zyn_util.tests.common.TestCommon):
@@ -106,7 +107,7 @@ class TestBasicFilesystem(zyn_util.tests.common.TestCommon):
         self._validate_response(rsp, c)
 
         rsp, _ = c.read_file(open_rsp.node_id, 0, 5)
-        self.assertEqual(rsp.error_code(), zyn_util.errors.ErrorFileIsNotOpen)
+        self.assertEqual(rsp.error_code(), zyn_util.errors.FileIsNotOpenError)
 
     def test_open_read_with_path_and_close_file(self):
         self._open_close(use_node_id=False, write=False)
@@ -354,6 +355,61 @@ class TestBasicEditFile(zyn_util.tests.common.TestCommon):
 
         rsp = self._blob_write(c, create_rsp.node_id, rsp.revision, 'qwerty')
         self._read(c, create_rsp.node_id, 0, 10, rsp.revision, 'qwerty')
+
+    def test_edit_blob_file_with_stream(self):
+        block_size = 10
+        c = self._start_and_connect_to_node_and_handle_auth()
+        create_rsp = c.create_file_blob(
+            'file-1',
+            parent_path='/',
+            page_size=block_size,
+        ).as_create_rsp()
+
+        open_rsp = c.open_file_write(node_id=create_rsp.node_id).as_open_rsp()
+        self.assertEqual(open_rsp.type_of_file, zyn_util.connection.FILE_TYPE_BLOB)
+        self.assertEqual(open_rsp.block_size, block_size)
+
+        data = ('a' * block_size + 'b' * block_size)
+        stream = DataStream(data.encode('utf-8'))
+        rsp = c.blob_write_stream(open_rsp.node_id, open_rsp.revision, stream, block_size)
+        self._validate_response(rsp, c)
+        rsp = rsp.as_write_rsp()
+        self._read(c, create_rsp.node_id, 0, 10, rsp.revision, data[0:10])
+        self._read(c, create_rsp.node_id, 10, 10, rsp.revision, data[10:20])
+
+    def test_read_blob_file_with_stream(self):
+        block_size = 10
+        c = self._start_and_connect_to_node_and_handle_auth()
+        create_rsp = c.create_file_blob(
+            'file-1',
+            parent_path='/',
+            page_size=block_size,
+        ).as_create_rsp()
+        open_rsp = c.open_file_write(node_id=create_rsp.node_id).as_open_rsp()
+
+        data = (
+            'a' * block_size + 'b' * block_size + 'c' * 2
+        ).encode('utf-8')
+        c.blob_write(open_rsp.node_id, open_rsp.revision, data, block_size)
+
+        class TestStream():
+            def __init__(self, block_size):
+                self.count = 0
+                self.data = b''
+                self.block_size = block_size
+
+            def transaction_id(self):
+                return None
+
+            def handle_data(self, offset, data):
+                self.count += 1
+                self.data += data
+                assert offset % self.block_size == 0
+
+        stream = TestStream(block_size)
+        c.read_file_stream(open_rsp.node_id, 0, len(data), block_size, stream)
+        self.assertEqual(stream.count, 3)
+        self.assertEqual(data, stream.data)
 
     def test_multiple_files_open_at_sametime(self):
         c = self._start_and_connect_to_node_and_handle_auth()
