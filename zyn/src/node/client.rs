@@ -93,14 +93,14 @@ Notification:
 
 enum CommonErrorCodes {
     NoError = 0,
-    ErrorMalformedMessage = 1,
+    MalformedMessageError = 1,
     InternalCommunicationError = 2,
-    ErrorFileIsNotOpen = 3,
-    ErrorFileOpenedInReadMode = 4,
-    OperationNotPermitedFotFileType = 5,
-    BlockSizeIsTooLarge = 6,
-    InvalidEdit = 7,
-    FailedToReceiveData = 8,
+    FileIsNotOpenError = 3,
+    FileOpenedInReadModeError = 4,
+    OperationNotPermitedFotFileTypeError = 5,
+    BlockSizeIsTooLargeError = 6,
+    InvalidEditError = 7,
+    FailedToReceiveDataError = 8,
 }
 
 fn map_node_error_to_uint(error: ErrorResponse) -> u64 {
@@ -301,7 +301,7 @@ macro_rules! try_parse {
                 match Client::send_response_without_fields(
                     & mut $class.connection,
                     0,
-                    CommonErrorCodes::ErrorMalformedMessage as u64)
+                    CommonErrorCodes::MalformedMessageError as u64)
                 {
                     Ok(()) => (),
                     Err(status) => {
@@ -477,7 +477,7 @@ impl Client {
                 Ok(value) => value,
                 Err(()) => {
                     error!("Failed to parse message namespace");
-                    match Client::send_response_without_fields(& mut self.connection, 0, CommonErrorCodes::ErrorMalformedMessage as u64) {
+                    match Client::send_response_without_fields(& mut self.connection, 0, CommonErrorCodes::MalformedMessageError as u64) {
                         Ok(()) => (),
                         Err(status) => {
                             self.status.set(status);
@@ -803,7 +803,7 @@ fn handle_create_file_req(client: & mut Client) -> Result<(), ()>
         FILE_TYPE_RANDOM_ACCESS => FileType::RandomAccess,
         FILE_TYPE_BLOB => FileType::Blob,
         _ => {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::MalformedMessageError as u64);
             return Err(());
         },
     };
@@ -920,7 +920,7 @@ fn handle_open_req(client: & mut Client) -> Result<(), ()>
         READ => OpenMode::Read,
         READ_WRITE => OpenMode::ReadWrite,
         _ => {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::MalformedMessageError as u64);
             return Err(());
         },
     };
@@ -1018,7 +1018,7 @@ fn handle_close_req(client: & mut Client) -> Result<(), ()>
             }
         }
     } else {
-        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileIsNotOpenError as u64);
         Err(())
     }
 }
@@ -1066,7 +1066,7 @@ fn handle_write_random_access_req(client: & mut Client) -> Result<(), ()>
 
     let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
         Err(()) => {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileIsNotOpenError as u64);
             return Err(());
         },
         Ok(v) => v,
@@ -1074,7 +1074,7 @@ fn handle_write_random_access_req(client: & mut Client) -> Result<(), ()>
 
     match open_file.open_mode {
         OpenMode::Read => {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileOpenedInReadModeError as u64);
             return Err(());
         },
         OpenMode::ReadWrite => (),
@@ -1083,7 +1083,7 @@ fn handle_write_random_access_req(client: & mut Client) -> Result<(), ()>
     if ! is_random_access_edit_allowed(open_file.page_size, offset, size) {
         warn!("Invalid edit, edited block not in fist page, page_size={}, offset={}, size={}",
               open_file.page_size, offset, size);
-        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::InvalidEdit as u64);
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::InvalidEditError as u64);
         return Err(());
     }
 
@@ -1092,7 +1092,7 @@ fn handle_write_random_access_req(client: & mut Client) -> Result<(), ()>
     let mut data = Buffer::with_capacity(size as usize);
     if Client::fill_buffer(& mut client.buffer, & mut client.connection, & mut data).is_err() {
         client.status.set(Status::FailedToreceiveFromClient);
-        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveData as u64);
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError as u64);
         return Err(());
     }
 
@@ -1134,7 +1134,7 @@ fn handle_random_access_insert_req(client: & mut Client) -> Result<(), ()>
 
     let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
         Err(()) => {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileIsNotOpenError as u64);
             return Err(());
         },
         Ok(v) => v,
@@ -1142,7 +1142,7 @@ fn handle_random_access_insert_req(client: & mut Client) -> Result<(), ()>
 
     match open_file.open_mode {
         OpenMode::Read => {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileOpenedInReadModeError as u64);
             return Err(());
         },
         OpenMode::ReadWrite => (),
@@ -1151,7 +1151,7 @@ fn handle_random_access_insert_req(client: & mut Client) -> Result<(), ()>
     if ! is_random_access_edit_allowed(open_file.page_size, offset, size) {
         warn!("Invalid edit, edited block not in fist page, page_size={}, offset={}, size={}",
               open_file.page_size, offset, size);
-        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::InvalidEdit as u64);
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::InvalidEditError as u64);
         return Err(());
     }
 
@@ -1160,7 +1160,7 @@ fn handle_random_access_insert_req(client: & mut Client) -> Result<(), ()>
     let mut data = Buffer::with_capacity(size as usize);
     if Client::fill_buffer(& mut client.buffer, & mut client.connection, & mut data).is_err() {
         client.status.set(Status::FailedToreceiveFromClient);
-        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveData as u64);
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError as u64);
         return Err(());
     }
 
@@ -1200,7 +1200,7 @@ fn handle_random_access_delete_req(client: & mut Client) -> Result<(), ()>
 
     let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
         Err(()) => {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileIsNotOpenError as u64);
             return Err(());
         },
         Ok(v) => v,
@@ -1208,7 +1208,7 @@ fn handle_random_access_delete_req(client: & mut Client) -> Result<(), ()>
 
     match open_file.open_mode {
         OpenMode::Read => {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileOpenedInReadModeError as u64);
             return Err(());
         },
         OpenMode::ReadWrite => (),
@@ -1217,7 +1217,7 @@ fn handle_random_access_delete_req(client: & mut Client) -> Result<(), ()>
     if ! is_random_access_edit_allowed(open_file.page_size, offset, size) {
         warn!("Invalid edit, edited block does not in fist page, page_size={}, offset={}, size={}",
               open_file.page_size, offset, size);
-        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::InvalidEdit as u64);
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::InvalidEditError as u64);
         return Err(());
     }
 
@@ -1262,7 +1262,7 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
 
     let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
         Err(()) => {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileIsNotOpenError as u64);
             return Err(());
         },
         Ok(v) => v,
@@ -1271,14 +1271,14 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
     match open_file.file_type {
         FileType::Blob => (),
         _ => {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::OperationNotPermitedFotFileType as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::OperationNotPermitedFotFileTypeError as u64);
             return Err(());
         },
     };
 
     match open_file.open_mode {
         OpenMode::Read => {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileOpenedInReadMode as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileOpenedInReadModeError as u64);
             return Err(());
         },
         OpenMode::ReadWrite => (),
@@ -1289,13 +1289,13 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
     if size > open_file.page_size {
         // If size of file is greater than page size, file must be written in blocks that do not cross pages
         if block_size > open_file.page_size || open_file.page_size % block_size != 0 {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::BlockSizeIsTooLarge as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::BlockSizeIsTooLargeError as u64);
             return Err(());
         }
     } else {
         // If size of file is less than page size, block size must match
         if size != block_size {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::BlockSizeIsTooLarge as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::BlockSizeIsTooLargeError as u64);
             return Err(());
         }
     }
@@ -1340,7 +1340,7 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
         let mut buffer = Buffer::with_capacity(buffer_size as usize);
         if Client::fill_buffer(& mut client.buffer, & mut client.connection, & mut buffer).is_err() {
             client.status.set(Status::FailedToreceiveFromClient);
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveData as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError as u64);
             return Err(());
         }
 
@@ -1383,7 +1383,7 @@ fn handle_read_req(client: & mut Client) -> Result<(), ()>
 
     let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
         Err(()) => {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorFileIsNotOpen as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileIsNotOpenError as u64);
             return Err(());
         },
         Ok(v) => v,
@@ -1800,7 +1800,7 @@ fn handle_add_user_group(client: & mut Client) -> Result<(), ()>
             name: name,
         },
         _ => {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::MalformedMessageError as u64);
             return Err(());
         },
     };
@@ -1851,7 +1851,7 @@ fn handle_mod_user_group(client: & mut Client) -> Result<(), ()>
     let number_of_elements = try_parse!(client.buffer.parse_list_start(), client, transaction_id);
     for _ in 0..number_of_elements {
         if client.buffer.parse_list_element_start().is_err() {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::MalformedMessageError as u64);
             return Err(());
         }
 
@@ -1869,7 +1869,7 @@ fn handle_mod_user_group(client: & mut Client) -> Result<(), ()>
             }
         } else {
             warn!("Failed to parse key value");
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::MalformedMessageError as u64);
             return Err(());
         }
 
@@ -1899,7 +1899,7 @@ fn handle_mod_user_group(client: & mut Client) -> Result<(), ()>
             }
         },
         _ => {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::ErrorMalformedMessage as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::MalformedMessageError as u64);
             return Err(());
         },
     };

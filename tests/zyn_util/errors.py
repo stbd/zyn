@@ -1,8 +1,12 @@
 NoError = 0
-ErrorMalformedMessage = 1
+MalformedMessageError = 1
 InternalCommunicationError = 2
-ErrorFileIsNotOpen = 3
-ErrorFileOpenedInReadMode = 4
+FileIsNotOpenError = 3
+FileOpenedInReadModeError = 4
+OperationNotPermitedFotFileTypeError = 5
+BlockSizeIsTooLargeError = 6
+InvalidEditError = 7
+FailedToReceiveDataError = 8
 InvalidUsernamePassword = 100
 ParentIsNotDirectory = 101
 UnauthorizedOperation = 102
@@ -37,13 +41,21 @@ def error_to_string(error):
     if error == 0:
         return "NoError"
     elif error == 1:
-        return "ErrorMalformedMessage"
+        return "MalformedMessageError"
     elif error == 2:
         return "InternalCommunicationError"
     elif error == 3:
-        return "ErrorFileIsNotOpen"
+        return "FileIsNotOpenError"
     elif error == 4:
-        return "ErrorFileOpenedInReadMode"
+        return "FileOpenedInReadModeError"
+    elif error == 5:
+        return "OperationNotPermitedFotFileTypeError"
+    elif error == 6:
+        return "BlockSizeIsTooLargeError"
+    elif error == 7:
+        return "InvalidEditError"
+    elif error == 8:
+        return "FailedToReceiveDataError"
     elif error == 100:
         return "InvalidUsernamePassword"
     elif error == 101:
