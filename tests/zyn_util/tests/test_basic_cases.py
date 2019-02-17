@@ -362,7 +362,7 @@ class TestBasicEditFile(zyn_util.tests.common.TestCommon):
         create_rsp = c.create_file_blob(
             'file-1',
             parent_path='/',
-            page_size=block_size,
+            block_size=block_size,
         ).as_create_rsp()
 
         open_rsp = c.open_file_write(node_id=create_rsp.node_id).as_open_rsp()
@@ -383,7 +383,7 @@ class TestBasicEditFile(zyn_util.tests.common.TestCommon):
         create_rsp = c.create_file_blob(
             'file-1',
             parent_path='/',
-            page_size=block_size,
+            block_size=block_size,
         ).as_create_rsp()
         open_rsp = c.open_file_write(node_id=create_rsp.node_id).as_open_rsp()
 
@@ -459,34 +459,34 @@ class TestArguments(zyn_util.tests.common.TestCommon):
         )
         self.assertEqual(len(files_4), 2)
 
-    def test_create_file_page_size_random_access(self):
-        max_page_size = 1024
-        self._start_node(max_page_size_random_access=max_page_size)
+    def test_create_file_block_size_random_access(self):
+        max_block_size = 1024
+        self._start_node(max_block_size_random_access=max_block_size)
         c = self._connect_to_node_and_handle_auth()
         self.assertFalse(c.create_file_random_access(
             'file-1',
             parent_path='/',
-            page_size=max_page_size - 100
+            block_size=max_block_size - 100
         ).is_error())
         self.assertTrue(c.create_file_random_access(
             'file-2',
             parent_path='/',
-            page_size=max_page_size + 100
+            block_size=max_block_size + 100
         ).is_error())
 
-    def test_create_file_page_size_blob(self):
-        max_page_size = 1024
-        self._start_node(max_page_size_blob=max_page_size)
+    def test_create_file_block_size_blob(self):
+        max_block_size = 1024
+        self._start_node(max_block_size_blob=max_block_size)
         c = self._connect_to_node_and_handle_auth()
         self.assertFalse(c.create_file_blob(
             'file-1',
             parent_path='/',
-            page_size=max_page_size - 100
+            block_size=max_block_size - 100
         ).is_error())
         self.assertTrue(c.create_file_blob(
             'file-2',
             parent_path='/',
-            page_size=max_page_size + 100
+            block_size=max_block_size + 100
         ).is_error())
 
 

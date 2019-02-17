@@ -95,7 +95,7 @@ class ZynConnection:
             file_type=None,
             parent_node_id=None,
             parent_path=None,
-            page_size=None,
+            block_size=None,
             transaction_id=None
     ):
         parent = self.file_descriptor(parent_node_id, parent_path)
@@ -107,8 +107,8 @@ class ZynConnection:
             + self.field_string(name) \
             + self.field_unsigned(file_type)
 
-        if page_size is not None:
-            req += self.field_unsigned(page_size)
+        if block_size is not None:
+            req += self.field_unsigned(block_size)
 
         req = \
             req \
@@ -122,7 +122,7 @@ class ZynConnection:
             name,
             parent_node_id=None,
             parent_path=None,
-            page_size=None,  # todo: change to block size
+            block_size=None,
             transaction_id=None
     ):
         return self.create_file(
@@ -130,7 +130,7 @@ class ZynConnection:
             FILE_TYPE_RANDOM_ACCESS,
             parent_node_id,
             parent_path,
-            page_size,
+            block_size,
             transaction_id
         )
 
@@ -139,7 +139,7 @@ class ZynConnection:
             name,
             parent_node_id=None,
             parent_path=None,
-            page_size=None,
+            block_size=None,
             transaction_id=None
     ):
         return self.create_file(
@@ -147,7 +147,7 @@ class ZynConnection:
             FILE_TYPE_BLOB,
             parent_node_id,
             parent_path,
-            page_size,
+            block_size,
             transaction_id
         )
 
