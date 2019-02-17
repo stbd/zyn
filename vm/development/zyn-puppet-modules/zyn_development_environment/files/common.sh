@@ -14,6 +14,7 @@ system_test_files=( \
     "test_basic_cases.py" \
     "test_edit_files.py" \
     "test_client.py" \
+    "test_util.py" \
 )
 
 function zyn-system-tests() {

@@ -3,4 +3,4 @@
 set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-zyn-system-tests -a "$@"
+zyn-system-tests "$@"

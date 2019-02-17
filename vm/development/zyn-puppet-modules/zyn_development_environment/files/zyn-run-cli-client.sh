@@ -2,13 +2,12 @@
 
 set -euo pipefail
 
+echo
+echo "Pass \"--init admin <path-data> 127.0.0.1 4433\" to initialise client"
+echo
 zyn-cli \
-    admin \
-    127.0.0.1 \
-    4433 \
     --path-to-cert "$HOME"/.zyn-certificates/cert.pem \
-    -p admin \
-    --debug-protocol \
-    --remote-hostname zyn \
     -vv \
+    --remote-hostname zyn \
+    --debug-protocol \
     "$@"
