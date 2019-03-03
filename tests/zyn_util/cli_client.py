@@ -354,15 +354,22 @@ class ZynCliClient(cmd.Cmd):
         self._elements_header()
         for c in children:
             self._print_element(c)
+        if not children:
+            print('-')
 
-        print('\nUntracked:')
+        print('\nUntracked local files:')
+        untracked_printed = False
         if element.is_local():
             untracked = element.children_local_untracked()
+            if untracked:
+                untracked_printed = True
             for u in untracked:
                 name = u.name()
                 if u.is_directory():
                     name += '/'
                 print(name)
+        if not untracked_printed:
+            print('-')
 
     def _parser_modify_user(self):
         parser = argparse.ArgumentParser(prog='modify_user')
@@ -380,9 +387,6 @@ class ZynCliClient(cmd.Cmd):
     def do_modify_user(self, args):
         parser = self._parser_modify_user()
         args = vars(parser.parse_args(self._parse_args(args)))
-
-        # print (args)
-
         password = None
         expiration = args['expiration']
         disable_expiration = args['disable_expiration']
@@ -508,7 +512,7 @@ def main():
 
     server_info = client.server_info()
     if not server_info.is_initialized():
-        client.initialize_server_info()
+        server_info.initialize()
     else:
         if not server_info.is_connected_to_same_server():
             print('It looks like the server you are connected is not the same server as before')
@@ -528,7 +532,7 @@ def main():
                 print('Would you like to try add all tracked local files to remote')
                 answer = input('yes/no? ')
                 if answer.strip().lower() == 'yes':
-                    client.add_tracked_files_to_remote()
+                    client.synchronize_local_files_with_remote()
                     print('Done')
                 else:
                     client.remove_local_files()
