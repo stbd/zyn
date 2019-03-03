@@ -1,25 +1,93 @@
-var _socket = null;
-var _user_id = 0;
-var _tab_id = 0;
-var _current_transaction = null;
-var _notification_callback = null;
-var _disconnected_callback = null;
+class ZynError {
+    constructor(client=null, web_server=null, zyn_server=null) {
+        this.client = client;
+        this.web_server = web_server;
+        this.zyn_server = zyn_server;
+        this._validate();
+    }
 
-var ZYN_ERROR_CODE_TRANSACTION_ALREADY_IN_PROGRESS = 1;
-var ZYN_ERROR_CODE_SERVER_RESPONDED_WITH_UEXPECTED_MESSAGE = 2;
-var ZYN_ERROR_CODE_NOT_INITIALIZED = 2;
-var ZYN_ERROR_CODE_ALREADY_INITIALIZED = 2;
+    _validate() {
+        if (
+            this.client === null
+            && this.web_server === null
+            && this.zyn_server === null
+        ) {
+            throw "No error defined";
+        }
+    }
 
-var ZYN_OPEN_FILE_MODE_READ = 'read';
-var ZYN_OPEN_FILE_MODE_WRITE = 'write';
+    to_string() {
+        if (this.client !== null) {
+            return `Client: ${this.client}`;
+        } else if (this.web_server !== null) {
+            return `Web server: ${this.web_server}`;
+        } else if (this.zyn_server !== null) {
+            return `Zyn server: ${this.zyn_server}`;
+        }
+    }
+}
 
-class Path {
+class ZynMessage {
+    constructor(msg) {
+        this._msg = msg;
+    }
+
+    msg() {
+        return this._msg;
+    }
+
+    is_error() {
+        return 'error' in this._msg;
+    }
+
+    error() {
+        console.log(this._msg)
+        return new ZynError(
+            null,
+            this._msg['error']['web-server-error'],
+            this._msg['error']['zyn-server-error'],
+        );
+    }
+
+    is_notification() {
+        return 'notification' in this._msg;
+    }
+
+    notification() {
+        return new ZynNotification(this);
+    }
+
+    content() {
+        return this._msg['content'];
+    }
+}
+
+class ZynPath {
     constructor() {
         this._path = [];
     }
 
-    to_str() {
+    static from_string(path) {
+        let p = new ZynPath();
+        for (let s of path.split('/')) {
+            let t = s.trim();
+            if (t.length != 0) {
+                p.append(t);
+            }
+        }
+        return p;
+    }
+
+    is_root() {
         if (this._path.length == 0) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    to_str() {
+        if (this.is_root()) {
             return '/';
         }
         return '/' + this._path.join('/');
@@ -48,298 +116,425 @@ class Path {
     }
 
     clone() {
-        var copy = new Path();
+        var copy = new ZynPath();
         copy._path = this._path.slice();
         return copy;
     }
 }
 
-function zyn_get_file_extension(filename) {
-    var split_name = filename.split('.');
-    if (split_name.length != 1) {
-        return split_name[split_name.length - 1].toLowerCase();
-    }
-    return null;
-}
-
-function zyn_poll_server()
-{
-    if (_current_transaction !== null) {
-        return ;
-    }
-    _socket.onmessage = _parse_response_and_forward;
-    _socket.send(_to_json_message('poll', {}));
-}
-
-function zyn_edit_file_blob(
-    node_id,
-    revision,
-    type_of_file,
-    content_edited,
-    transaction,
-) {
-    if (_start_transaction(transaction) === false) {
-        return ;
+class ZynNotification {
+    constructor(msg) {
+        this._notification = msg.msg()['notification'];
     }
 
-    _socket.onmessage = _parse_response_and_forward;
-    _socket.send(_to_json_message(
-        'edit-file',
-        {
-            'node-id': node_id,
-            'revision': revision,
-            'type-of-file': type_of_file,
-            'content-original': null,
-            'content-edited': btoa(content_edited),
+    type() {
+        return this._notification['type']
+    }
+
+    source() {
+        return this._notification['source']
+    }
+
+    content() {
+        return this._notification['content']
+    }
+
+    is_disconnect() {
+        return this.type() === 'disconnected';
+    }
+
+    is_file_edit_modified() {
+        return this.type() === 'random-access-modification';
+    }
+
+    is_file_edit_insert() {
+        return this.type() === 'random-access-insert';
+    }
+
+    is_file_edit_delete() {
+        return this.type() === 'random-access-delete';
+    }
+
+    is_file_edit() {
+        return this.is_file_edit_modified() ||
+               this.is_file_edit_insert() ||
+               this.is_file_edit_delete();
+    }
+
+    to_string() {
+        if (this.is_disconnect()) {
+            return `Server stopped: ${this.content()['reason']}`;
+        } else if (this.is_file_edit) {
+            let c = this.content();
+            return `File ${c['node-id']} updated to revision ${c['revision']}, type: ${this.type()}`;
+        } else if (this.type() === 'reconnect') {
+            return `Reconnecting, trial: ${this.content()['trial']}`;
+        } else {
+            return `Unhandled notification: ${this.type()}`;
         }
-    ));
+    }
 }
 
-function zyn_edit_file_random_access(
-    node_id,
-    revision,
-    type_of_file,
-    content_edited,
-    transaction,
-) {
-    if (_start_transaction(transaction) === false) {
-        return ;
-    }
-
-    _socket.onmessage = _parse_response_and_forward;
-    _socket.send(_to_json_message(
-        'edit-file',
-        {
-            'node-id': node_id,
-            'revision': revision,
-            'type-of-file': type_of_file,
-            'content-edited': btoa(content_edited),
-        }
-    ));
-}
-
-function zyn_change_file_open_mode(node_id, open_mode, transaction)
-{
-    if (_start_transaction(transaction) === false) {
-        return ;
-    }
-
-    _socket.onmessage = _parse_response_and_forward;
-    _socket.send(_to_json_message(
-        'change-open-file-mode',
-        {
-            'node-id': node_id,
-            'open-mode': open_mode,
-        }
-    ));
-}
-
-function zyn_load_file(node_id, filename, open_mode, transaction)
-{
-    if (_start_transaction(transaction) === false) {
-        return ;
-    }
-
-    _socket.onmessage = _parse_response_and_forward;
-    _socket.send(_to_json_message(
-        'load-file',
-        {
-            'node-id': node_id,
-            'filename': filename,
-            'open-mode': open_mode,
-        }
-    ));
-}
-
-function zyn_query_filesystem_element(path, transaction)
-{
-    if (_start_transaction(transaction) === false) {
-        return ;
-    }
-
-    _socket.onmessage = _parse_response_and_forward;
-    _socket.send(_to_json_message(
-        'query-filesystem-element',
-        {
-            'path': path.to_str(),
-        }
-    ));
-
-}
-
-function zyn_load_folder_contents(path, transaction)
-{
-    if (_start_transaction(transaction) === false) {
-        return ;
-    }
-
-    _socket.onmessage = _parse_response_and_forward;
-    _socket.send(_to_json_message(
-        'list-directory-content',
-        {
-            'path': path.to_str(),
-        }
-    ));
-}
-
-function zyn_send_message(
-    message_type,
-    parameters,
-    transaction,
-) {
-    if (_start_transaction(transaction) === false) {
-        return ;
-    }
-
-    _socket.onmessage = _parse_response_and_forward;
-    _socket.send(_to_json_message(message_type, parameters));
-}
-
-function _handle_register_response(websocket_msg)
-{
-    var msg = JSON.parse(websocket_msg.data);
-    if (_handle_notification_msg(msg)) {
-        return ;
-    }
-    var transaction = _reset_current_transaction();
-
-    if (msg['type'] != 'register-rsp') {
-        transaction.on_error(ZYN_ERROR_CODE_SERVER_RESPONDED_WITH_UEXPECTED_MESSAGE, null, null);
-        return ;
-    }
-
-    if (_handle_error_rsp(msg, transaction)) {
-        return ;
-    }
-
-    _tab_id = msg['tab-id'];
-    transaction.on_success(msg['content']);
-}
-
-function zyn_init(user_id, notification_callback, disconnected_callback, transaction)
-{
-    if (_user_id === null) {
-        transaction.on_error(ZYN_ERROR_CODE_ALREADY_INITIALIZED, null, null);
-        return ;
-    }
-
-    _user_id = user_id;
-    _notification_callback = notification_callback;
-    _disconnected_callback = disconnected_callback;
-    _current_transaction = transaction;
-
+function zyn_websocket_server_url() {
     var url = new URL(window.location.href)
     var protocol = "ws";
     if (location.protocol === 'https:') {
         protocol = "wss";
     }
-    var websocket_url = protocol + '://' + url.hostname + ":" + url.port + "/websocket";
-
-    _socket = new WebSocket(websocket_url);
-    _socket.onmessage = _handle_register_response;
-    _socket.onclose = _handle_on_close;
-    _socket.onopen = function () {
-        _socket.send(_to_json_message('register', null));
-    };
+    return protocol + '://' + url.hostname + ":" + url.port + "/websocket";
 }
 
-function zyn_log_on_server(message, level='debug')
-{
-    var supported_levels = ['debug', 'info']
-    if (supported_levels.indexOf(level) == -1) {
-        console.log('Invalid log level: ' + level);
-        return
+class ZynFileHandler {
+    constructor(node_id, filename, client) {
+        this._client = client;
+        this._node_id = node_id,
+        this._name = filename;
+        this._revision = null;
+        this._block_size = null;
+        this._size = null;
+        this._file_type = null;
+        this._mode = null;
+        this.content = null;
     }
+    static is_editable() { return false; }
+    is_editable() { return false; }
+    mode() { return this._mode; }
 
-    _socket.send(_to_json_message(
-        'log',
-        {
-            'level': level,
-            'message': message,
+    properties() {
+        return {
+            'name': this._name,
+            'node-id': this._node_id,
+            'revision': this._revision,
+            'block-size': this._block_size,
+            'file-type': this._file_type,
         }
-    ));
-}
-
-function _handle_notification_msg(msg) {
-    if (msg['type'] === 'notification') {
-        _notification_callback(msg['notification']);
-        return true;
     }
-    return false;
-}
 
+    open(mode, callback) {
+        this._client.execute_command(
+            'open-file',
+            {
+                'node-id': this._node_id,
+                'mode': mode,
+            },
+            (msg) => {
+                this._mode = mode;
+                this.handle_open_rsp(msg, callback);
+            },
+        );
+    }
 
-function _handle_error_rsp(msg, transaction) {
-    if ('error' in msg) {
-        web = msg['error']['web-server-error'];
-        zyn = msg['error']['zyn-server-error'];
+    close(callback) {
+        this._client.execute_command(
+            'close-file',
+            {
+                'node-id': this._node_id,
+            },
+            (msg) => this.handle_open_rsp(msg, callback),
+        );
+    }
 
-        if (web === '') {
-            web = null;
+    initial_load(callback) {
+        if (this._size === 0) {
+            this._content = '';
+            callback();
+            return ;
         }
 
-        if (zyn === '') {
-            zyn = null;
+        this.read(0, this._size, (msg) => {
+            let bytes = msg.content()['bytes'];
+            this._content = atob(bytes);
+            callback();
+        });
+    }
+
+    change_file_mode(mode, callback) {
+        if (mode === this._mode) {
+            callback();
+            return ;
         }
 
-        transaction.on_error(null, web, zyn);
-        return true;
+        // Do not change to read from edit, to avoid
+        // extra operation
+        if (this._mode === OpenMode.edit) {
+            callback();
+            return ;
+        }
+        this.close(() => this.open(mode, callback));
     }
-    return false;
+
+    handle_open_rsp(msg, callback) {
+        let content = msg.content();
+        this._revision = content['revision'];
+        this._size = content['size'];
+        this._block_size = content['block-size'];
+        this._file_type = content['file-type'];
+        callback();
+    }
+
+    read(offset, size, callback) {
+        this._client.execute_command(
+            'read-file',
+            {
+                'node-id': this._node_id,
+                'offset': offset,
+                'size': size,
+            },
+            callback,
+        );
+    }
+
+    render(mode, target_id, callback=null) {
+        let element = document.getElementById(target_id);
+        if (this._content.length === 0) {
+            this.render_empty_file(target_id);
+        } else {
+            element.innerHTML = this._content;
+        }
+        callback();
+    }
+
+    render_empty_file(target_id) {
+        this._client.set_content_area_text(
+            'Empty',
+            target_id
+        );
+    }
 }
 
-function _to_json_message(msg_type, content)
-{
-    var msg = {
-        'user-id': _user_id,
-        'tab-id': _tab_id,
-        'type': msg_type,
-    };
-
-    if (content != null) {
-        msg['content'] = content;
+class ZynPdfHandler {
+    constructor(node_id, filename, client) {
+        this._base = new ZynFileHandler(node_id, filename, client);
+        this._content = null;
     }
 
-    return JSON.stringify(msg);
+    static is_editable() { return false; }
+    is_editable() { return false; }
+    properties() { return this._base.properties(); }
+    mode() { return this._base.mode(); }
+    close(callback) { this._base.close(callback); }
+
+    open(mode, callback) {
+        this._base.open(
+            mode,
+            () => {
+                this.load_full_file(callback);
+            },
+        );
+    }
+
+    initial_load(callback) {
+        this.load_full_file(callback);
+    }
+
+    load_full_file(callback) {
+        if (this._base._size === 0) {
+            this._content = '';
+            callback();
+            return ;
+        }
+
+        this._base.read(0, this._base._size, (msg) => {
+            let bytes = msg.content()['bytes'];
+            this._content = atob(bytes);
+            callback();
+        });
+    }
+
+    render(mode, target_id, callback=null) {
+        let element = document.getElementById(target_id);
+        if (mode !== OpenMode.read) {
+            _zyn_unhandled();
+            return ;
+        }
+
+        var root = document.createElement('div');
+        var loadingTask = pdfjsLib.getDocument({data: this._content});
+        loadingTask.promise.then(function(pdf) {
+            var pageNumber = 1;
+            for (var pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+                pdf.getPage(pageNumber).then(function(page) {
+                    var scale = 1.5;
+                    var viewport = page.getViewport(scale);
+                    var canvas = document.createElement('canvas');
+
+                    root.appendChild(canvas);
+                    var context = canvas.getContext('2d');
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    var renderContext = {
+                        canvasContext: context,
+                        viewport: viewport
+                    };
+                    var renderTask = page.render(renderContext);
+                    renderTask.then(function () {});
+                });
+            }
+        }, function (reason) {
+            console.error(reason);
+        });
+        element.appendChild(root);
+
+        if (callback !== null) {
+            callback();
+        }
+    }
 }
 
-function _start_transaction(transaction)
-{
-    if (_socket == null) {
-        transaction.on_error(ZYN_ERROR_CODE_NOT_INITIALIZED, null, null);
-        return false;
+class ZynMarkdownHandler {
+    constructor(node_id, filename, client) {
+        this._base = new ZynFileHandler(node_id, filename, client);
+        this._is_edited = false;
+        this._content =  null;
     }
 
-    if (_current_transaction != null) {
-        transaction.on_error(ZYN_ERROR_CODE_TRANSACTION_ALREADY_IN_PROGRESS, null, null);
-        return false;
+    static is_editable() { return true; }
+    is_editable() { return true; }
+    properties() { return this._base.properties(); }
+    has_edits() { return this._is_edited; }
+    mode() { return this._base.mode(); }
+    change_file_mode(mode, callback) { this._base.change_file_mode(mode, callback); }
+    close(callback) { this._base.close(callback); }
+    content_edited() { this._is_edited = true; }
+
+    update_content(content, revision) {
+        this._base._revision = revision;
+        this._base._size = content.length;
+        this._is_edited = false;
+        this._content = content;
     }
 
-    _current_transaction = transaction;
-    return true;
-}
-
-function _reset_current_transaction()
-{
-    var transaction = _current_transaction;
-    _current_transaction = null;
-    return transaction;
-}
-
-function _parse_response_and_forward(websocket_msg)
-{
-    var msg = JSON.parse(websocket_msg.data);
-    if (_handle_notification_msg(msg)) {
-        return ;
+    open(mode, callback) {
+        this._base.open(
+            mode,
+            () => {
+                this.load_full_file(callback);
+            },
+        );
     }
-    transaction = _reset_current_transaction();
-    if (_handle_error_rsp(msg, transaction)) {
-        return ;
-    }
-    transaction.on_success(msg['content']);
-}
 
-function _handle_on_close()
-{
-    _disconnected_callback();
+    initial_load(callback) {
+        this.load_full_file(callback);
+    }
+
+    load_full_file(callback) {
+        if (this._base._size === 0) {
+            this._content = '';
+            callback();
+            return ;
+        }
+
+        this._base.read(0, this._base._size, (msg) => {
+            let bytes = msg.content()['bytes'];
+            this._content = utf8.decode(atob(bytes));
+            callback();
+        });
+    }
+
+    render(mode, target_id, callback=null) {
+        let element = document.getElementById(target_id);
+        if (mode === OpenMode.read) {
+            let content = this._content;
+            if (content.length === 0) {
+                this._base.render_empty_file(target_id);
+            } else {
+                var converter = new showdown.Converter({
+                    'simplifiedAutoLink': true,
+                    'tables': true,
+                });
+                let html = converter.makeHtml(content);
+                element.innerHTML = html;
+            }
+        } else if (mode === OpenMode.edit) {
+            let content = this._content;
+            element.classList.add('w3-pale-green');
+            element.innerText = content;
+        } else {
+            _zyn_unhandled();
+        }
+
+        this._is_edited = false;
+        if (callback !== null) {
+            callback();
+        }
+    }
+
+    save(source_id, callback) {
+        let element = document.getElementById(source_id);
+        let modified_content = element.innerText;
+        let modifications = []
+        let offset = 0
+        var diff = JsDiff.diffChars(this._content, modified_content);
+
+        for (let d of diff) {
+            let bytes = utf8.encode(d.value);
+            if (d.added) {
+                modifications.push({
+                    'type': 'add',
+                    'offset': offset,
+                    'bytes': btoa(bytes),
+                });
+                offset += bytes.length;
+            } else if (d.removed) {
+                modifications.push({
+                    'type': 'delete',
+                    'offset': offset,
+                    'size': bytes.length,
+                });
+            } else {
+                offset += bytes.length
+            }
+        }
+        if (modifications.length == 0) {
+            callback();
+            return ;
+        }
+
+        this._base._client.execute_command(
+            'modify-file',
+            {
+                'node-id': this._base._node_id,
+                'revision': this._base._revision,
+                'modifications': modifications,
+            },
+            (msg) => {
+                this.update_content(
+                    modified_content,
+                    msg.content()['revision'],
+                );
+                callback();
+            }
+        );
+    }
+
+    handle_notification(notification, mode, target_id, callback) {
+        let offset = notification.content()['offset'];
+        let bytes = utf8.encode(this._content);
+
+        if (notification.is_file_edit_delete()) {
+
+            let size = notification.content()['size'];
+            bytes = bytes.slice(0, offset)
+                  + bytes.slice(offset + size, bytes.length);
+
+        } else if (notification.is_file_edit_insert()) {
+
+            let edited = atob(notification.content()['bytes']);
+            bytes = bytes.slice(0, offset)
+                  + edited
+                  + bytes.slice(offset, bytes.length);
+
+        } else if (notification.is_file_edit_modified()) {
+
+            let edited = atob(notification.content()['bytes']);
+            bytes = bytes.slice(0, offset)
+                  + edited
+                  + bytes.slice(offset + edited.length, bytes.length);
+
+        } else {
+            zyn_unhandled();
+        }
+        this._base._revision = notification.content()['revision'];
+        this._content = utf8.decode(bytes);
+    }
 }

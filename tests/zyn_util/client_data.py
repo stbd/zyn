@@ -365,38 +365,42 @@ class LocalFile(LocalFileSystemElement):
                 ))
 
         try:
-            if self.is_blob():
-                stream = zyn_util.connection.FileStream(self.path_local())
-                rsp = connection.blob_write_stream(
-                    self.node_id(),
-                    self._revision,
-                    stream,
-                    rsp_open.block_size,
-                )
-            elif self.is_random_access():
-                data = self.local_data()
-                if rsp_open.size > len(data):
-                    rsp = connection.ra_delete(
+            if self.is_empty_local():
+                pass
+            else:
+                if self.is_blob():
+                    stream = zyn_util.connection.FileStream(self.path_local())
+                    rsp = connection.blob_write_stream(
                         self.node_id(),
                         self._revision,
-                        len(data),
-                        rsp_open.size - len(data),
+                        stream,
+                        rsp_open.block_size,
                     )
-                    zyn_util.util.check_server_response(rsp)
-                    self._revision = rsp.as_delete_rsp().revision
+                elif self.is_random_access():
+                    data = self.local_data()
+                    if rsp_open.size > len(data):
+                        rsp = connection.ra_delete(
+                            self.node_id(),
+                            self._revision,
+                            len(data),
+                            rsp_open.size - len(data),
+                        )
+                        zyn_util.util.check_server_response(rsp)
+                        self._revision = rsp.as_delete_rsp().revision
 
-                rsp = connection.ra_write(
-                    self.node_id(),
-                    self._revision,
-                    0,
-                    data,
-                )
-            else:
-                zyn_util.util.unhandled()
+                    rsp = connection.ra_write(
+                        self.node_id(),
+                        self._revision,
+                        0,
+                        data,
+                    )
+                else:
+                    zyn_util.util.unhandled()
 
-            zyn_util.util.check_server_response(rsp)
-            rsp = rsp.as_write_rsp()
-            self._revision = rsp.revision
+                zyn_util.util.check_server_response(rsp)
+                rsp = rsp.as_write_rsp()
+                self._revision = rsp.revision
+
             self._local_file_metadata.update()
 
         finally:
@@ -611,7 +615,7 @@ class OpenLocalFile():
 
     def open_and_sync(self, connection):
         rsp = self._fs.open_write(self._local_file, connection)
-        self._local_file.synchronize(connection, rsp.revision)
+        self._local_file.synchronize(connection, rsp.revision, discard_local_changes=False)
         self._bytes = self._local_file.local_data()
 
     def close(self, connection):
@@ -869,7 +873,7 @@ class LocalFilesystemManager:
             raise create_error
 
         self._add_element_to_filesystem(element, parent)
-        if element.is_file() and not element.is_empty_local():
+        if element.is_file():
             element.push_to_remote(connection)
         return element
 
@@ -938,8 +942,7 @@ class LocalFilesystemManager:
                 c.create_on_remote(element, connection)
                 self._add_element_to_filesystem(c, element)
                 if c.is_file():
-                    if not c.is_empty_local():
-                        c.push_to_remote(connection)
+                    c.push_to_remote(connection)
                 elif c.is_directory():
                     self._initial_synchronization_for_directory(c, elements, connection, element)
                 else:

@@ -1,0 +1,971 @@
+<!doctype html>
+<head>
+    <title>Zyn - Fileserver</title>
+    <link rel="stylesheet" href="{{ static_url('3pp/w3css/w3.css') }}">
+    <link rel="stylesheet" href="{{ static_url('zyn.css') }}">
+    <script src="{{ static_url('zyn.js') }}" type="text/javascript"></script>
+    <script src="{{ static_url('zyn-client.js') }}" type="text/javascript"></script>
+    <script src="{{ static_url('3pp/utf8/utf8.js') }}" type="text/javascript"></script>
+    <script src="{{ static_url('3pp/jsdiff/diff.min.js') }}" type="text/javascript"></script>
+    <script src="{{ static_url('3pp/showdownjs/showdown.min.js') }}" type="text/javascript"></script>
+    <script src="{{ static_url('3pp/pdfjs/pdf.js') }}" type="text/javascript"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+
+<body style="height: 100%;">
+    <script>
+     function _element_height(name) {
+         let e = document.getElementById(name);
+         let style = document.defaultView.getComputedStyle(e);
+         let height = e.offsetHeight;
+         let margin_top = parseFloat(style['margin-top']);
+         let margin_bottom = parseFloat(style['margin-bottom']);
+         return height + margin_top + margin_bottom;
+     }
+
+     function _handle_window_resize() {
+         // todo: this should be reimplemented by someone who understands
+         // frontend
+         client.redraw_content(0);
+         let file_area_height = document.getElementById('zyn-file').offsetHeight;
+         let available_height = file_area_height;
+         available_height -= _element_height('zyn-file-header');
+         available_height -= _element_height('zyn-file-footer');
+         available_height -= _element_height('zyn-file-buttons');
+         available_height -= (0.1 * window.innerHeight);
+         client.redraw_content(available_height);
+     }
+
+     window.addEventListener('resize', function(event){
+         _handle_window_resize();
+     });
+    </script>
+
+    <div id="zyn-modal-error" class="w3-modal" style="display: none;">
+        <div class="w3-modal-content">
+            <div class="w3-container w3-center">
+
+                <h3 id="zyn-modal-error-header"></h3>
+                <hr>
+                <h4 id="zyn-modal-error-criticality"></h4>
+                <p id="zyn-modal-error-description"></p>
+                <p id="zyn-modal-error-detail"></p>
+
+                <button
+                    id="zyn-modal-error-button-show-detail"
+                    class="w3-button w3-border"
+                    onclick='(function() { document.getElementById("zyn-modal-error-detail").style.display="block"; })()'
+                >Show detail</button>
+
+                <button
+                    class="w3-button w3-border"
+                    onclick='(function() { zyn_hide_modals(); })()'
+                >Ok</button>
+            </div>
+        </div>
+    </div>
+    <div id="zyn-modal-loading" class="w3-modal" style="display: none;">
+        <div class="w3-modal-content">
+            <div class="w3-container w3-center">
+                <h2>Loading</h2>
+                <div class="zyn-load"></div>
+                <p id="zyn-modal-loading-description"></p>
+            </div>
+        </div>
+    </div>
+    <div id="zyn-modal-ask" class="w3-modal" style="display: none;">
+        <div class="w3-modal-content">
+            <div class="w3-container w3-center">
+                <h3 id="zyn-modal-ask-header"></h3>
+                <p id="zyn-modal-ask-detail"></p>
+                <div id="zyn-modal-ask-buttons"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+
+     let modals = []
+
+     let ErrorLevel = Object.freeze({
+         'error': 'Error',
+         'warning': 'Warning',
+         'notification': 'Notification',
+     })
+     modals.push('zyn-modal-error');
+     function zyn_show_modal_error(error_level, description, detail=null) {
+         zyn_hide_modals('zyn-modal-error');
+         let header_element = document.getElementById("zyn-modal-error-header");
+         let detail_button = document.getElementById("zyn-modal-error-button-show-detail");
+         let detail_element = document.getElementById("zyn-modal-error-detail");
+         let criticality_element = document.getElementById("zyn-modal-error-criticality");
+         let description_element = document.getElementById("zyn-modal-error-description");
+
+         detail_button.style.display = 'none';
+         detail_element.style.display = 'none';
+         criticality_element.innerText = error_level;
+         description_element.innerText = description;
+
+         if (error_level === ErrorLevel.notification) {
+             criticality_element.innerText = '--';
+             header_element.innerText = error_level;
+         } else {
+             header_element.innerText = 'Ohops.. There was a problem with the service';
+         }
+
+         if (detail !== null) {
+             detail_element.innerText = detail;
+             detail_button.style.display = 'inline';
+         }
+         document.getElementById("zyn-modal-error").style.display = 'block';
+     }
+
+     modals.push('zyn-modal-loading');
+     function zyn_show_modal_loading(description=null) {
+         zyn_hide_modals('zyn-modal-loading');
+         let modal = document.getElementById("zyn-modal-loading");
+         modal.style.display = 'inline';
+         if (description !== null) {
+             let desc = document.getElementById('zyn-modal-loading-description');
+             desc.innerText = description;
+         } else {
+             desc.innerText = '';
+         }
+     }
+
+     modals.push('zyn-modal-ask');
+     function zyn_show_modal_ask(text, button_to_callback, detail_text=null) {
+         zyn_hide_modals();
+         let modal = document.getElementById("zyn-modal-ask");
+         modal.style.display = 'inline';
+
+         let header = document.getElementById('zyn-modal-ask-header');
+         let detail = document.getElementById('zyn-modal-ask-detail');
+         let buttons = document.getElementById('zyn-modal-ask-buttons');
+         header.innerText = text;
+         if (detail !== null) {
+             detail.innerText = detail_text;
+         } else {
+             detail.innerText = '';
+         }
+
+         while (buttons.childElementCount > 0) {
+             buttons.removeChild(buttons.childNodes[0])
+         }
+         for (let name in button_to_callback) {
+             let button = document.createElement('button');
+             button.classList.add('w3-button');
+             button.classList.add('w3-border');
+             button.style.margin = '5px 5px 5px 5px';
+             button.innerText = name;
+             button.onclick = button_to_callback[name];
+             buttons.appendChild(button);
+         }
+     }
+    </script>
+
+    <script>
+     function zyn_hide_modals(exception=null) {
+         for (let m of modals) {
+             if (exception !== null && exception === m) {
+                 continue ;
+             }
+             let modal = document.getElementById(m);
+             modal.style.display = 'none';
+         }
+     }
+    </script>
+
+    <script>
+     function _set_vissible_tab(tab_name) {
+         var tabs = document.getElementsByClassName("zyn-tabs");
+         for(let tab of tabs) {
+             tab.style.display = "none";
+         }
+         document.getElementById(tab_name).style.display = "table-row";
+     }
+    </script>
+
+    <div id="zyn-fs-sidebar"
+         class="w3-sidebar w3-border"
+         style="display: table; width: 25%; min-width: 500px; height: 100%; overflow-y: scroll;"
+    >
+        <div style="height: 100%; overflow-y: scroll;">
+
+            <button href="#"
+                    class="w3-button w3-border w3-blue-grey"
+                    onclick="_hide_sidebar()"
+                    style="width: 100%;"
+            >Hide</button>
+
+            <p class="w3-center">Working directory</p>
+            <div
+                class="w3-container w3-margin"
+            >
+                <input
+                    id="zyn-fs-working_directory"
+                    type="text"
+                    class="w3-input"
+                    disabled
+                    style="width: 70%; display: inline; vertical-aling: middle"></input>
+
+                <button id="zyn-fs-working_directory-button"
+                        href="#"
+                        class="w3-button w3-border"
+                        onclick="_handle_parent_directory_clicked()"
+                        style="display: inline; vertical-align: middle"
+                >Up</button>
+                <button id="zyn-fs-working_directory-button"
+                        href="#"
+                        class="w3-button w3-border"
+                        onclick="_handle_refresh_directory_clicked()"
+                        style="display: inline; vertical-align: middle"
+                >&#8635;</button>
+            </div>
+
+            <hr>
+
+            <div
+                class="w3-dropdown-hover"
+                style="width: 100%;"
+            >
+                <button href="#"
+                        class="w3-button w3-border w3-block"
+                        style="width: 70%; margin: auto;"
+                >Create</button>
+
+                <div
+                    class="w3-dropdown-content w3-bar-block w3-border w3-card"
+                    style="width: 100%;"
+                >
+                    Name:
+                    <input id="zyn-fs-create-element-name" class="w3-input w3-border w3-round" type="text">
+                    Type:
+                    <a
+                        onclick="_handle_create_ra_clicked()"
+                        href="#"
+                        class="w3-bar-item w3-button">File (Random Access)</a>
+                    <a
+                        href="#"
+                        onclick="_handle_create_dir_clicked()"
+                        class="w3-bar-item w3-button">Directory</a>
+                </div>
+            </div>
+
+            <hr>
+
+            <div
+                id="zyn-fs-elements-header"
+                class="w3-cell-row"
+                style="white-space: nowrap;"
+            >
+                <div
+                    class="w3-container w3-cell"
+                    style="width: 20%;"
+                >
+                </div>
+                <div
+                    class="w3-container w3-cell"
+                    style="width: 20%; vertical-align: middle;"
+                >
+                    Type
+                </div>
+                <div
+                    class="w3-container w3-cell"
+                    style="width: 20%; vertical-align: middle;"
+                >
+                    Node Id
+                </div>
+                <div
+                    class="w3-container w3-cell"
+                    style="width: 40%; vertical-align: middle;"
+                >
+                    <span style="width: 20%">Name</span>
+                    <input
+                        id="zyn-fs-elements-header-namme-filter"
+                        style="display: inline; width: 80%"
+                        onkeyup="_render_directory_children()"
+                    ></input>
+                </div>
+            </div>
+
+            <hr>
+
+            <div id="zyn-fs-elements">
+            </div>
+
+            <hr>
+
+            <a class="w3-right" href="#zyn-fs-elements-header" style="font-size: 300%">&#8679;</a>
+
+            <script>
+             function _clear_fs_elements() {
+                 let element = document.getElementById("zyn-fs-elements");
+                 while (element.firstChild) {
+                     element.removeChild(element.firstChild);
+                 }
+             }
+
+             function _set_fs_elements_text(text) {
+                 let text_content = document.createElement('div');
+                 text_content.innerText = text
+                 text_content.style.fontSize = '20px';
+                 text_content.style.fontWeight = 'bold';
+                 text_content.classList.add('w3-center');
+                 let element = document.getElementById("zyn-fs-elements");
+                 element.appendChild(text_content);
+             }
+
+             function _create_fs_element_field(width) {
+                 let field = document.createElement("div");
+                 field.classList.add('w3-container');
+                 field.classList.add('w3-cell');
+                 field.style.width = width;
+                 field.style.verticalAlign = 'middle';
+                 return field;
+             }
+
+             function _add_fs_row(element) {
+                 let name = element['name'];
+                 let node_id = element['node-id'];
+                 let element_type = element['element-type'];
+
+                 let row = document.createElement("div");
+                 row.classList.add('w3-cell-row');
+                 row.classList.add('w3-button');
+
+                 let field_edit = _create_fs_element_field("20%");
+                 if (element_type == ElementType.file) {
+                     row.onclick = () => _handle_open_file_clicked(node_id, name);
+                     if (client.is_editable(name)) {
+                         let button = document.createElement("button");
+                         button.id = "zyn-open-file-edit";
+                         button.classList.add('w3-button');
+                         button.classList.add('w3-border');
+                         button.classList.add('w3-tiny');
+                         button.classList.add('w3-hover-gray');
+                         button.innerText = 'Edit';
+                         button.onclick = () =>
+                             _handle_open_file_edit_clicked(event, node_id, name);
+                         field_edit.appendChild(button);
+                     }
+                 } else if (element_type == ElementType.directory) {
+                     row.onclick = () => _handle_directory_clicked(node_id, name);
+                 }
+
+                 let field_type = _create_fs_element_field("20%");
+                 field_type.innerText = element_type;
+                 let field_node_id = _create_fs_element_field("20%");
+                 field_node_id.innerText = node_id;
+                 let field_name = _create_fs_element_field("40%");
+                 field_name.innerText = name;
+                 field_name.style.whiteSpace = 'nowrap';
+
+                 let delete_button = document.createElement("button");
+                 delete_button.id = 'zyn-delete-element';
+                 delete_button.classList.add('w3-button');
+                 delete_button.classList.add('w3-hover-gray');
+                 delete_button.onclick = () =>
+                     _handle_delete_element_clicked(event, node_id, name);
+
+                 let delete_button_image = document.createElement("img");
+                 delete_button_image.id = 'zyn-delete-element';
+                 delete_button_image.onclick = () =>
+                     _handle_delete_element_clicked(event, node_id, name);
+                 delete_button_image.src = '/static/3pp/icons8/cancel.png';
+                 delete_button.appendChild(delete_button_image);
+
+                 row.appendChild(field_edit);
+                 row.appendChild(field_type);
+                 row.appendChild(field_node_id);
+                 row.appendChild(field_name);
+                 row.appendChild(delete_button);
+                 let list = document.getElementById("zyn-fs-elements");
+                 list.appendChild(row);
+             }
+
+             function _render_directory_children() {
+                 _clear_fs_elements();
+
+                 let name_filter = document
+                     .getElementById("zyn-fs-elements-header-namme-filter").value;
+
+                 for (let c of client.children()) {
+                     if (name_filter.length !== 0) {
+                         if (c['name'].indexOf(name_filter) === -1) {
+                             continue ;
+                         }
+                     }
+                     _add_fs_row(c);
+                 }
+
+                 if (client.children().length === 0) {
+                     _set_fs_elements_text("Empty");
+                 } else if (!document.getElementById("zyn-fs-elements").firstChild) {
+                     _set_fs_elements_text("No matching elements");
+                 }
+                 document.getElementById('zyn-fs-working_directory').value = client.working_directory().to_str();
+             }
+
+             function _get_created_element_name() {
+                 let name = document.getElementById("zyn-fs-create-element-name").value;
+                 name = name.trim();
+                 if (name.length === 0) {
+                     zyn_show_modal_error(
+                         ErrorLevel.notification,
+                         'Please specify name'
+                     );
+                     return null;
+                 }
+                 document.getElementById("zyn-fs-create-element-name").value = '';
+                 return name;
+             }
+
+             function _handle_create_rsp(rsp) {
+                 _handle_refresh_directory_clicked();
+             }
+
+             function _handle_create_ra_clicked() {
+                 let name = _get_created_element_name();
+                 if (name === null) {
+                     return ;
+                 }
+                 client.create_ra_file(name, _handle_create_rsp);
+             }
+
+             function _handle_create_dir_clicked() {
+                 let name = _get_created_element_name();
+                 if (name === null) {
+                     return ;
+                 }
+                 client.create_directory(name, _handle_create_rsp);
+             }
+
+             function _handle_directory_changed() {
+                 _set_browser_url();
+                 zyn_hide_modals();
+                 _render_directory_children();
+             }
+
+             function _handle_refresh_directory_clicked() {
+                 zyn_show_modal_loading('Loading filesystem...');
+                 client.refresh_working_directory(_handle_directory_changed);
+             }
+
+             function _set_browser_url(name=null) {
+                 let wd = client.working_directory();
+                 let url = client.root_url() + wd.to_str();
+                 if (!wd.is_root()) {
+                     url += '/';
+                 }
+                 if (name !== null) {
+                     url += `${name}`;
+                 }
+                 history.pushState(null, '', url);
+             }
+
+             function _handle_parent_directory_clicked() {
+                 zyn_show_modal_loading('Loading filesystem...');
+                 let path = client.working_directory();
+                 path.parent();
+                 client.change_working_directory(
+                     path,
+                     _handle_directory_changed
+                 );
+             }
+
+             function _handle_directory_clicked(node_id, name) {
+                 zyn_show_modal_loading('Loading filesystem...');
+                 let path = client.working_directory();
+                 path.append(name);
+                 client.change_working_directory(
+                     path,
+                     _handle_directory_changed
+                 );
+             }
+
+             function _file_opened() {
+                 let name = client.current_file_handler().properties()['name'];
+                 _set_browser_url(name);
+                 _hide_sidebar();
+                 _update_file_buttons();
+                 _update_file_properties();
+                 zyn_hide_modals();
+             }
+
+             function _handle_open_file_edit_clicked(event, node_id, name) {
+                 if (event.target.id === 'zyn-open-file-edit') {
+                     event.stopPropagation();
+                 }
+
+                 zyn_show_modal_loading('Fetching content...');
+                 client.open_file(
+                     node_id,
+                     name,
+                     OpenMode.edit,
+                     'zyn-file-content',
+                     _file_opened,
+                 );
+             }
+
+             function _handle_open_file_clicked(node_id, name) {
+                 zyn_show_modal_loading('Fetching content...');
+                 client.open_file(
+                     node_id,
+                     name,
+                     OpenMode.read,
+                     'zyn-file-content',
+                     _file_opened,
+                 );
+             }
+
+             function _handle_delete_rsp(rsp) {
+                 _handle_refresh_directory_clicked();
+             }
+
+             function _handle_delete_element_clicked(event, node_id, name) {
+                 if (event.target.id === 'zyn-delete-element') {
+                     event.stopPropagation();
+                 }
+                 zyn_show_modal_ask(
+                     `Are you sure you want to delete element "${name}"`,
+                     {
+                         'Yes': () => {
+                             zyn_show_modal_loading('Deleting...');
+                             client.execute_command(
+                                 'delete-element',
+                                 {
+                                     'node-id': node_id,
+                                 },
+                                 _handle_delete_rsp,
+                             );
+                         },
+                         'Cancel': () => {
+                             zyn_hide_modals();
+                         },
+                     }
+                 );
+             }
+
+             _set_fs_elements_text('Empty');
+            </script>
+        </div>
+    </div>
+
+    <div class="w3-container w3-bar w3-black" style="display: table-row;">
+        <button class="w3-bar-item w3-button" onclick="_set_vissible_tab('zyn-tab-fs')">Filesystem</button>
+        <button class="w3-bar-item w3-button" onclick="_set_vissible_tab('zyn-tab-settings')">Settings</button>
+    </div>
+
+    <div id="zyn-tab-settings" class="zyn-tabs" style="height: 100%; width: 100%; display: none">
+        <div
+            class="w3-container w3-center"
+            style="width: 100%; height: 100%; display: block;"
+        >
+            <button
+                class="w3-button w3-border"
+                style="margin: 20px 20px;"
+                onclick="_handle_settings_refresh()"
+            >Refresh</button>
+            <h3>Zyn server</h3>
+            <table
+                id="zyn-settings-system-zyn-server"
+                class="w3-table w3-centered"
+            ></table>
+            <h3>Web server</h3>
+            <table
+                id="zyn-settings-system-web-server"
+                class="w3-table w3-centered"
+            ></table>
+
+            <hr>
+            <a href="https://icons8.com/icon/833/cancel">Cancel icon by Icons8</a>
+
+            <script>
+             function _handle_settings_refresh() {
+                 client.execute_command(
+                     'query-system',
+                     null,
+                     (rsp) => {
+                         function _create_settings_cell(row, value) {
+                             let c = row.insertCell();
+                             c.innerText = value;
+                             c.classList.add('w3-border');
+                             return c;
+                         }
+                         function _show_settings(element_id, settings) {
+                             var element = document.getElementById(element_id);
+                             while (element.rows.length > 0) {
+                                 element.deleteRow(0);
+                             }
+                             for (let name in settings) {
+                                 var row = element.insertRow(0);
+                                 _create_settings_cell(row, name);
+
+                                 let value = settings[name];
+                                 if ('string' in value) {
+                                     _create_settings_cell(row, value['string']);
+                                 } else if ('timestamp' in value) {
+                                     let d = new Date(value['timestamp'] * 1000);
+                                     _create_settings_cell(row, d.toString());
+                                 } else {
+                                     zyn_add_notification(
+                                         NotificationSource.client,
+                                         'Unhandled server settings type',
+                                     );
+                                 }
+                             }
+                         }
+
+                         let c = rsp.content();
+                         _show_settings('zyn-settings-system-zyn-server', c['zyn-server']);
+                         _show_settings('zyn-settings-system-web-server', c['web-server']);
+                     },
+                 );
+             }
+            </script>
+        </div>
+    </div>
+
+    <div
+        id="zyn-tab-fs"
+        class="zyn-tabs"
+        style="display: table-row; height: 100%; width: 100%"
+    >
+        <div
+            style="display: table; height: 100%; width: 100%"
+        >
+
+            <div style="display: table-row" class="w3-sand">
+                <button type="button"
+                        class="w3-button w3-border w3-blue-grey"
+                        style="font-size: large; width: 20%"
+                        onclick="_show_sidebar()"
+                >&#9776;</button>
+
+                <button
+                    id="zyn-toogle-file-header"
+                    class="w3-button w3-border"
+                    onclick="_handle_toggle_file_header()"
+                    data-is-minimized="true";
+                ></button>
+            </div>
+
+            <script>
+             function _show_sidebar() {
+                 document.getElementById("zyn-fs-sidebar").style.display = 'table';
+             }
+
+             function _hide_sidebar() {
+                 document.getElementById("zyn-fs-sidebar").style.display = 'none';
+             }
+            </script>
+
+            <div
+                class="w3-container"
+                style="width: 100%; height: 100%; box-sizing: border-box; display: table-row;"
+            >
+                <div
+                    id="zyn-file"
+                    style="display: table; width: 100%; height: 100%;"
+                >
+                    <div
+                        id="zyn-file-header-container"
+                        class="w3-container w3-sand"
+                        style="display: table-row; width: 100%;"
+                    >
+                        <div
+                            id="zyn-file-header"
+                            style="display: block; width: 100%; height: 100%; overflow-y: scroll; min-height: 200px;"
+                        >
+                            <div
+                                id="zyn-file-header-info"
+                                style="width: 30%; display: inline-block; vertical-align: top;"
+                            >
+                                <div class="w3-margin">
+                                    File
+                                    <ul class="zyn-current-file" style="padding: 0px 0px;">
+                                        <li><span>Filename:</span><span class="w3-right" id="zyn-file-name"></span></li>
+                                        <li><span>Node Id:</span><span class="w3-right" id="zyn-file-node-id"></span></li>
+                                        <li><span>Revision:</span><span class="w3-right" id="zyn-file-revision"></span></li>
+                                        <li><span>File type:</span><span class="w3-right" id="zyn-file-type"></span></li>
+                                        <li><span>Block size:</span><span class="w3-right" id="zyn-file-block-size"></span></li>
+                                    </ul>
+                                </div>
+                                <script>
+                                 function _set_file_properties(
+                                     name,
+                                     node_id,
+                                     revision,
+                                     file_type,
+                                     block_size,
+                                 ) {
+                                     document.getElementById("zyn-file-name").innerText = name;
+                                     document.getElementById("zyn-file-node-id").innerText = node_id;
+                                     document.getElementById("zyn-file-revision").innerText = revision;
+                                     document.getElementById("zyn-file-type").innerText = file_type;
+                                     document.getElementById("zyn-file-block-size").innerText = block_size;
+                                 }
+
+                                 function _clear_file_properties() {
+                                     _set_file_properties('-', '-', '-', '-', '-');
+                                 }
+
+                                 function _update_file_properties() {
+                                     if (client.has_current_file()) {
+                                         let handler = client.current_file_handler();
+                                         let properties = handler.properties();
+                                         _set_file_properties(
+                                             properties['name'],
+                                             properties['node-id'],
+                                             properties['revision'],
+                                             properties['file-type'],
+                                             properties['block-size'],
+                                         )
+                                     }
+                                 }
+
+                                 _clear_file_properties();
+                                </script>
+
+                            </div><!-- zyn-file-header-info --><div
+                                                                   id="zyn-file-header-notifications"
+                                                                   style="width: 70%; display: inline-block; vertical-align: top;"
+                                                               >
+                                <div class="w3-margin">
+                                    Notifications
+                                    <table
+                                        id="zyn-notifications"
+                                        style="width: 100%; height: 100%;"
+                                    >
+                                        <tr>
+                                            <th class="zyn-notification-source w3-border-bottom">Source</th>
+                                            <th class="w3-border-bottom">Description</th>
+                                        </tr>
+                                    </table>
+                                </div>
+                            </div><!-- zyn-file-header-notifications -->
+
+                            <script>
+                             let MAX_NUMBER_OF_NOTIFICATIONS = 50;
+                             let NotificationSource = Object.freeze({
+                                 'client': 'Client',
+                                 'server': 'Server',
+                             });
+                             let NotificationType = Object.freeze({
+                                 'info': 10,
+                                 'warn': 20,
+                                 'error': 30,
+                             });
+
+                             function zyn_add_notification(source, description, type=NotificationType.info)
+                             {
+                                 var notifications = document.getElementById("zyn-notifications");
+                                 var size = notifications.rows.length;
+                                 if (size > MAX_NUMBER_OF_NOTIFICATIONS) {
+                                     notifications.deleteRow(size - 1);
+                                 }
+                                 var row = notifications.insertRow(1);
+
+                                 field_source = row.insertCell();
+                                 field_source.innerText = source;
+                                 field_source.classList.add('zyn-notification-source');
+                                 field_source.classList.add('w3-border-right');
+                                 field_source.classList.add('w3-border-bottom');
+
+                                 field_desc = row.insertCell();
+                                 field_desc.innerText = description;
+                                 field_desc.classList.add('w3-border-bottom');
+                             }
+
+                            </script>
+                        </div>
+                    </div><!-- zyn-file-header-container -->
+
+                    <script>
+                     function _handle_toggle_file_header() {
+                         let file = document.getElementById("zyn-file");
+                         let header = document.getElementById("zyn-file-header");
+                         let button = document.getElementById("zyn-toogle-file-header");
+                         let is_minimized = button.dataset.isMinimized == 'true';
+
+                         if (is_minimized) {
+                             header.style.minHeight = file.offsetHeight * 0.25 + 'px'
+                             button.innerText = 'Hide Properties'
+                         } else {
+                             header.style.minHeight = file.offsetHeight * 0.05 + 'px'
+                             button.innerText = 'Show Properties'
+                         }
+                         button.dataset.isMinimized = (!is_minimized).toString();
+                         _handle_window_resize();
+                     }
+                    </script>
+                    <div
+                        id="zyn-file-buttons"
+                        class="w3-container"
+                        style="display: table-row; width: 100%;"
+                    >
+                        <button
+                            id="zyn-file-edit"
+                            class="w3-button"
+                            onclick="_handle_file_edit_clicked()"
+                        ></button>
+
+                        <button
+                            id="zyn-file-done"
+                            class="w3-button"
+                            onclick="_handle_file_done_clicked()"
+                        ></button>
+
+                        <button
+                            id="zyn-file-cancel"
+                            class="w3-button"
+                            onclick="_handle_file_cancel_clicked()"
+                        ></button>
+
+                        <button
+                            id="zyn-file-save"
+                            class="w3-button"
+                            onclick="_handle_file_save_clicked()"
+                        ></button>
+                    </div><!-- zyn-file-buttons -->
+
+                    <script>
+                     function _handle_client_updated() {
+                         _update_file_buttons();
+                     }
+
+                     function _handle_properties_changed() {
+                         _update_file_properties();
+                     }
+
+                     function _handle_file_edit_clicked() {
+                         client.change_file_to_mode(
+                             OpenMode.edit,
+                             'zyn-file-content',
+                             _handle_client_updated
+                         );
+                     }
+
+                     function _handle_file_done_clicked() {
+                         client.change_file_to_mode(
+                             OpenMode.read,
+                             'zyn-file-content',
+                             _handle_client_updated
+                         );
+                     }
+
+                     function _handle_file_cancel_clicked() {
+                         client.cancel_file_edits(_handle_client_updated);
+                     }
+
+                     function _handle_file_save_clicked() {
+                         client.save_file_edits(_handle_properties_changed);
+                     }
+
+                     function _set_file_button(name, enabled, shown, text=null) {
+                         let button = document.getElementById(name)
+                         button.disabled = !enabled;
+                         if (shown) {
+                             button.style.display = 'inline-block';
+                         } else {
+                             button.style.display = 'none';
+                         }
+                         if (text !== null) {
+                             button.innerText = text;
+                         }
+                     }
+
+                     function _reset_file_buttons() {
+                         _set_file_button('zyn-file-edit', false, true, 'Edit');
+                         _set_file_button('zyn-file-done', false, false, 'Done');
+                         _set_file_button('zyn-file-cancel', false, true, 'Cancel');
+                         _set_file_button('zyn-file-save', false, true, 'Save');
+                     }
+
+                     function _update_file_buttons() {
+                         if (!client.has_current_file()) {
+                             _reset_file_buttons();
+                             return ;
+                         }
+
+                         let handler = client.current_file_handler();
+                         if (!handler.is_editable()) {
+                             _reset_file_buttons();
+                             return ;
+                         }
+
+                         if (client.is_in_edit_mode()) {
+                             _set_file_button('zyn-file-edit', false, false);
+                             _set_file_button('zyn-file-done', true, true);
+                             _set_file_button('zyn-file-cancel', true, true);
+                             _set_file_button('zyn-file-save', true, true);
+                         } else if (client.is_in_read_mode()) {
+                             _set_file_button('zyn-file-edit', true, true);
+                             _set_file_button('zyn-file-done', false, false);
+                             _set_file_button('zyn-file-cancel', false, true);
+                             _set_file_button('zyn-file-save', false, true);
+                         }
+                     }
+                    </script>
+
+                    <hr>
+
+                    <div
+                        id="zyn-file-content"
+                        style="height: 100%; width: 100%; display: table-row;"
+                    ></div>
+
+                    <div id="zyn-file-footer">
+                        <hr>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+
+     function _handle_notitification() {
+         _handle_properties_changed();
+     }
+
+     zyn_show_modal_loading('Initializing...');
+     let path_parent = "{{ path_parent }}";
+     let name = "{{ name }}";
+
+     let client = new ZynClient(
+         "{{ zyn_user_id }}",
+         "{{ root_url }}",
+         ZynPath.from_string(path_parent),
+         _handle_notitification,
+         (rsp) => {
+             if (rsp.is_error()) {
+                 zyn_show_modal_error(ErrorLevel.error, `${rsp.error().to_string()}`);
+                 return ;
+             }
+             _render_directory_children();
+             _update_file_buttons();
+             client.set_content_area_text('Content', 'zyn-file-content');
+             _handle_window_resize();
+             _handle_toggle_file_header();
+
+             if (name.length != 0) {
+                 let element = client.get_child(name);
+                 if (element === null) {
+                     zyn_show_modal_error(ErrorLevel.error, `Element "${name}" not found`);
+                 } else if (element['element-type'] === ElementType.file) {
+                     _handle_open_file_clicked(element['node-id'], name);
+                 } else if (element['element-type'] === ElementType.directory) {
+                     _handle_directory_clicked(element['node-id'], name);
+                 } else {
+                     zyn_unhandled();
+                 }
+             } else {
+                 zyn_hide_modals();
+             }
+         }
+     );
+    </script>
+</body>
+</html>
