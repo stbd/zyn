@@ -63,22 +63,12 @@ class zyn_development_environment(
         }
 
         exec { 'prepare-home' :
-                 command => "${developer_home}/.zyn-prepare-home.sh $developer_name $developer_home",
+                 command => "${developer_home}/.zyn-prepare-home.sh $developer_name $developer_home $developer_home/zyn/vm/development/zyn-puppet-modules/zyn_development_environment/files",
                provider => shell,
                require => [
                  User["$developer_name"],
                  File["prepare-home-script"],
                ]
-        }
-
-        file { 'zyn-dev-env-script' :
-        ensure => file,
-               path => "${developer_home}/.zyn-dev-env.sh",
-               source => 'puppet:///modules/zyn_development_environment/zyn-dev-env.sh',
-               group => "$developer_name",
-               owner => "$developer_name",
-               mode => 0776,
-               require => User["$developer_name"],
         }
 
         $packages = [
@@ -89,6 +79,8 @@ class zyn_development_environment(
           'shellcheck',         # Static analyser for bash scripts
           'curl',
           'gnupg2',
+          'apt-transport-https',
+          'software-properties-common',
         ]
 
         package { $packages :
@@ -172,5 +164,20 @@ class zyn_development_environment(
                  Package['haveged'],
                  Exec['prepare-home'],
                ],
+        }
+
+        exec { 'Install Docker Community Edition (CE)':
+                 command => 'curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add - ;
+         add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable" ;
+         apt-get update ;
+         apt-get -y install docker-ce ;',
+               path => ['/usr/local/sbin', '/usr/sbin', '/sbin', '/usr/bin/', '/bin'],
+               unless => 'which docker',
+                      require => [
+                        Package['apt-transport-https'],
+                        Package['curl'],
+                        Package['gnupg2'],
+                        Package['software-properties-common'],
+                      ]
         }
 }

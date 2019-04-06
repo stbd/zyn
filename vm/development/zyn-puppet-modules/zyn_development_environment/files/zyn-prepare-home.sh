@@ -1,13 +1,14 @@
-#/usr/bin/env bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-if [ "$#" -ne 2 ]; then
-    echo "Usage: [username] [path-user-home]"
+if [ "$#" -ne 3 ]; then
+    echo "Usage: [username] [path-user-home] [path-module-files]"
     exit 1
 fi
 
 username=$1
 path_user_home=$2
-path_scripts_source="$(dirname "$0")"
+path_scripts_source=$3
 path_scripts_dest=$path_user_home/.zyn-scripts
 
 # Make sure home has all files from skeleton
@@ -31,7 +32,7 @@ PATH=\$PATH:$path_scripts_dest
 echo -e "
 \tZyn - Development environment
 
-Project repository is mounted to $ZYN_ROOT
+Project repository is mounted to \$ZYN_ROOT
 
 Use user \"vagrant\" to have sudo access to the machine
 su vagrant  # password: vagrant
@@ -54,6 +55,7 @@ declare -a scripts=(
     "zyn-run-web-client.sh"
     "zyn-run-server.sh"
     "zyn-static-analysis.sh"
+    "zyn-install-web-tools.sh"
     "common.sh"
 )
 

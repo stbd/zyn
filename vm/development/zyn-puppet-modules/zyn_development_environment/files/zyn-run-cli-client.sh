@@ -10,4 +10,5 @@ zyn-cli \
     -vv \
     --remote-hostname zyn \
     --debug-protocol \
+    --password admin \
     "$@"

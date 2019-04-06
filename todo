@@ -9,6 +9,7 @@
  * Cleanup and remove references to GPGME
  * Replace all encrypt/decrypt operations with encrypt_to_file and decrypt_from_file
  * Think how commands could be batched together
+ * create_file should return revision
 
 ## CLI Client:
  * Handle large files better
