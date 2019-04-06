@@ -42,7 +42,6 @@ def _file_type_to_string(file_type):
         raise ValueError('Invalid file type: {}'.format(file_type))
 
 
-
 class UserSessionWebSocket:
     def __init__(self, web_socket, connection):
         self.web_socket = web_socket
@@ -132,9 +131,6 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
     def on_message(self, message):
         msg = json.loads(message)
-
-        print (message)
-
         msg_type = msg['type']
         user_id = int(msg['user-id'])
         tab_id = int(msg['tab-id'])
@@ -357,7 +353,7 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             ))
 
             if len(modifications) == 0:
-                raise RuntimeError('No modifications sent');
+                raise RuntimeError('No modifications sent')
 
             for mod in modifications:
 
@@ -487,7 +483,6 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             self._log.error("Closing socket: unexpected message: {}".format(msg_type))
             self._close_socket()
 
-
     def _handle_notification(self, notification):
         if isinstance(notification, zyn_util.connection.NotificationDisconnected):
             self._send_notification(
@@ -517,7 +512,10 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
             elif file_type == zyn_util.connection.FILE_TYPE_RANDOM_ACCESS:
 
-                if notification.notification_type() == zyn_util.connection.Notification.TYPE_MODIFIED:
+                if (
+                        notification.notification_type()
+                        == zyn_util.connection.Notification.TYPE_MODIFIED
+                ):
                     rsp, bytes = self._connection().read_file(
                         notification.node_id,
                         notification.block_offset,
@@ -534,7 +532,10 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                             'bytes': str(base64.b64encode(bytes), 'ascii'),
                         })
 
-                elif notification.notification_type() == zyn_util.connection.Notification.TYPE_INSERTED:
+                elif (
+                    notification.notification_type()
+                    == zyn_util.connection.Notification.TYPE_INSERTED
+                ):
                     rsp, bytes = self._connection().read_file(
                         notification.node_id,
                         notification.block_offset,
@@ -551,7 +552,10 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                             'bytes': str(base64.b64encode(bytes), 'ascii'),
                         })
 
-                elif notification.notification_type() == zyn_util.connection.Notification.TYPE_DELETED:
+                elif (
+                    notification.notification_type()
+                    == zyn_util.connection.Notification.TYPE_DELETED
+                ):
                     self._send_notification(
                         NOTIFICATION_SOURCE_ZYN_SERVER,
                         'random-access-delete',

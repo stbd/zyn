@@ -14,19 +14,18 @@ tag=ZYN-NODE-SETTINGS
 if [ -d "$path_target" ]; then
     echo "Node already installed"
 else
-
     workdir="$(mktemp -d)"
     echo "Using workdir: $workdir"
-    workdir=/tmp/tmp.H3ShuYJPkq
     pushd "$workdir" > /dev/null 2>&1
     wget "$url"
 
     filename="$(basename "$url")"
     tar -xf "$filename"
-    if [ "$(ls -1 | grep -v "$filename" | wc -l)" -ne 1 ]; then
+    if [ ! -f "$filename" ]; then
         echo "Failed to find unpacked tar content"
         exit 1
     fi
+    # shellcheck disable=SC2010
     node_package="$(ls -1 | grep -v "$filename")"
     mkdir -p "$path_target"
     mv "$node_package" "$path_target"
