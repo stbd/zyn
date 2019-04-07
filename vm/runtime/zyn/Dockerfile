@@ -23,6 +23,7 @@ workdir /workdir
 
 run apt-get update && apt-get install \
        wget \
+       curl \
        build-essential \
        -y
 
@@ -30,13 +31,14 @@ run /bin/bash -euc " \
 curl https://sh.rustup.rs -sSf \
     | sh -s -- -y \
          --default-host x86_64-unknown-linux-gnu \
-         --default-toolchain 1.23.0
+         --default-toolchain 1.23.0 \
 "
 
 copy --from=build_libressl /usr/libressl /usr
 copy zyn-src.tar.gz /workdir/zyn-src.tar.gz
 
 run /bin/bash -euc " \
+source $HOME/.cargo/env && \
 pushd /workdir && \
 tar -xf zyn-src.tar.gz && \
 pushd zyn && \

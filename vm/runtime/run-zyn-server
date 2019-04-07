@@ -10,6 +10,8 @@ import sys
 import tempfile
 import time
 
+import zyn_docker
+
 
 PATH_DIR = os.path.dirname(os.path.abspath(__file__))
 PATH_IMAGE = PATH_DIR + '/zyn'
@@ -31,35 +33,6 @@ def _delete_file(path):
     open(path, 'wb').write(os.urandom(size))
     os.remove(path)
 
-
-def _pack_zyn_src():
-    process = subprocess.Popen(
-        [
-            PATH_SCRIPT_TO_PACK_ZYN_SRC,
-        ],
-        cwd=PATH_DIR,
-    )
-    process.communicate()
-    if process.returncode != 0:
-        raise RuntimeError('Packing Zyn source failed')
-
-
-def _build_image(image_tag):
-    build_cmd = [
-        'docker',
-        'build',
-        '-t',
-        image_tag,
-        PATH_IMAGE
-    ]
-
-    process = subprocess.Popen(
-        build_cmd,
-        cwd=PATH_DIR,
-    )
-    process.communicate()
-    if process.returncode != 0:
-        raise RuntimeError('Building image failed')
 
 def _main():
     parser = argparse.ArgumentParser(
@@ -88,7 +61,7 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
     )
     parser.add_argument(
         '--bind-to',
-        default="localhost:8080",
+        default="127.0.0.1:8080",
         type=str,
         help='IP and/or port pair to which bind Docker container'
     )
@@ -104,26 +77,11 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
         help='Initialize system and of its settings. Required' \
         'when server is run for the first time',
     )
-    parser.add_argument( # todo: Handle
+    parser.add_argument(
         '--path-data',
         default=None,
         help='Path to folder that will be mounted to container and which will' \
         'hold data stored by server. If left empty, data will be only in container'
-    )
-    parser.add_argument( # todo: Handle
-        '--admin-username',
-        default=None,
-        help='Username for admin account',
-    )
-    parser.add_argument( # todo: Handle
-        '--admin-password',
-        default=None,
-        help='Password for admin account',
-    )
-    parser.add_argument( # todo: Handle
-        '--admin-expiration',
-        default=None,
-        help='UTC expiration timestamp for admin account',
     )
     parser.add_argument(
         '--skip-packing-src',
@@ -145,9 +103,9 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
     if not args['skip_packing_src']:
         if os.path.exists(PATH_ZYN_SRC):
             os.remove(PATH_ZYN_SRC)
-        _pack_zyn_src()
+        zyn_docker.execute_script(PATH_SCRIPT_TO_PACK_ZYN_SRC, PATH_DIR)
 
-    _build_image(IMAGE_TAG)
+    zyn_docker.build_image(IMAGE_TAG, PATH_IMAGE, PATH_DIR)
 
     if not args['skip_packing_src']:
         os.remove(PATH_ZYN_SRC)
@@ -190,23 +148,14 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
         if args['init']:
             run_cmd += ['--init']
 
-        if args['admin_username']:
-            run_cmd += ['--admin-username', args['admin_username']]
-            raise NotImplementedError()
-
-        if args['admin_password']:
-            run_cmd += ['--admin-password', args['admin_password']]
-            raise NotImplementedError()
-
-        if args['admin_expiration']:
-            # run_cmd += ['--admin-expiration', args['admin_expiration']]
-            raise NotImplementedError()
-
         print (run_cmd)
         is_daemon = '--detach' in run_cmd or '-d' in run_cmd
+
         process = subprocess.Popen(
             run_cmd,
             cwd=PATH_DIR,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
         )
         process.communicate()
         if is_daemon:

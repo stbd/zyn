@@ -42,7 +42,7 @@ function install_gpg_fingerprint() {
 	exit 1
     fi
 
-    # Seems to work, but could be written in Python for safetier implementation
+    # Seems to work, but could be written in Python for safer implementation
     fingerprint=$(echo "$fingerprint_output" | grep -A2 sub | grep fingerprint | tr -s ' ' | cut -d ' ' -f 5- | sed 's/ //g')
     echo "Installing gpg fingerprint to $path_gpg_fingerprint"
     echo "$fingerprint" > "$path_gpg_fingerprint"
@@ -160,3 +160,8 @@ create_certificate
 
 # To debug gpg use env variable
 # GPGME_DEBUG=9:/home/user/mygpgme.log
+
+# Exporting
+# gpg --export-ownertrust > "$path_exported_key"
+# gpg --export $user_email > "$path_public_key"
+# gpg --export-secret-key $user_email > "$path_private_key"

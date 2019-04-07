@@ -5,41 +5,13 @@ import os.path
 import sys
 import subprocess
 
+import zyn_docker
+
+
 PATH_DIR = os.path.dirname(os.path.abspath(__file__))
 PATH_IMAGE = PATH_DIR + '/web'
 PATH_SCRIPT_TO_PACK_SRC = PATH_IMAGE + '/create-src-tar.sh'
 IMAGE_TAG = 'zyn-web-client'
-
-
-def _pack_src():
-    process = subprocess.Popen(
-        [
-            PATH_SCRIPT_TO_PACK_SRC,
-        ],
-        cwd=PATH_DIR,
-    )
-    process.communicate()
-    if process.returncode != 0:
-        raise RuntimeError('Packing Zyn source failed')
-
-
-def _build_image(image_tag):
-    build_cmd = [
-        'docker',
-        'build',
-        '-t',
-        image_tag,
-        PATH_IMAGE
-    ]
-
-    process = subprocess.Popen(
-        build_cmd,
-        cwd=PATH_DIR,
-    )
-    process.communicate()
-    if process.returncode != 0:
-        raise RuntimeError('Building image failed')
-
 
 
 def _main():
@@ -85,9 +57,9 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
     path_image_web_key = '/workdir/web-key.pem'
 
     if not args['skip_pack_src']:
-        _pack_src()
+        zyn_docker.execute_script(PATH_SCRIPT_TO_PACK_SRC, PATH_DIR)
 
-    _build_image(tag)
+    zyn_docker.build_image(tag, PATH_IMAGE, PATH_DIR)
 
     run_cmd = [
         'docker',
@@ -117,8 +89,6 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
     if path_ssl_cert is not None:
         run_cmd += ['--ssl-path-to-cert', path_image_web_cert]
         run_cmd += ['--ssl-path-to-key', path_image_web_key]
-
-    print (run_cmd)
 
     process = subprocess.Popen(
         run_cmd,
