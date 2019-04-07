@@ -14,9 +14,6 @@ let OpenMode = Object.freeze({
 })
 
 class ZynClient {
-    TIMER_INTERVAL_NORMAL = 5000;
-    TIMER_INTERVAL_PROMPT = 1000;
-
     constructor(
         user_id,
         url_root,
@@ -40,6 +37,9 @@ class ZynClient {
         this._target_id = 'zyn-client-target';
         this._poll_timer = null;
         this._notification_callback = notification_callback;
+
+        this.TIMER_INTERVAL_NORMAL = 5000;
+        this.TIMER_INTERVAL_PROMPT = 1000;
 
         let url = zyn_websocket_server_url();
         console.log(`Connecting to server at ${url}`);
