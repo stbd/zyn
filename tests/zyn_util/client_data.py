@@ -418,7 +418,7 @@ class LocalFile(LocalFileSystemElement):
             with open(self.path_local(), 'wb') as fp:
                 stream = zyn_util.connection.InputFileStream(fp)
                 connection.read_file_stream(
-                    self._node_id,
+                    open_rsp.node_id,
                     0,
                     open_rsp.size,
                     open_rsp.block_size,
@@ -889,7 +889,7 @@ class LocalFilesystemManager:
             self._add_element_to_filesystem(element, parent)
             return element
         except zyn_util.exception.ZynServerException as fetch_error:
-            self.log.warn('Fetch failed, element={}'.format(
+            self._log.warn('Fetch failed, element={}'.format(
                 element.name()
             ))
             raise fetch_error

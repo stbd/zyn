@@ -478,10 +478,16 @@ def main():
             return
 
     if init is not None:
+        username = init[0]
+        path_local_data = os.path.abspath(init[1])
+        if not os.path.exists(path_local_data):
+            print('Data location "{}" does not exist, aborting'.format(path_local_data))
+            return
+
         zyn_util.client.ZynFilesystemClient.init(
             path_state_file,
-            init[1],
-            init[0],
+            path_local_data,
+            username,
             init[2],
             int(init[3]),
         )
