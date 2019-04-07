@@ -316,11 +316,13 @@
                  element.appendChild(text_content);
              }
 
-             function _create_fs_element_field(width) {
+             function _create_fs_element_field(width=null) {
                  let field = document.createElement("div");
                  field.classList.add('w3-container');
                  field.classList.add('w3-cell');
-                 field.style.width = width;
+                 if (width !== null) {
+                     field.style.width = width;
+                 }
                  field.style.verticalAlign = 'middle';
                  return field;
              }
@@ -334,7 +336,7 @@
                  row.classList.add('w3-cell-row');
                  row.classList.add('w3-button');
 
-                 let field_edit = _create_fs_element_field("20%");
+                 let field_edit = _create_fs_element_field("25%");
                  if (element_type == ElementType.file) {
                      row.onclick = () => _handle_open_file_clicked(node_id, name);
                      if (client.is_editable(name)) {
@@ -353,11 +355,11 @@
                      row.onclick = () => _handle_directory_clicked(node_id, name);
                  }
 
-                 let field_type = _create_fs_element_field("20%");
+                 let field_type = _create_fs_element_field("10%");
                  field_type.innerText = element_type;
-                 let field_node_id = _create_fs_element_field("20%");
+                 let field_node_id = _create_fs_element_field("10%");
                  field_node_id.innerText = node_id;
-                 let field_name = _create_fs_element_field("40%");
+                 let field_name = _create_fs_element_field();
                  field_name.innerText = name;
                  field_name.style.whiteSpace = 'nowrap';
 
@@ -365,6 +367,7 @@
                  delete_button.id = 'zyn-delete-element';
                  delete_button.classList.add('w3-button');
                  delete_button.classList.add('w3-hover-gray');
+                 delete_button.classList.add('w3-right');
                  delete_button.onclick = () =>
                      _handle_delete_element_clicked(event, node_id, name);
 
@@ -390,12 +393,10 @@
                  let name_filter = document
                      .getElementById("zyn-fs-elements-header-namme-filter").value;
 
-                 for (let c of client.children()) {
-                     if (name_filter.length !== 0) {
-                         if (c['name'].indexOf(name_filter) === -1) {
-                             continue ;
-                         }
-                     }
+                 for (c of zyn_sort_filesystem_elements(
+                     client.children(),
+                     name_filter,
+                 )) {
                      _add_fs_row(c);
                  }
 

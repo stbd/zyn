@@ -1,3 +1,42 @@
+function zyn_websocket_server_url() {
+    var url = new URL(window.location.href)
+    var protocol = "ws";
+    if (location.protocol === 'https:') {
+        protocol = "wss";
+    }
+    return protocol + '://' + url.hostname + ":" + url.port + "/websocket";
+}
+
+function zyn_sort_filesystem_elements(elements, name_filter) {
+    let dirs = [];
+    let files = [];
+
+    function _sort_by_name(a, b) {
+        let name_a = a['name'].toLowerCase()
+        let name_b = b['name'].toLowerCase()
+        if (name_a < name_b) {return -1;}
+        if (name_a > name_b) {return 1;}
+        return 0;
+    }
+
+    for (let e of elements) {
+        if (name_filter !== null && e['name'].indexOf(name_filter) === -1) {
+            continue ;
+        }
+        if (e['element-type'] == ElementType.file) {
+            files.push(e);
+        } else if (e['element-type'] == ElementType.directory) {
+            dirs.push(e);
+        } else {
+            zyn_unhandled();
+        }
+    }
+
+    files.sort(_sort_by_name);
+    dirs.sort(_sort_by_name);
+    return files.concat(dirs);
+}
+
 class ZynError {
     constructor(client=null, web_server=null, zyn_server=null) {
         this.client = client;
@@ -173,15 +212,6 @@ class ZynNotification {
             return `Unhandled notification: ${this.type()}`;
         }
     }
-}
-
-function zyn_websocket_server_url() {
-    var url = new URL(window.location.href)
-    var protocol = "ws";
-    if (location.protocol === 'https:') {
-        protocol = "wss";
-    }
-    return protocol + '://' + url.hostname + ":" + url.port + "/websocket";
 }
 
 class ZynFileHandler {
