@@ -837,6 +837,7 @@
                      }
 
                      function _handle_properties_changed() {
+                         zyn_hide_modals();
                          _update_file_properties();
                      }
 
@@ -861,6 +862,7 @@
                      }
 
                      function _handle_file_save_clicked() {
+                         zyn_show_modal_loading('Saving...')
                          client.save_file_edits(_handle_properties_changed);
                      }
 
