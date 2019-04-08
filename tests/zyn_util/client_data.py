@@ -899,6 +899,9 @@ class LocalFilesystemManager:
         fetched_elements = []
         rsp = self.query_fs_children(parent, connection)
         for e in rsp.elements:
+            if e.node_id in self._elements:
+                continue
+
             path_remote = zyn_util.util.join_remote_paths([parent.path_remote(), e.name])
             if e.is_file():
                 element = LocalFile.create_empty(path_remote, e.file_type, self)
