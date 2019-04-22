@@ -1442,7 +1442,7 @@ fn handle_delete_fs_element_req(client: & mut Client) -> Result<(), ()>
                     (None, Some(Ok(())))
                 },
 
-                ClientProtocol::CountersResponse {
+                ClientProtocol::DeleteResponse {
                     result: Err(error),
                 } => {
                     try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));

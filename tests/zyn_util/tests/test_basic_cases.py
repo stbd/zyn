@@ -325,6 +325,13 @@ class TestBasicFilesystem(TestBasicOperatinsCommon):
         self._delete(c, path='/dir')
         self._validate_fs_element_does_not_exist(c, rsp.node_id)
 
+    def test_delete_non_empty_directory(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        rsp = self._create_directory(c, 'dir', parent_path='/')
+        rsp = self._create_file_ra(c, 'file', parent_node_id=rsp.node_id)
+        rsp = c.delete(path='/dir')
+        self._validate_response(rsp, c, zyn_util.errors.DirectoryIsNotEmpty)
+
     def test_files_created_on_server_workdir(self):
         c = self._start_and_connect_to_node_and_handle_auth()
         files_1 = self._get_files_in_server_workdir()
