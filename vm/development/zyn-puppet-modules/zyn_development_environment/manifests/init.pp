@@ -18,6 +18,7 @@ class zyn_development_environment(
                name => "$developer_name",
                uid => "$developer_user_pid",
                gid => "$developer_group_pid",
+               groups => ['sudo', 'docker'],
                managehome => true,
                shell => '/bin/bash',
                require => Group['dev-group'],
