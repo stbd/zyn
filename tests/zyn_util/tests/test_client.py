@@ -184,7 +184,7 @@ class TestClient(zyn_util.tests.common.TestCommon):
         return 'server-workdir-{}'.format(server_workdir_id)
 
     def _restart_server(self):
-        self._stop_node(self._process)
+        self._stop_node()
         self._start_node(
             server_workdir=self._server_workdir(self._server_workdir_id),
             init=False,
@@ -192,7 +192,7 @@ class TestClient(zyn_util.tests.common.TestCommon):
 
     def _start_new_server_with_different_work_dir(self):
         self._server_workdir_id += 1
-        self._stop_node(self._process)
+        self._stop_node()
         self._start_node(self._server_workdir(self._server_workdir_id))
 
     def _start_server_and_client(self, client_id=0):
@@ -461,6 +461,12 @@ class TestClientCreateAndFetch(TestClient):
         state.validate_file_state(path_1, is_tracked=False, exists_locally=True)
         state.validate_file_state(path_2, is_tracked=True, exists_locally=True)
 
+    def test_client_validate_fetch_works_mutitple_times_in_succession(self):
+        state = self._start_server_and_client()
+        self._create_remote_ra(state, '/file-1')
+        self._fetch(state, '/')
+        self._fetch(state, '/')
+
 
 class TestClientSync(TestClient):
     def _edit_and_sync_file_validate_revision_increased(
@@ -601,6 +607,12 @@ class TestClientSync(TestClient):
         self.assertNotEqual(self._revision(state_1, path_1), r_1)
         self.assertNotEqual(self._revision(state_2, path_2), r_2)
         self.assertEqual(self._revision(state_1, path_2), self._revision(state_2, path_2))
+
+    def test_client_validate_sync_works_mutitple_times_in_succession(self):
+        state = self._start_server_and_client()
+        self._create_remote_ra_and_fetch(state, '/file-1')
+        self._sync(state)
+        self._sync(state)
 
 
 class TestClientRemove(TestClient):

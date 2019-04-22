@@ -154,21 +154,29 @@ class TestCommon(TestZyn):
 
     def tearDown(self):
         if self._process:
-            self._stop_node(self._process)
+            self._stop_node()
 
-    def _stop_node(self, process, expected_return_code=0):
-        ret = process.poll()
+    def _stop_node(self, expected_return_code=0, trials=1):
+        if self._process is None:
+            return
+
+        ret = self._process.poll()
         if ret is not None:
             assert ret == expected_return_code
         else:
-            logging.info('Process {} was still alive, stopping'.format(process.pid))
-            while True:
-                process.terminate()
-                if process.poll() is None:
-                    process.kill()
+            logging.info('Process {} was still alive, stopping'.format(self._process.pid))
+            for _ in range(0, trials):
+                self._process.terminate()
+                if self._process.poll() is not None:
+                    break
                 time.sleep(1)
-                if process.poll() is None:
-                    print('Failed to kill server, trying again')
+
+            # This may block forever if OS for some reason decides not
+            # to stop the process, but at least user is able to notice it
+            while True:
+                if self._process.poll() is None:
+                    self._process.kill()
+                    time.sleep(0.5)
                 else:
                     break
 
@@ -235,9 +243,9 @@ class TestCommon(TestZyn):
         self._validate_response(rsp, connection)
         return rsp
 
-    def _connect_to_node_and_handle_auth(self):
+    def _connect_to_node_and_handle_auth(self, username=None, password=None):
         c = self._connect_to_node()
-        self._handle_auth(c)
+        self._handle_auth(c, username, password)
         return c
 
     def _start_and_connect_to_node_and_handle_auth(self, server_workdir=DEFAULT_SERVER_WORKDIR):
