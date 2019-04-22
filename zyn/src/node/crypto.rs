@@ -1,4 +1,5 @@
 use std::io::{ BufWriter, Write };
+use std::fs::{ remove_file };
 use std::option::{ Option };
 use std::path::{ Path };
 use std::process::{ Command, Stdio, Output };
@@ -83,38 +84,6 @@ impl Context {
         cmd
     }
 
-    pub fn decrypt(& self, ciphertext: & [u8]) -> Result<Vec<u8>, ()> {
-
-        let ciphertext_length = ciphertext.len();
-
-        let output = self.run_command(
-            self.gpg_command_base()
-                .arg("--decrypt")
-                .stdin(Stdio::piped())
-                .stderr(Stdio::null())
-                .stdout(Stdio::piped()),
-            Some(ciphertext),
-        )
-            ? ;
-
-        if ! output.status.success() {
-            match output.status.code() {
-                Some(code) => {
-                    error!("GPG decrypt process failed, error_code={}", code);
-                },
-                None => {
-                    error!("GPG decrypt process failed without error");
-                },
-            }
-            return Err(());
-        }
-
-        trace!("Succefully decrypted {} ciphertext bytes into {} bytes of plaintext",
-               ciphertext_length, output.stdout.len());
-
-        Ok(output.stdout)
-    }
-
     pub fn decrypt_from_file(& self, path_input: & Path)
                              -> Result<Vec<u8>, ()>
     {
@@ -148,42 +117,11 @@ impl Context {
         Ok(output.stdout)
     }
 
-    pub fn encrypt(& self, plaintext: & [u8]) -> Result<Vec<u8>, ()> {
-
-        let plaintext_length = plaintext.len();
-        let output = self.run_command(
-            self.gpg_command_base()
-                .arg("--encrypt")
-                .arg("-r")
-                .arg(self.fingerprint.clone())
-                .stdin(Stdio::piped())
-                .stderr(Stdio::null())
-                .stdout(Stdio::piped()),
-            Some(plaintext),
-        )
-            ? ;
-
-        if ! output.status.success() {
-            match output.status.code() {
-                Some(code) => {
-                    error!("GPG encrypt process failed, error_code={}", code);
-                },
-                None => {
-                    error!("GPG encrypt process failed without error");
-                },
-            }
-            return Err(());
-        }
-
-        trace!("Succefully encrypted {} bytes of plaintext into {} bytes of ciphertext",
-               plaintext_length, output.stdout.len());
-
-        Ok(output.stdout)
-    }
-
     pub fn encrypt_to_file(& self, plaintext: & [u8], path_output: & Path)
                            -> Result<(), ()>
     {
+
+        let _ = remove_file(& path_output);
 
         let plaintext_length = plaintext.len();
         let output = self.run_command(

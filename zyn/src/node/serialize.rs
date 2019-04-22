@@ -1,5 +1,3 @@
-use std::fs::{ OpenOptions, File };
-use std::io::{ Write, Read };
 use std::path::{ Path, PathBuf };
 use std::slice::{ Iter };
 use std::str;
@@ -11,8 +9,7 @@ use serde_json;
 
 use node::crypto::{ Context };
 use node::user_authority::{ Id };
-use node::common::{ log_io_error_to_unit_err, log_crypto_usage_error,
-                    log_utf_error, Timestamp, FileRevision, NodeId, FileType };
+use node::common::{ log_utf_error, Timestamp, FileRevision, NodeId, FileType };
 
 
 fn path_with_version(path_basename: & Path, version_number: u32) -> PathBuf {
@@ -114,19 +111,12 @@ impl SerializedNode {
 
         debug!("Serializing node settings to path={}", path.display());
 
+
         let serialized = serde_json::to_string(& self)
             .map_err(log_serde_error)
             ? ;
 
-        let mut file = OpenOptions::new().read(false).write(true).create(true).open(path)
-            .map_err(log_io_error_to_unit_err)
-            ? ;
-
-        crypto_context.encrypt(& serialized.into_bytes())
-            .map_err(|()| log_crypto_usage_error())
-            .and_then(|encrypted| file.write_all(encrypted.as_slice())
-                      .map_err(log_io_error_to_unit_err)
-            )
+        crypto_context.encrypt_to_file(& serialized.into_bytes(), & path)
     }
 
     pub fn read(crypto_context: Context, path_basename: & Path)
@@ -142,20 +132,7 @@ impl SerializedNode {
 
         debug!("Deserializing node settings from version={}, path={}", version, path.display());
 
-        let mut file = OpenOptions::new().read(true).write(false).create(false).open(path)
-            .map_err(log_io_error_to_unit_err)
-            ? ;
-
-        let mut buffer = Vec::new();
-        file.read_to_end(& mut buffer)
-            .map_err(log_io_error_to_unit_err)
-            ? ;
-
-
-        let decrypted = crypto_context.decrypt(& buffer)
-            .map_err(|()| log_crypto_usage_error())
-            ? ;
-
+        let decrypted = crypto_context.decrypt_from_file(& path) ? ;
         if version == 1 {
             let serialized = str::from_utf8(& decrypted)
                 .map_err(log_utf_error)
@@ -226,15 +203,7 @@ impl SerializedFilesystem {
             .map_err(log_serde_error)
             ? ;
 
-        let mut file = OpenOptions::new().read(false).write(true).create(true).open(path)
-            .map_err(log_io_error_to_unit_err)
-            ? ;
-
-        crypto_context.encrypt(& serialized.into_bytes())
-            .map_err(|()| log_crypto_usage_error())
-            .and_then(|encrypted| file.write_all(encrypted.as_slice())
-                      .map_err(log_io_error_to_unit_err)
-            )
+        crypto_context.encrypt_to_file(& serialized.into_bytes(), & path)
     }
 
     pub fn read(crypto_context: Context, path_basename: & Path)
@@ -250,20 +219,7 @@ impl SerializedFilesystem {
 
         debug!("Deserializing filesystem from version={}, path={}", version, path.display());
 
-        let mut file = OpenOptions::new().read(true).write(false).create(false).open(path)
-            .map_err(log_io_error_to_unit_err)
-            ? ;
-
-        let mut buffer = Vec::new();
-        file.read_to_end(& mut buffer)
-            .map_err(log_io_error_to_unit_err)
-            ? ;
-
-
-        let decrypted = crypto_context.decrypt(& buffer)
-            .map_err(|()| log_crypto_usage_error())
-            ? ;
-
+        let decrypted = crypto_context.decrypt_from_file(& path) ? ;
         if version == 1 {
             let serialized = str::from_utf8(& decrypted)
                 .map_err(log_utf_error)
@@ -338,15 +294,7 @@ impl SerializedUserAuthority {
             .map_err(log_serde_error)
             ? ;
 
-        let mut file = OpenOptions::new().read(false).write(true).create(true).open(path)
-            .map_err(log_io_error_to_unit_err)
-            ? ;
-
-        crypto_context.encrypt(& serialized.into_bytes())
-            .map_err(|()| log_crypto_usage_error())
-            .and_then(|encrypted| file.write_all(encrypted.as_slice())
-                      .map_err(log_io_error_to_unit_err)
-            )
+        crypto_context.encrypt_to_file(& serialized.into_bytes(), & path)
     }
 
     pub fn read(crypto_context: Context, path_base: & Path)
@@ -358,20 +306,7 @@ impl SerializedUserAuthority {
 
         debug!("Deserializing user authority from version={}, path={}", version, path.display());
 
-
-        let mut file = OpenOptions::new().read(true).write(false).create(false).open(path)
-            .map_err(log_io_error_to_unit_err)
-            ? ;
-
-        let mut buffer = Vec::new();
-        file.read_to_end(& mut buffer)
-            .map_err(log_io_error_to_unit_err)
-            ? ;
-
-        let decrypted = crypto_context.decrypt(& buffer)
-            .map_err(|()| log_crypto_usage_error())
-            ? ;
-
+        let decrypted = crypto_context.decrypt_from_file(& path) ? ;
         if version == 1 {
             let serialized = str::from_utf8(& decrypted)
                 .map_err(log_utf_error)
@@ -451,15 +386,7 @@ impl SerializedMetadata {
             .map_err(log_serde_error)
             ? ;
 
-        let mut file = File::create(path)
-            .map_err(log_io_error_to_unit_err)
-            ? ;
-
-        crypto_context.encrypt(& serialized.into_bytes())
-            .map_err(|()| log_crypto_usage_error())
-            .and_then(|encrypted| file.write_all(encrypted.as_slice())
-                      .map_err(log_io_error_to_unit_err)
-            )
+        crypto_context.encrypt_to_file(& serialized.into_bytes(), & path)
     }
 
     pub fn read(crypto_context: & Context, path_basename: & Path)
@@ -471,19 +398,7 @@ impl SerializedMetadata {
 
         debug!("Deserializing file from version={}, path={}", version, path.display());
 
-        let mut file = OpenOptions::new().read(true).write(false).create(false).open(path)
-            .map_err(log_io_error_to_unit_err)
-            ? ;
-
-        let mut buffer = Vec::new();
-        file.read_to_end(& mut buffer)
-            .map_err(log_io_error_to_unit_err)
-            ? ;
-
-        let decrypted = crypto_context.decrypt(& buffer)
-            .map_err(|()| log_crypto_usage_error())
-            ? ;
-
+        let decrypted = crypto_context.decrypt_from_file(& path) ? ;
         if version == 1 {
             let serialized = str::from_utf8(& decrypted)
                 .map_err(log_utf_error)

@@ -1,4 +1,4 @@
-use std::fs::{ create_dir };
+use std::fs::{ create_dir, read_dir };
 use std::mem::{ uninitialized };
 use std::path::{ Path, PathBuf };
 use std::ptr::{ null_mut };
@@ -225,6 +225,15 @@ impl Node {
 
         info!("Creating node, path_workdir={}", path_workdir.display());
 
+        let workdir_it = read_dir(& path_workdir)
+            .map_err(| error | error!("Failed to read workdir content, error=\"{}\"", error))
+            ? ;
+
+        if workdir_it.count() != 0 {
+            error!("Working directory is not empty");
+            return Err(());
+        }
+
         let context_auth = crypto.create_context()
             .map_err(| () | log_crypto_context_error())
             ?;
@@ -239,7 +248,7 @@ impl Node {
 
         let path_data_dir = Node::path_data(path_workdir);
         create_dir(& path_data_dir)
-            .map_err(| error | error!("failed to create data dir, error=\"{}\"", error))
+            .map_err(| error | error!("Failed to create data dir, error=\"{}\"", error))
             ? ;
 
         let mut fs = Filesystem::new_with_capacity(

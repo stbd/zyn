@@ -1,4 +1,3 @@
-use std::io::{ Error };
 use std::str::{ Utf8Error };
 use std::path::{ PathBuf };
 use std::fmt::{ Display, Formatter, Result as FmtResult };
@@ -22,14 +21,6 @@ pub fn utc_timestamp() -> Timestamp {
 
 pub fn log_crypto_context_error() {
     error!("Failed to create crypto context");
-}
-
-pub fn log_crypto_usage_error() {
-    error!("Failed to encrypt/decrypt data");
-}
-
-pub fn log_io_error_to_unit_err(error_code: Error) {
-    error!("IO error, error_code={}", error_code);
 }
 
 pub fn log_utf_error(error_code: Utf8Error) {

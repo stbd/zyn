@@ -37,16 +37,6 @@ impl State {
 }
 
 #[test]
-fn test_encrypt_decrypt() {
-    let _state = State::new();
-    let context = test_util::create_crypto_context();
-    let plaintext = String::from("data").into_bytes();
-    let ciphertext = context.encrypt(& plaintext).unwrap();
-    let decrypted = context.decrypt(& ciphertext).unwrap();
-    assert!(plaintext == decrypted);
-}
-
-#[test]
 fn test_encrypt_decrypt_1mb_file_via_file() {
     let state = State::new();
     let path_test_data = test_util::create_file_of_random_1024_blocks(1024);
