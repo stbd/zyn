@@ -6,7 +6,7 @@ use std::result::{ Result };
 use std::str;
 use std::vec::{ Vec };
 
-use node::file_handle::{ FileHandle };
+use node::file_handle::{ FileHandle, FileProperties };
 use node::directory::{ Directory };
 use node::crypto::{ Crypto };
 use node::user_authority::{ Id };
@@ -297,9 +297,9 @@ impl Filesystem {
         user: Id,
         type_of_file: FileType,
         page_size: usize,
-    ) -> Result<NodeId, FilesystemError> {
+    ) -> Result<(NodeId, FileProperties), FilesystemError> {
 
-        let (file, node_id) = {
+        let (file, node_id, properties) = {
 
             {
                 let parent = self.nodes[*parent_node_id as usize].to_directory()
@@ -326,7 +326,7 @@ impl Filesystem {
                 })
                 ? ;
 
-            let file = FileHandle::create(
+            let mut file = FileHandle::create(
                 path_file_root,
                 & self.crypto.clone(),
                 user.clone(),
@@ -347,12 +347,19 @@ impl Filesystem {
 
             parent.add_child(node_id, filename);
 
-            (file, node_id)
+            let properties = file.properties(& self.crypto.clone())
+                .map_err(| () | {
+                    warn!("Failed to get file poperties when creating, user={}, filename={}", user, filename);
+                    FilesystemError::HostFilesystemError
+                })
+                ? ;
+
+            (file, node_id, properties)
         };
 
         self.nodes[node_id as usize] = Node::File { file: file };
         self.number_of_files += 1;
-        Ok(node_id)
+        Ok((node_id, properties))
     }
 
     pub fn to_directory(

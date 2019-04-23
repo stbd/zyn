@@ -7,6 +7,7 @@ OperationNotPermitedFotFileTypeError = 5
 BlockSizeIsTooLargeError = 6
 InvalidEditError = 7
 FailedToReceiveDataError = 8
+TooManyFilesOpenError = 9
 InvalidUsernamePassword = 100
 ParentIsNotDirectory = 101
 UnauthorizedOperation = 102
@@ -56,6 +57,8 @@ def error_to_string(error):
         return "InvalidEditError"
     elif error == 8:
         return "FailedToReceiveDataError"
+    elif error == 9:
+        return "TooManyFilesOpenError"
     elif error == 100:
         return "InvalidUsernamePassword"
     elif error == 101:

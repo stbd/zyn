@@ -187,6 +187,26 @@ class TestBasicFilesystem(TestBasicOperatinsCommon):
         rsp = self._create_directory(c, 'dir', parent_node_id=0)
         self._create_file_ra(c, 'file', parent_node_id=rsp.node_id)
 
+    def test_reopened_file_is_not_vissible_to_client(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        rsp = self._create_file_ra(c, 'file', parent_node_id=0)
+        self._open_file_read(c, path='/file')
+
+        # Opening the file for second time succeeds, but the new descriptor is
+        # added after read descriptor in open files list, and because of this it is not visible
+        # for user and edit fails
+        self._open_file_write(c, path='/file')
+        rsp = c.ra_insert(rsp.node_id, rsp.revision, 0, 'data'.encode('utf-8'))
+        self._validate_response(rsp, c, zyn_util.errors.FileOpenedInReadModeError)
+
+    def test_max_number_of_files_open(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        rsp = self._create_file_ra(c, 'file', parent_node_id=0)
+        for _ in range(0, 5):  # Hardcoded
+            self._open_file_read(c, path='/file')
+        rsp = c.open_file_read(path='/file')
+        self._validate_response(rsp, c, zyn_util.errors.TooManyFilesOpenError)
+
     def test_open_read_with_path_and_close_file(self):
         c = self._start_and_connect_to_node_and_handle_auth()
         rsp = self._create_file_ra(c, 'file', parent_node_id=0)

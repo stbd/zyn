@@ -1004,9 +1004,13 @@ class Message:
 class CreateResponse:
     def __init__(self, response):
         self._rsp = response
-        if response.number_of_fields() != 1:
+        if response.number_of_fields() == 1:
+            self.node_id = response.field(0).as_node_id()
+        elif response.number_of_fields() == 2:
+            self.node_id = response.field(0).as_node_id()
+            self.revision = response.field(1).as_uint()
+        else:
             _malfomed_message()
-        self.node_id = response.field(0).as_node_id()
 
 
 class WriteResponse:

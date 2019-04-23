@@ -101,6 +101,7 @@ enum CommonErrorCodes {
     BlockSizeIsTooLargeError = 6,
     InvalidEditError = 7,
     FailedToReceiveDataError = 8,
+    TooManyFilesOpenError = 9,
 }
 
 fn map_node_error_to_uint(error: ErrorResponse) -> u64 {
@@ -787,7 +788,7 @@ Create file request
 <- [Version]CREATE-FILE:[Transaction Id][FileDescriptor: parent][String: name][Uint: type](Uint: page size);[End]
  * Type: 0: random access,
  * Type: 1: blob,
--> [Version]RSP:[Transaction Id][Uint: error code];(Node-Id)[End]
+-> [Version]RSP:[Transaction Id][Uint: error code];(Node-Id)(Uint: revision)[End]
 */
 fn handle_create_file_req(client: & mut Client) -> Result<(), ()>
 {
@@ -824,17 +825,18 @@ fn handle_create_file_req(client: & mut Client) -> Result<(), ()>
         client,
         & | msg, client | {
             match msg {
-                ClientProtocol::CreateFilesystemElementResponse {
-                    result: Ok(node_id),
+                ClientProtocol::CreateFileResponse {
+                    result: Ok((node_id, properties)),
                 } => {
                     let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
                     try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_unsigned(properties.revision), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
                     (None, Some(Ok(())))
                 },
 
-                ClientProtocol::CreateFilesystemElementResponse {
+                ClientProtocol::CreateFileResponse {
                     result: Err(error),
                 } => {
                     try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
@@ -875,7 +877,7 @@ fn handle_create_directory_req(client: & mut Client) -> Result<(), ()>
         client,
         & | msg, client | {
             match msg {
-                ClientProtocol::CreateFilesystemElementResponse {
+                ClientProtocol::CreateDirectoryResponse {
                     result: Ok(node_id),
                 } => {
                     let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
@@ -885,7 +887,7 @@ fn handle_create_directory_req(client: & mut Client) -> Result<(), ()>
                     (None, Some(Ok(())))
                 },
 
-                ClientProtocol::CreateFilesystemElementResponse {
+                ClientProtocol::CreateDirectoryResponse {
                     result: Err(error),
                 } => {
                     try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
@@ -926,6 +928,11 @@ fn handle_open_req(client: & mut Client) -> Result<(), ()>
     };
 
     trace!("Open file, user={}, fd=\"{}\"", client, fd);
+
+    if client.open_files.len() >= 5 {
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::TooManyFilesOpenError as u64);
+        return Err(());
+    }
 
     let user = client.user.as_ref().unwrap().clone();
     client.send_to_node(transaction_id, NodeProtocol::OpenFileRequest {
@@ -983,6 +990,7 @@ fn handle_open_req(client: & mut Client) -> Result<(), ()>
         page_size: properties.page_size,
         access: access
     });
+
     Ok(())
 }
 

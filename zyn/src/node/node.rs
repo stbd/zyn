@@ -110,7 +110,8 @@ pub enum ShutdownReason {
 
 pub enum ClientProtocol {
     AuthenticateResponse { result: Result<Id, ErrorResponse> },
-    CreateFilesystemElementResponse { result: Result<NodeId, ErrorResponse> },
+    CreateFileResponse { result: Result<(NodeId, FileProperties), ErrorResponse> },
+    CreateDirectoryResponse { result: Result<NodeId, ErrorResponse> },
     OpenFileResponse { result: Result<(FileAccess, NodeId, FileProperties), ErrorResponse> },
     Shutdown { reason: ShutdownReason },
     CountersResponse { result: Result<Counters, ErrorResponse> },
@@ -427,7 +428,7 @@ impl Node {
                                 );
 
                                 send_failed = client.transmit.send(
-                                    ClientProtocol::CreateFilesystemElementResponse {
+                                    ClientProtocol::CreateFileResponse {
                                         result: result
                                     },
                                 ).is_err();
@@ -451,7 +452,7 @@ impl Node {
                                 );
 
                                 send_failed = client.transmit.send(
-                                    ClientProtocol::CreateFilesystemElementResponse {
+                                    ClientProtocol::CreateDirectoryResponse {
                                         result: result
                                     },
                                 ).is_err();
@@ -746,7 +747,7 @@ impl Node {
         name: String,
         user: Id,
         requested_page_size: Option<u64>,
-    ) -> Result<NodeId, ErrorResponse> {
+    ) -> Result<(NodeId, FileProperties), ErrorResponse> {
 
         let parent_id = Node::resolve_file_descriptor(
             node_id_buffer,
