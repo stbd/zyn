@@ -843,6 +843,7 @@ TAG_LIST = 'L'
 TAG_KEY_VALUE = 'KVP'
 TAG_LIST_ELEMENT = 'LE'
 TAG_TRANSACTION_ID = 'T'
+TAG_TIMESTAMP = 'TS'
 TAG_PROTOCOL_VERSION = 'V'
 TAG_AUTHORITY = 'AUTHORITY'
 
@@ -873,6 +874,11 @@ class Field:
 
     def as_uint(self):
         if self._content[0] != TAG_UINT:
+            _malfomed_message()
+        return int(self._content[1])
+
+    def as_timestamp(self):
+        if self._content[0] != TAG_TIMESTAMP:
             _malfomed_message()
         return int(self._content[1])
 
@@ -1161,10 +1167,10 @@ class QueryCountersResponse:
             _malfomed_message()
 
         desc = response.field(0).key_value_list_to_dict()
-        if len(desc) != 1:
+        self._number_of_counters = 1
+        if len(desc) != self._number_of_counters:
             _malfomed_message()
 
-        self._number_of_counters = 1
         self.active_connections = desc['active-connections'].as_uint()
 
     def number_of_counters(self):
@@ -1177,12 +1183,21 @@ class QuerySystemResponse:
         if response.number_of_fields() != 1:
             _malfomed_message()
 
-        desc = response.field(0).key_value_list_to_dict()
-        if len(desc) != 2:
-            _malfomed_message()
+        self.has_admin_information = False
 
-        self.started_at = desc['started-at'].as_uint()
-        self.server_id = desc['server-id'].as_uint()
+        desc = response.field(0).key_value_list_to_dict()
+        if len(desc) in [4, 5]:
+            self.started_at = desc['started-at'].as_uint()
+            self.server_id = desc['server-id'].as_uint()
+            self.max_number_of_open_files_per_connection = (
+                desc['max-number-of-open-files-per-connection'].as_uint()
+            )
+            self.number_of_open_files = desc['number-of-open-files'].as_uint()
+        if len(desc) in [5]:
+            self.has_admin_information = True
+            self.expiration = desc['certification-expiration'].as_timestamp()
+        else:
+            _malfomed_message()
 
 
 class Response(Message):

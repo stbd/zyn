@@ -2,7 +2,7 @@ use std::io::{ Write };
 use std::path::{ PathBuf };
 use std::vec::{ Vec };
 
-use node::common::{ Buffer, NodeId, FileDescriptor };
+use node::common::{ Buffer, NodeId, FileDescriptor, Timestamp };
 use node::node::{ Authority };
 
 // todo: collect all static str to constants
@@ -262,6 +262,11 @@ impl SendBuffer {
 
     pub fn write_unsigned(& mut self, value: u64) -> Result<(), ()> {
         write!(self.buffer, "U:{};", value)
+            .map_err(| _ | ())
+    }
+
+    pub fn write_timestamp(& mut self, value: Timestamp) -> Result<(), ()> {
+        write!(self.buffer, "TS:{};", value)
             .map_err(| _ | ())
     }
 

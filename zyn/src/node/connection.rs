@@ -7,10 +7,11 @@ use std::ptr;
 use std::string::String;
 use std::thread::{ sleep };
 use std::time::{ Duration };
+use std::process::{ Command };
 
 use tls_sys;
 
-use node::common::{ Buffer };
+use node::common::{ Buffer, Timestamp };
 
 static TLS_WANT_POLLIN: isize = tls_sys::WANT_POLLIN as isize;
 static TLS_WANT_POLLOUT: isize = tls_sys::WANT_POLLOUT as isize;
@@ -113,11 +114,70 @@ impl Drop for Connection {
 pub struct Server {
     socket: TcpListener,
     context: tls_sys::Tls,
+    certificate_expiration: Timestamp,
 }
 
 impl Server {
+    pub fn certificate_expiration(& self) -> Timestamp {
+        self.certificate_expiration
+    }
+
     pub fn new(local_address: & str, port: u16, path_key: & Path, path_cert: & Path)
                -> Result<Server, ()> {
+
+        let output_not_after_date = Command::new("openssl")
+            .arg("x509")
+            .arg("-noout")
+            .arg("-enddate")
+            .arg("-in")
+            .arg(path_cert.to_str().unwrap())
+            .output()
+            .map_err(| error | {
+                error!("Failed to query openssl not after date, error=\"{}\"", error);
+            })
+            ? ;
+
+        if ! output_not_after_date.status.success() {
+            error!("openssl not after date query failed with code: {:?}", output_not_after_date.status);
+            return Err(());
+        }
+
+        let mut not_after_date = String::from_utf8(output_not_after_date.stdout)
+            .map_err(| error | {
+                error!("Failed to run openssl command, error=\"{}\"", error);
+            })
+            ? ;
+
+        not_after_date.drain(.."notAfter=".len()); // Remove field name
+        not_after_date.pop();                      // Remove end of line
+
+        let output_timestamp = Command::new("date")
+            .arg("-d")
+            .arg(not_after_date)
+            .arg("+%s")
+            .output()
+            .map_err(| error | {
+                error!("Failed to run openssl date command, error=\"{}\"", error);
+            })
+            ? ;
+
+        if ! output_timestamp.status.success() {
+            error!("openssl date conversion failed code: {:?}", output_timestamp.status);
+            return Err(());
+        }
+
+        let mut end_timestamp = String::from_utf8(output_timestamp.stdout)
+            .map_err(| error | {
+                error!("Failed to run openssl command, error=\"{}\"", error);
+            })
+            ? ;
+
+        end_timestamp.pop(); // Remove end of line
+        let expiration: Timestamp = end_timestamp.parse()
+            .map_err(| error | {
+                error!("Failed to parse certiface expiration, error=\"{}\"", error);
+            })
+            ? ;
 
         unsafe {
             match tls_sys::tls_init() {
@@ -177,6 +237,7 @@ impl Server {
             Ok(Server {
                 socket: socket,
                 context: server,
+                certificate_expiration: expiration,
             })
         }
     }

@@ -159,6 +159,7 @@ const FILE_TYPE_RANDOM_ACCESS: u64 = 0;
 const FILE_TYPE_BLOB: u64 = 1;
 const TYPE_USER: u64 = 0;
 const TYPE_GROUP: u64 = 1;
+const MAX_NUMBER_OF_OPEN_FILES: usize = 5;
 
 const DISCONNET_REASON_INTERNAL_ERROR: & str = "internal-error";
 const DISCONNET_REASON_NODE_CLOSING: & str = "node-closing";
@@ -929,7 +930,7 @@ fn handle_open_req(client: & mut Client) -> Result<(), ()>
 
     trace!("Open file, user={}, fd=\"{}\"", client, fd);
 
-    if client.open_files.len() >= 5 {
+    if client.open_files.len() >= MAX_NUMBER_OF_OPEN_FILES {
         try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::TooManyFilesOpenError as u64);
         return Err(());
     }
@@ -1475,6 +1476,16 @@ fn write_le_kv_su(buffer: & mut SendBuffer, key: & str, value: u64) -> Result<()
     buffer.write_key_value_pair_end() ? ;
     buffer.write_list_element_end()
 }
+
+fn write_le_kv_st(buffer: & mut SendBuffer, key: & str, value: Timestamp) -> Result<(), ()> {
+    buffer.write_list_element_start() ? ;
+    buffer.write_key_value_pair_start() ? ;
+    buffer.write_string(String::from(key)) ? ;
+    buffer.write_timestamp(value) ? ;
+    buffer.write_key_value_pair_end() ? ;
+    buffer.write_list_element_end()
+}
+
 /*
 fn write_le_kv_ss(buffer: & mut SendBuffer, key: & str, value: String) -> Result<(), ()> {
     buffer.write_list_element_start() ? ;
@@ -1754,9 +1765,24 @@ fn handle_query_system(client: & mut Client) -> Result<(), ()>
 
                     let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
 
-                    try_in_receive_loop!(client, buffer.write_list_start(2), Status::FailedToWriteToSendBuffer);
+                    let mut number_of_fields = 4;
+                    if desc.admin_system_information.is_some() {
+                        number_of_fields += 1;
+                    }
+
+                    try_in_receive_loop!(client, buffer.write_list_start(number_of_fields), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "server-id", desc.server_id), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "started-at", desc.started_at as u64), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "max-number-of-open-files-per-connection", MAX_NUMBER_OF_OPEN_FILES as u64), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "number-of-open-files", client.open_files.len() as u64), Status::FailedToWriteToSendBuffer);
+
+                    match desc.admin_system_information {
+                        Some(info) => {
+                            try_in_receive_loop!(client, write_le_kv_st(& mut buffer, "certification-expiration", info.certificate_expiration), Status::FailedToWriteToSendBuffer);
+                        },
+                        None => (),
+                    }
+
                     try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);

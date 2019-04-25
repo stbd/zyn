@@ -99,9 +99,14 @@ pub struct Counters {
     pub active_connections: u32,
 }
 
+pub struct AdminSystemInformation {
+    pub certificate_expiration: Timestamp,
+}
+
 pub struct SystemInformation {
     pub started_at: Timestamp,
     pub server_id: u64,
+    pub admin_system_information: Option<AdminSystemInformation>,
 }
 
 pub enum ShutdownReason {
@@ -502,6 +507,7 @@ impl Node {
 
                                 let result = Node::handle_query_system_request(
                                     & mut self.auth,
+                                    & self.server,
                                     self.started_at,
                                     self.server_id,
                                     user,
@@ -883,15 +889,27 @@ impl Node {
     }
 
     fn handle_query_system_request(
-        _auth: & mut UserAuthority,
+        auth: & mut UserAuthority,
+        server: & Server,
         started_at: Timestamp,
         server_id: u64,
-        _user: Id,
+        user: Id,
     ) -> Result<SystemInformation, ErrorResponse> {
+
+        let admin_system_information = {
+            if auth.is_authorized(& ADMIN_GROUP, & user, utc_timestamp()).is_ok() {
+                Some(AdminSystemInformation {
+                    certificate_expiration: server.certificate_expiration(),
+                })
+            } else {
+                None
+            }
+        };
 
         Ok(SystemInformation {
             started_at: started_at,
             server_id: server_id,
+            admin_system_information: admin_system_information,
         })
     }
 
