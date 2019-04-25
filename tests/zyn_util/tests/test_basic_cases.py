@@ -170,6 +170,17 @@ class TestQuery(TestBasicOperatinsCommon):
         query = self._query_system(c)
         self.assertNotEqual(query.started_at, 0)
         self.assertNotEqual(query.server_id, 0)
+        self.assertEqual(query.max_number_of_open_files_per_connection, 5)  # todo: hardcoded
+        self.assertEqual(query.number_of_open_files, 0)
+        self.assertEqual(query.has_admin_information, True)
+
+    def test_query_system_number_of_open_files(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        self._create_file_ra(c, 'file', parent_node_id=0)
+        self._open_file_read(c, path='/file')
+        self.assertEqual(self._query_system(c).number_of_open_files, 1)
+        self._open_file_read(c, path='/file')
+        self.assertEqual(self._query_system(c).number_of_open_files, 2)
 
 
 class TestBasicFilesystem(TestBasicOperatinsCommon):
@@ -202,7 +213,8 @@ class TestBasicFilesystem(TestBasicOperatinsCommon):
     def test_max_number_of_files_open(self):
         c = self._start_and_connect_to_node_and_handle_auth()
         rsp = self._create_file_ra(c, 'file', parent_node_id=0)
-        for _ in range(0, 5):  # Hardcoded
+        query = self._query_system(c)
+        for _ in range(0, query.max_number_of_open_files_per_connection):
             self._open_file_read(c, path='/file')
         rsp = c.open_file_read(path='/file')
         self._validate_response(rsp, c, zyn_util.errors.TooManyFilesOpenError)

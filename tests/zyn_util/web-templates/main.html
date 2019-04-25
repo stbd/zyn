@@ -606,6 +606,8 @@
                                  let value = settings[name];
                                  if ('string' in value) {
                                      _create_settings_cell(row, value['string']);
+                                 } else if ('unsigned' in value) {
+                                     _create_settings_cell(row, value['unsigned']);
                                  } else if ('timestamp' in value) {
                                      let d = new Date(value['timestamp'] * 1000);
                                      _create_settings_cell(row, d.toString());

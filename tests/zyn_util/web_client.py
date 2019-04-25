@@ -439,7 +439,7 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 return
 
             rsp = rsp.as_query_system_rsp()
-            self._send_response(msg_type, {
+            payload = {
                 'zyn-server': {
                     'started-at': {
                         'timestamp': rsp.started_at,
@@ -447,15 +447,26 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                     'server-id': {
                         'string': rsp.server_id,
                     },
+                    'max-number-of-open-files-per-connection': {
+                        'unsigned': rsp.max_number_of_open_files_per_connection,
+                    },
+                    'open-files-on-current-connection': {
+                        'unsigned': rsp.number_of_open_files,
+                    },
                 },
                 'web-server': {
                     'certificate-expiration': {
-                        'string': certifacte_expiration,
+                        'timestamp': certifacte_expiration,
                     },
                 },
-            })
+            }
 
-            pass
+            if rsp.has_admin_information:
+                payload['zyn-server']['certificate-expiration'] = {
+                    'timestamp': rsp.expiration
+                }
+
+            self._send_response(msg_type, payload)
 
         elif msg_type == 'delete-element':
 
@@ -812,8 +823,26 @@ def _certificate_expiration(path):
         print(data_stdout)
         raise RuntimeError('Reading certificate expiration failed')
 
-    parsed = data_stdout.decode('utf8').strip().split('=')
-    return parsed[1]
+    expiration_string = data_stdout.decode('utf8').strip().split('=')[1]
+
+    p = subprocess.Popen(
+        [
+            'date',
+            '-d',
+            expiration_string,
+            '+%s'
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    (data_stdout, data_stderr) = p.communicate()
+    if p.returncode != 0:
+        print(data_stderr)
+        print(data_stdout)
+        raise RuntimeError('Converting certificate expiration to timestamp failed')
+
+    ts = data_stdout.strip().decode('utf8')
+    return ts
 
 
 def main():
