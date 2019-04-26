@@ -478,7 +478,13 @@ class ZynMarkdownHandler {
         } else if (mode === OpenMode.edit) {
             let content = this._content;
             element.classList.add('w3-pale-green');
+            element.style.margin = "0px 5px 0px 5px";
             element.innerText = content;
+            element.addEventListener("paste", function(e) {
+                e.preventDefault();
+                var text = e.clipboardData.getData("text/plain");
+                document.execCommand("insertHTML", false, text);
+            });
         } else {
             _zyn_unhandled();
         }
