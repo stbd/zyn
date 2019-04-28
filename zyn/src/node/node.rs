@@ -959,7 +959,7 @@ impl Node {
                         node_id: child.node_id.clone(),
                         revision: properties.revision,
                         file_type: properties.file_type,
-                        size: properties.revision,
+                        size: properties.size,
                     })
             } else {
                 let dir = fs.node(& child.node_id)
