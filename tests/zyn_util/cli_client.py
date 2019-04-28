@@ -538,8 +538,21 @@ def main():
                 print('Would you like to try add all tracked local files to remote')
                 answer = input('yes/no? ')
                 if answer.strip().lower() == 'yes':
-                    client.synchronize_local_files_with_remote()
-                    print('Done')
+                    added, existed = client.synchronize_local_files_with_remote()
+                    print('Done\n')
+                    if added:
+                        print()
+                        print('Following files were pushed to remote:')
+                        for a in added:
+                            print('\tName: "{}", Node Id: {}'.format(a.path_remote(), a.node_id()))
+
+                    if existed:
+                        print()
+                        print('Note: Following files already existed on remote,')
+                        print('they are assumed to be same as local files')
+                        for e in existed:
+                            print('\tName: "{}", Node Id: {}'.format(e.path_remote(), e.node_id()))
+                        print()
                 else:
                     client.remove_local_files()
                     print('Removing local files from tracked files')

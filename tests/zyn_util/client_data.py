@@ -305,6 +305,9 @@ class LocalFile(LocalFileSystemElement):
     def is_empty_local(self):
         return os.stat(self.path_local()).st_size == 0
 
+    def size_local(self):
+        return self._local_file_metadata._size
+
     def to_json(self):
         return {
             'data-format': 1,
@@ -671,7 +674,10 @@ class LocalFilesystemManager:
     def __init__(self, path_local_root):
         self._path_root = path_local_root
         self._log = logging.getLogger(__name__)
+        self.reset_data()
+        self._log.debug('Initialized, root="{}"'.format(self._path_root))
 
+    def reset_data(self):
         rootdir = LocalDirectory.create_empty(_REMOTE_PATH_ROOT, self)
         rootdir._node_id = 0
         self._elements = {
@@ -680,7 +686,9 @@ class LocalFilesystemManager:
         self._path_to_node_id = {
             _REMOTE_PATH_ROOT: 0,
         }
-        self._log.debug('Initialized, root="{}"'.format(self._path_root))
+
+    def is_empty(self):
+        return len(self._elements) == 1
 
     def local_path(self, element):
         if isinstance(element, str):
@@ -926,34 +934,82 @@ class LocalFilesystemManager:
                 fetched_elements += self.fetch_children_and_add_to_tracked(connection, element)
         return fetched_elements
 
-    def _initial_synchronization_for_directory(self, element, elements, connection, parent=None):
+    def _initial_synchronization_for_directory(self, parent, elements, connection):
+        files_pushed = []
+        files_assumed_to_already_exists = []
+
         self._log.debug('Initial synchronization for directory "{}"'.format(
-            element.path_remote(),
+            parent.path_remote(),
         ))
 
-        rsp = self.query_fs_children(element, connection)
+        rsp = self.query_fs_children(parent, connection)
         remote_elements = {}
         for e in rsp.elements:
             remote_elements[e.name] = e
 
-        children = element._node_id_children
-        element._node_id_children = []
+        children = parent._node_id_children
+        parent._node_id_children = []
+
         for n in children:
             c = elements[n]
             if c.name() not in remote_elements:
-                self._log.debug('Element "{}" not found on remote'.format(c.name()))
-                c.create_on_remote(element, connection)
-                self._add_element_to_filesystem(c, element)
+                self._log.debug('Element "{}" not found on remote, creating'.format(c.name()))
+                c.create_on_remote(parent, connection)
+                self._add_element_to_filesystem(c, parent)
                 if c.is_file():
                     c.push_to_remote(connection)
+                    files_pushed.append(c)
                 elif c.is_directory():
-                    self._initial_synchronization_for_directory(c, elements, connection, element)
+                    p, e = self._initial_synchronization_for_directory(
+                        c,
+                        elements,
+                        connection,
+                    )
+                    files_pushed += p
+                    files_assumed_to_already_exists += e
                 else:
                     zyn_util.util.unhandled()
+            else:
+                remote_element = remote_elements[c.name()]
+                if c.is_file():
+                    if c.size_local() == remote_element.size:
+                        # File with same name and size is found on remote,
+                        # assume the they are the same
+                        # This assumption may cause problems if file was edited
+                        # on remote but the result was file with same size
+                        self._log.debug(
+                            'Element "{}" found on remote with equal size, assuming same'.format(
+                                c.name())
+                        )
+                        c._revision = remote_element.revision
+                        c._node_id = remote_element.node_id
+                        self._add_element_to_filesystem(c, parent)
+                        files_assumed_to_already_exists.append(c)
+                    else:
+                        self._log.debug(
+                            'Element "{}" found on remote, but size differs, skipping'.format(
+                                c.name())
+                        )
+                elif c.is_directory():
+                    p, e = self._initial_synchronization_for_directory(
+                        c,
+                        elements,
+                        connection,
+                    )
+                    files_pushed += p
+                    files_assumed_to_already_exists += e
+                else:
+                    zyn_util.util.unhandled()
+        return files_pushed, files_assumed_to_already_exists
 
     def initial_synchronization(self, connection):
-        self._log.debug('Initial synchronization')
         elements = self._elements
-        self._elements = {0: elements[0]}
-        self._path_to_node_id = {'/': 0}
-        self._initial_synchronization_for_directory(elements[0], elements, connection)
+        self.reset_data()
+        self._log.debug('Initial synchronization, fs has {} local elements'.format(
+            len(elements),
+        ))
+
+        # Clone root to have children of previous state
+        # this is to set starting point for initial sync
+        self._elements[0]._node_id_children = elements[0]._node_id_children
+        return self._initial_synchronization_for_directory(self._elements[0], elements, connection)

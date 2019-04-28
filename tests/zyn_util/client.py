@@ -194,7 +194,7 @@ class ZynFilesystemClient:
         return self._server
 
     def is_empty(self):
-        return self._fs.size() == 0
+        return self._fs.is_empty()
 
     def element(self, node_id=None, path_remote=None):
         if node_id is not None:
@@ -373,7 +373,7 @@ class ZynFilesystemClient:
             zyn_util.util.unhandled()
 
     def synchronize_local_files_with_remote(self):
-        self._fs.initial_synchronization(self.connection())
+        return self._fs.initial_synchronization(self.connection())
 
     def open(self, path_files, sleep_duration):
 

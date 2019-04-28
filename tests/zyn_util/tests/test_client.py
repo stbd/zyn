@@ -715,17 +715,24 @@ class TestClientCommon(TestClient):
 
     def test_client_synchronization_conflicting_file_on_remote(self):
         state_1 = self._start_server_and_client(client_id=0)
-        path_1 = self._create_remote_ra_and_fetch(state_1, '/file-1')
-        path_2 = self._create_remote_ra_and_fetch(state_1, '/file-2')
+        path_1 = self._create_local_file_and_add_ra(state_1, '/file-1', 'data')
+        path_2 = self._create_local_file_and_add_ra(state_1, '/file-2', 'data')
 
         self._start_new_server_with_different_work_dir()
         state_2 = self._init_client(client_id=1)
-        self._create_remote_ra_and_fetch(state_2, path_2)
+        self._create_local_file_and_add_ra(state_2, path_2, 'different data')
 
         self._restart_client(state_1)
         state_1.client.synchronize_local_files_with_remote()
         state_1.validate_file_state(path_1, is_tracked=True, exists_locally=True)
         state_1.validate_file_state(path_2, is_tracked=False, exists_locally=True)
+
+    def test_client_synchronization_when_both_have_same_files(self):
+        state = self._start_server_and_client()
+        path = self._create_local_file_and_add_ra(state, '/file-1', 'data')
+        self._restart_client(state)
+        state.client.synchronize_local_files_with_remote()
+        state.validate_file_state(path, is_tracked=True, exists_locally=True)
 
 
 class TestClientList(TestClient):
