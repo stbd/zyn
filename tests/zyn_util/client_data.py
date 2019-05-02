@@ -948,12 +948,9 @@ class LocalFilesystemManager:
     def _initial_synchronization_for_directory(self, parent, elements, connection):
         files_pushed = []
         files_assumed_to_already_exists = []
+        self.print_progress('Initial synchronization for files in "{}"'.format(parent.path_remote()))
 
-        self._log.debug('Initial synchronization for directory "{}"'.format(
-            parent.path_remote(),
-        ))
-
-        rsp = self.query_fs_children(parent, connection)
+        rsp = self.query_fs_children(parent.path_remote(), connection)
         remote_elements = {}
         for e in rsp.elements:
             remote_elements[e.name] = e
