@@ -375,6 +375,9 @@ class ZynFilesystemClient:
     def synchronize_local_files_with_remote(self):
         return self._fs.initial_synchronization(self.connection())
 
+    def reset_local_filesystem(self):
+        self._fs.reset_data()
+
     def open(self, path_files, sleep_duration):
 
         files = {}

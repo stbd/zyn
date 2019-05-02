@@ -545,6 +545,7 @@ def main():
                         print('Following files were pushed to remote:')
                         for a in added:
                             print('\tName: "{}", Node Id: {}'.format(a.path_remote(), a.node_id()))
+                        print()
 
                     if existed:
                         print()
@@ -554,8 +555,8 @@ def main():
                             print('\tName: "{}", Node Id: {}'.format(e.path_remote(), e.node_id()))
                         print()
                 else:
-                    client.remove_local_files()
-                    print('Removing local files from tracked files')
+                    client.reset_local_filesystem()
+                    print('Local filesystem cleared')
 
     remote_description = '{}:{}'.format(server_info.address, server_info.port)
     cli = ZynCliClient(client, remote_description=remote_description)

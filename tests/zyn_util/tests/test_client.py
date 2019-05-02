@@ -437,6 +437,17 @@ class TestClientCreateAndFetch(TestClient):
         self._fetch(state, '/')
         state.validate_local_file_exists('/dir/nested/file-3')
 
+    def test_client_fetch_new_files_are_fetch_in_dir(self):
+        state = self._start_server_and_client()
+        self._create_remote_directory(state, '/dir')
+        self._create_remote_ra(state, '/dir/file-1')
+        self._fetch(state, '/')
+        state.validate_local_file_exists('/dir/file-1')
+
+        self._create_remote_ra(state, '/dir/file-2')
+        self._fetch(state, '/')
+        state.validate_local_file_exists('/dir/file-2')
+
     def test_client_fetch_aborts_when_local_file(self):
         state = self._start_server_and_client()
         path = self._create_remote_ra(state, 'file-1')
@@ -663,6 +674,11 @@ class TestClientRemove(TestClient):
         path = self._create_remote_ra_and_fetch(state, '/file')
         self._remove(state, path, ['--delete-remote'])
         state.validate_file_state(path, is_tracked=False, exists_locally=True)
+
+    def test_client_remove_local_and_remote(self):
+        state = self._start_server_and_client()
+        path = self._create_remote_ra_and_fetch(state, '/file')
+        self._remove(state, path, ['--delete-remote', '--delete-local'])
 
 
 class TestClientCommon(TestClient):

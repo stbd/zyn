@@ -188,6 +188,8 @@ class LocalDirectory(LocalFileSystemElement):
             os.mkdir(self.path_local())
 
     def sync(self, connection, child_filter=None, discard_local_changes=False):
+
+        self._fs.print_progress('Synchronizing files in "{}"'.format(self._path_remote))
         self._fs._log.debug(
             'Synchronizing directory: child_filter: "{}", path="{}"'.format(
                 child_filter,
@@ -197,6 +199,7 @@ class LocalDirectory(LocalFileSystemElement):
         synchronized_elements = []
         rsp = self._fs.query_fs_children(self, connection)
         rsp_elements = {}
+
         for c in rsp.elements:
             rsp_elements[c.node_id] = None
             if not self._fs.is_tracked(node_id=c.node_id):
@@ -690,6 +693,9 @@ class LocalFilesystemManager:
     def is_empty(self):
         return len(self._elements) == 1
 
+    def print_progress(self, msg):
+        print(msg)
+
     def local_path(self, element):
         if isinstance(element, str):
             return zyn_util.util.join_remote_paths([self._path_root, element])
@@ -904,34 +910,39 @@ class LocalFilesystemManager:
 
     def fetch_children_and_add_to_tracked(self, connection, parent, overwrite=False):
 
+        self.print_progress('Fetching files in "{}"'.format(parent.path_remote()))
+
         fetched_elements = []
         rsp = self.query_fs_children(parent, connection)
         for e in rsp.elements:
-            if e.node_id in self._elements:
-                continue
 
-            path_remote = zyn_util.util.join_remote_paths([parent.path_remote(), e.name])
-            if e.is_file():
-                element = LocalFile.create_empty(path_remote, e.file_type, self)
-            elif e.is_directory():
-                element = LocalDirectory.create_empty(path_remote, self)
+            if e.node_id not in self._elements:
+                path_remote = zyn_util.util.join_remote_paths([parent.path_remote(), e.name])
+                if e.is_file():
+                    element = LocalFile.create_empty(path_remote, e.file_type, self)
+                elif e.is_directory():
+                    element = LocalDirectory.create_empty(path_remote, self)
+                else:
+                    zyn_util.util.unhandled()
+                try:
+                    self._log.debug('Fetching: {}'.format(element.path_remote()))
+                    element = self.fetch_element_and_add_to_tracked(
+                        connection,
+                        parent,
+                        element,
+                        overwrite,
+                    )
+                    fetched_elements.append(element)
+                except ZynClientException:
+                    self._log.error('Failed to fetch element "{}"'.format(element.path_remote()))
+                    print(traceback.format_exc())
+                    continue
             else:
-                zyn_util.util.unhandled()
-            try:
-                element = self.fetch_element_and_add_to_tracked(
-                    connection,
-                    parent,
-                    element,
-                    overwrite,
-                )
-            except ZynClientException:
-                self._log.error('Failed to fetch element "{}"'.format(element.path_remote()))
-                print(traceback.format_exc())
-                continue
+                element = self.local_element_from_node_id(e.node_id)
 
-            fetched_elements.append(element)
             if element.is_directory():
                 fetched_elements += self.fetch_children_and_add_to_tracked(connection, element)
+
         return fetched_elements
 
     def _initial_synchronization_for_directory(self, parent, elements, connection):
@@ -952,13 +963,19 @@ class LocalFilesystemManager:
 
         for n in children:
             c = elements[n]
+            if not c.local_element_exists():
+                self._log.debug('Element "{}" does not exists locally, skipping'.format(c.name()))
+                continue
+
             if c.name() not in remote_elements:
                 self._log.debug('Element "{}" not found on remote, creating'.format(c.name()))
                 c.create_on_remote(parent, connection)
                 self._add_element_to_filesystem(c, parent)
+
                 if c.is_file():
                     c.push_to_remote(connection)
                     files_pushed.append(c)
+
                 elif c.is_directory():
                     p, e = self._initial_synchronization_for_directory(
                         c,
