@@ -21,7 +21,10 @@ class zyn_development_environment(
                groups => ['sudo', 'docker'],
                managehome => true,
                shell => '/bin/bash',
-               require => Group['dev-group'],
+               require => [
+                   Group['dev-group'],
+	           Exec['Install Docker Community Edition (CE)'],
+	       ]
         }
 
         file { 'ssh-folder':
