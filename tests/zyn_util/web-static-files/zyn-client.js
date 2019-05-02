@@ -182,10 +182,11 @@ class ZynClient {
     handle_notification(msg) {
         if (msg.is_notification()) {
             let n = msg.notification();
-            zyn_add_notification(n.source(), n.to_string());
             if (n.is_disconnect()) {
+                zyn_add_notification(n.source(), n.to_string());
                 this.stop_poll_timer();
             } else if (n.is_file_edit()) {
+                zyn_add_notification(n.source(), n.to_string());
                 if (!this.has_current_file()) {
                     zyn_unhandled();
                 }
@@ -200,6 +201,13 @@ class ZynClient {
                     null,
                 );
                 this._notification_callback();
+            } else if (n.is_progress_update()) {
+                if (zyn_is_modal_loading_vissible()) {
+                    let desc = n.content()['description'];
+                    zyn_show_modal_loading(desc);
+                } else {
+                    zyn_add_notification(n.source(), n.to_string());
+                }
             }
             return true;
         }

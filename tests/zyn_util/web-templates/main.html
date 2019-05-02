@@ -132,6 +132,10 @@
              desc.innerText = '';
          }
      }
+     function zyn_is_modal_loading_vissible() {
+         let modal = document.getElementById("zyn-modal-loading");
+         return modal.style.display !== 'none';
+     }
 
      modals.push('zyn-modal-ask');
      function zyn_show_modal_ask(text, button_to_callback, detail_text=null) {

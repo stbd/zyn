@@ -194,6 +194,10 @@ class ZynNotification {
         return this.type() === 'random-access-delete';
     }
 
+    is_progress_update() {
+        return this.type() === 'progress-update';
+    }
+
     is_file_edit() {
         return this.is_file_edit_modified() ||
                this.is_file_edit_insert() ||
@@ -203,7 +207,10 @@ class ZynNotification {
     to_string() {
         if (this.is_disconnect()) {
             return `Server stopped: ${this.content()['reason']}`;
-        } else if (this.is_file_edit) {
+        } else if (this.is_progress_update()) {
+            let c = this.content();
+            return `Update notification from server: ${c['description']}`;
+        } else if (this.is_file_edit()) {
             let c = this.content();
             return `File ${c['node-id']} updated to revision ${c['revision']}, type: ${this.type()}`;
         } else if (this.type() === 'reconnect') {
@@ -347,9 +354,7 @@ class ZynPdfHandler {
     open(mode, callback) {
         this._base.open(
             mode,
-            () => {
-                this.load_full_file(callback);
-            },
+            callback,
         );
     }
 
@@ -437,9 +442,7 @@ class ZynMarkdownHandler {
     open(mode, callback) {
         this._base.open(
             mode,
-            () => {
-                this.load_full_file(callback);
-            },
+            callback,
         );
     }
 

@@ -355,7 +355,8 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             if len(modifications) == 0:
                 raise RuntimeError('No modifications sent')
 
-            for mod in modifications:
+            number_of_mofications = len(modifications)
+            for mod_i, mod in enumerate(modifications):
 
                 type_of = mod['type']
                 offset = mod['offset']
@@ -380,6 +381,10 @@ class WebSocket(tornado.websocket.WebSocketHandler):
                 if rsp.is_error():
                     self._send_error_response(msg_type, None, rsp.error_code())
                     return
+
+                self._send_progress_notification(
+                    'Applying modification: {}/{}'.format(mod_i + 1, number_of_mofications)
+                )
 
                 rsp = rsp.as_write_rsp()
                 revision = rsp.revision
@@ -493,6 +498,14 @@ class WebSocket(tornado.websocket.WebSocketHandler):
         else:
             self._log.error("Closing socket: unexpected message: {}".format(msg_type))
             self._close_socket()
+
+    def _send_progress_notification(self, progress_message):
+        self._send_notification(
+            NOTIFICATION_SOURCE_WEB_SERVER,
+            'progress-update',
+            {
+                'description': progress_message
+            })
 
     def _handle_notification(self, notification):
         if isinstance(notification, zyn_util.connection.NotificationDisconnected):
