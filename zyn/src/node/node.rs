@@ -79,6 +79,20 @@ pub enum FilesystemElement {
     },
 }
 
+pub enum FilesystemElementProperties {
+    File {
+        name: String,
+        node_id: NodeId,
+        revision: FileRevision,
+        file_type: FileType,
+        size: u64,
+    },
+    Directory {
+        name: String,
+        node_id: NodeId,
+    },
+}
+
 pub enum FileSystemListElement {
     File {
         name: String,
@@ -123,6 +137,7 @@ pub enum ClientProtocol {
     QuerySystemResponse { result: Result<SystemInformation, ErrorResponse> },
     QueryFsChildrenResponse { result: Result<Vec<FileSystemListElement>, ErrorResponse> },
     QueryFsElementResponse { result: Result<FilesystemElement, ErrorResponse> },
+    QueryFsElementPropertiesResponse { result: Result<FilesystemElementProperties, ErrorResponse> },
     DeleteResponse { result: Result<(), ErrorResponse> },
     AddUserGroupResponse { result: Result<(), ErrorResponse> },
     ModifyUserGroupResponse { result: Result<(), ErrorResponse> },
@@ -137,6 +152,7 @@ pub enum NodeProtocol {
     QuerySystemRequest { user: Id, },
     QueryFsChildrenRequest { user: Id, fd: FileDescriptor, },
     QueryFsElementRequest { user: Id, fd: FileDescriptor, },
+    QueryFsElementPropertiesRequest { user: Id, fd: FileDescriptor, fd_parent: FileDescriptor, },
     DeleteRequest { user: Id, fd: FileDescriptor },
     AddUserRequest { user: Id, name: String },
     ModifyUser { user: Id, name: String, password: Option<String>, expiration: Option<Option<Timestamp>> },
@@ -538,6 +554,30 @@ impl Node {
                                 send_failed = client.transmit.send(
                                     ClientProtocol::QueryFsChildrenResponse {
                                         result: result
+                                    },
+                                ).is_err();
+                            },
+
+                            NodeProtocol::QueryFsElementPropertiesRequest {
+                                user,
+                                fd,
+                                fd_parent,
+                            } => {
+
+                                trace!("Query fs element properties, user={}", user);
+
+                                let result = Node::handle_query_fs_element_properties_request(
+                                    & mut node_id_buffer,
+                                    & mut self.filesystem,
+                                    & mut self.auth,
+                                    user,
+                                    fd,
+                                    fd_parent,
+                                );
+
+                                send_failed = client.transmit.send(
+                                    ClientProtocol::QueryFsElementPropertiesResponse {
+                                        result: result,
                                     },
                                 ).is_err();
                             },
@@ -984,6 +1024,69 @@ impl Node {
             }
         }
         Ok(result)
+    }
+
+    fn handle_query_fs_element_properties_request(
+        node_id_buffer: & mut [NodeId],
+        fs: & mut Filesystem,
+        auth: & mut UserAuthority,
+        user: Id,
+        file_descriptor: FileDescriptor,
+        parent_file_descriptor: FileDescriptor,
+    ) -> Result<FilesystemElementProperties, ErrorResponse> {
+
+        let node_id = Node::resolve_file_descriptor(
+            node_id_buffer,
+            fs,
+            file_descriptor
+        ) ? ;
+
+        let parent_node_id = Node::resolve_file_descriptor(
+            node_id_buffer,
+            fs,
+            parent_file_descriptor
+        ) ? ;
+
+        let (name, auth_read) = {
+            let parent_node = fs.node(& parent_node_id)
+                .map_err(fs_error_to_rsp)
+                ? ;
+
+            let parent = parent_node.to_directory()
+                .map_err(| _ | node_error_to_rsp(NodeError::ParentIsNotDirectory))
+                ? ;
+
+            let node_index = parent.child_with_node_id(& node_id)
+                .map_err(| () | node_error_to_rsp(NodeError::UnknownFile))
+                ? ;
+
+            let name = & parent.children().nth(node_index).unwrap().name;
+
+            (name.clone(), parent.read().clone())
+        };
+
+        auth.is_authorized(& auth_read, & user, utc_timestamp())
+            .map_err(| () | node_error_to_rsp(NodeError::UnauthorizedOperation))
+            ? ;
+
+        let is_file = fs.node(& node_id).unwrap().is_file();
+        if is_file {
+
+            let file = fs.mut_file(& node_id).unwrap();
+            let properties = file.cached_properties().unwrap();
+            Ok(FilesystemElementProperties::File {
+                name: name,
+                node_id: node_id,
+                file_type: properties.file_type,
+                revision: properties.revision,
+                size: properties.size,
+            })
+        } else {
+            Ok(FilesystemElementProperties::Directory {
+                name: name,
+                node_id: node_id,
+            })
+        }
     }
 
     fn handle_query_fs_element_request(

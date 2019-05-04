@@ -11,7 +11,8 @@ use node::common::{ NodeId, Buffer, OpenMode, FileType, Timestamp };
 use node::connection::{ Connection };
 use node::file_handle::{ FileAccess, FileError, Notification, FileLock, FileProperties };
 use node::filesystem::{ FilesystemError };
-use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, ErrorResponse, NodeError, ShutdownReason, FileSystemListElement, Authority };
+use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, ErrorResponse, NodeError, ShutdownReason, FileSystemListElement, Authority,
+                  FilesystemElementProperties, };
 use node::user_authority::{ Id };
 
 /*
@@ -419,6 +420,7 @@ impl Client {
             ("DELETE:", handle_delete_fs_element_req, 1),
             ("Q-COUNTERS:", handle_query_counters_req, 1),
             ("Q-FS-C:", handle_query_fs_children, 1),
+            ("Q-FS-P:", handle_query_fs_element_properties, 1),
             ("Q-FS-E:", handle_query_fs_element, 1),
             ("Q-SYSTEM:", handle_query_system, 1),
             ("ADD-USER-GROUP:", handle_add_user_group, 1),
@@ -1631,6 +1633,89 @@ fn handle_query_fs_children(client: & mut Client) -> Result<(), ()>
                 },
 
                 ClientProtocol::QueryFsChildrenResponse {
+                    result: Err(error),
+                } => {
+                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    (None, Some(Err(())))
+                },
+
+                other => {
+                    (Some(other), None)
+                }
+            }
+        })
+        ? ;
+
+    Ok(())
+}
+
+
+/*
+Query fileystem element properties
+<- [Version]Q-FILESYSTEM:[Transaction Id][FileDescriptor][];[End]
+-> [Version]RSP:[Transaction Id][Uint: 0][Uint: Node id][];[End]
+-> [Version]RSP:[Transaction Id][Uint: type][Element-Properties];[End]
+ * Uint type: 0: file, 1: directory
+ * Element-Properties for file: String: name, node_id, Uint: type-of-file, Uint: revision, Uint: size
+ * Element-Properties for directory: String: name, node_id)
+
+*/
+fn handle_query_fs_element_properties(client: & mut Client) -> Result<(), ()>
+{
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let fd = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
+    let fd_parent = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
+    try_parse!(client.buffer.expect(";"), client, 0);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Query fs properties: user={}, fd={}", client, fd);
+
+    let user = client.user.as_ref().unwrap().clone();
+    client.send_to_node(transaction_id, NodeProtocol::QueryFsElementPropertiesRequest {
+        user: user,
+        fd: fd,
+        fd_parent: fd_parent,
+    }) ? ;
+
+    node_receive::<()>(
+        client,
+        & | msg, client | {
+            match msg {
+                ClientProtocol::QueryFsElementPropertiesResponse {
+                    result: Ok(desc),
+                } => {
+
+                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
+                    match desc {
+                        FilesystemElementProperties::File { name, node_id, revision, file_type, size } => {
+                            try_in_receive_loop!(client, buffer.write_unsigned(FILE as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_unsigned(revision as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_unsigned(size), Status::FailedToWriteToSendBuffer);
+
+                            match file_type {
+                                FileType::RandomAccess => {
+                                    try_in_receive_loop!(client, buffer.write_unsigned(FILE_TYPE_RANDOM_ACCESS as u64), Status::FailedToWriteToSendBuffer);
+                                },
+                                FileType::Blob => {
+                                    try_in_receive_loop!(client, buffer.write_unsigned(FILE_TYPE_BLOB as u64), Status::FailedToWriteToSendBuffer);
+                                },
+                            };
+                        },
+                        FilesystemElementProperties::Directory { name, node_id } => {
+                            try_in_receive_loop!(client, buffer.write_unsigned(DIRECTORY as u64), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
+                            try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                        },
+                    }
+
+                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    (None, Some(Ok(())))
+                },
+
+                ClientProtocol::QueryFsElementPropertiesResponse {
                     result: Err(error),
                 } => {
                     try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
