@@ -743,12 +743,16 @@ class TestClientCommon(TestClient):
         state_1.validate_file_state(path_1, is_tracked=True, exists_locally=True)
         state_1.validate_file_state(path_2, is_tracked=False, exists_locally=True)
 
-    def test_client_synchronization_when_both_have_same_files(self):
+    def test_client_synchronization_directory(self):
         state = self._start_server_and_client()
-        path = self._create_local_file_and_add_ra(state, '/file-1', 'data')
+        path_dir = self._create_remote_directory_and_fetch(state, '/dir')
+        path_file = self._create_remote_ra_and_fetch(state, '/dir/file')
+
+        self._start_new_server_with_different_work_dir()
         self._restart_client(state)
         state.client.synchronize_local_files_with_remote()
-        state.validate_file_state(path, is_tracked=True, exists_locally=True)
+        state.validate_dir_state(path_dir, is_tracked=True, exists_locally=True)
+        state.validate_file_state(path_file, is_tracked=True, exists_locally=True)
 
 
 class TestClientList(TestClient):
