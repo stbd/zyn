@@ -390,6 +390,26 @@ class ZynConnection:
         rsp = self.read_response()
         return rsp
 
+    def query_fs_element_properties(
+            self,
+            node_id=None,
+            path=None,
+            parent_node_id=None,
+            parent_path=None,
+            transaction_id=None):
+        req = \
+            self.field_version() \
+            + 'Q-FS-P:' \
+            + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
+            + self.file_descriptor(node_id, path) \
+            + self.file_descriptor(parent_node_id, parent_path) \
+            + ';' \
+            + self.field_end_of_message() \
+
+        self.write(req)
+        rsp = self.read_response()
+        return rsp
+
     def query_fs_element(self, node_id=None, path=None, transaction_id=None):
         req = \
             self.field_version() \
@@ -1109,6 +1129,43 @@ class QueryFilesystemChildrenResponse:
         return len(self.elements)
 
 
+class QueryFilesystemElementPropertiesResponse:
+    def is_file(self):
+        return self.type_of_element == FILESYSTEM_ELEMENT_FILE
+
+    def is_directory(self):
+        return self.type_of_element == FILESYSTEM_ELEMENT_DIRECTORY
+
+    def is_random_access_file(self):
+        if self.type_of_element != FILESYSTEM_ELEMENT_FILE:
+            raise RuntimeError('Element is not file')
+        return self.type_of_file == FILE_TYPE_RANDOM_ACCESS
+
+    def is_blob_file(self):
+        if self.type_of_element != FILESYSTEM_ELEMENT_FILE:
+            raise RuntimeError('Element is not file')
+        return self.type_of_file == FILE_TYPE_BLOB
+
+    def __init__(self, response):
+        self.type_of_element = response.field(0).as_uint()
+        _validate_file_system_element_type(self.type_of_element)
+
+        if self.type_of_element == FILESYSTEM_ELEMENT_FILE:
+            if response.number_of_fields() != 6:
+                _malfomed_message()
+            self.name = response.field(1).as_string()
+            self.node_id = response.field(2).as_node_id()
+            self.revision = response.field(3).as_uint()
+            self.size = response.field(4).as_uint()
+            self.type_of_file = response.field(5).as_uint()
+
+        elif self.type_of_element == FILESYSTEM_ELEMENT_DIRECTORY:
+            if response.number_of_fields() != 3:
+                _malfomed_message()
+            self.name = response.field(1).as_string()
+            self.node_id = response.field(2).as_node_id()
+
+
 class QueryFilesystemElementResponse:
     def is_file(self):
         return self.type_of_element == FILESYSTEM_ELEMENT_FILE
@@ -1240,6 +1297,9 @@ class Response(Message):
 
     def as_query_counters_rsp(self):
         return QueryCountersResponse(self)
+
+    def as_query_fs_element_properties_rsp(self):
+        return QueryFilesystemElementPropertiesResponse(self)
 
     def as_query_fs_element_rsp(self):
         return QueryFilesystemElementResponse(self)

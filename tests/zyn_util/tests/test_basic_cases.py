@@ -76,6 +76,22 @@ class TestBasicOperatinsCommon(zyn_util.tests.common.TestCommon):
         )
         return rsp.as_query_fs_element_rsp()
 
+    def _query_fs_element_properties(
+            self,
+            connection,
+            path=None,
+            node_id=None,
+            parent_node_id=None,
+            parent_path=None
+    ):
+        rsp = connection.query_fs_element_properties(
+            node_id=node_id,
+            path=path,
+            parent_node_id=parent_node_id,
+            parent_path=parent_path,
+        )
+        return rsp.as_query_fs_element_properties_rsp()
+
     def _delete(self, connection, node_id=None, path=None):
         rsp = connection.delete(
             node_id=node_id,
@@ -338,6 +354,46 @@ class TestBasicFilesystem(TestBasicOperatinsCommon):
             rsp_create.node_id,
             zyn_util.connection.FILESYSTEM_ELEMENT_DIRECTORY,
         )
+
+    def test_query_fs_element_properties_file_ra(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        rsp_create = self._create_file_ra(c, 'file', parent_path='/')
+        rsp_query = self._query_fs_element_properties(
+            c,
+            node_id=rsp_create.node_id,
+            parent_path='/'
+        )
+        self.assertTrue(rsp_query.is_file())
+        self.assertTrue(rsp_query.is_random_access_file())
+        self.assertEqual(rsp_query.node_id, rsp_create.node_id)
+        self.assertEqual(rsp_query.revision, rsp_create.revision)
+        self.assertEqual(rsp_query.name, 'file')
+
+    def test_query_fs_element_properties_file_ra_after_edit(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        rsp_create = self._create_file_ra(c, 'file', parent_path='/')
+        node_id = rsp_create.node_id
+        data = 'data'.encode('utf-8')
+        rsp_query_1 = self._query_fs_element_properties(c, node_id=node_id, parent_path='/')
+        self._open_file_write(c, node_id=node_id)
+        rsp_edit = c.ra_write(node_id, rsp_create.revision, 0, data).as_write_rsp()
+        rsp_query_2 = self._query_fs_element_properties(c, node_id=node_id, parent_path='/')
+
+        self.assertEqual(rsp_query_1.revision, rsp_create.revision)
+        self.assertEqual(rsp_query_2.revision, rsp_edit.revision)
+        self.assertEqual(rsp_query_1.size, 0)
+        self.assertEqual(rsp_query_2.size, len(data))
+
+    def test_query_fs_element_properties_directory(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        rsp_create = self._create_directory(c, 'dir', parent_path='/')
+        rsp_query = self._query_fs_element_properties(
+            c,
+            node_id=rsp_create.node_id,
+            parent_path='/'
+        )
+        self.assertTrue(rsp_query.is_directory())
+        self.assertEqual(rsp_query.name, 'dir')
 
     def test_delete_file_with_node_id(self):
         c = self._start_and_connect_to_node_and_handle_auth()
