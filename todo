@@ -7,18 +7,12 @@
  * Possibility to store protocol messages to file, to make debugging easier?
   * When debugging protocol, passwords are vissible in logs
  * Cleanup and remove references to GPGME
- * Replace all encrypt/decrypt operations with encrypt_to_file and decrypt_from_file
  * Think how commands could be batched together
- * create_file should return revision
 
 ## CLI Client:
- * Handle large files better
-  * When editing
 
 ## Web Client:
- * Sorting of directory content is different in different browsers
  * Math extension for showdown, lots of problems with showdown-katex, probably have to think about something else
- * Support for raw links, raw.server.path-file
  * Do not show large binary files in raw format for unsupported files
 
 ## Check

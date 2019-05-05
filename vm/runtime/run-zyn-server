@@ -61,7 +61,7 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
     )
     parser.add_argument(
         '--bind-to',
-        default="127.0.0.1:8080",
+        default="127.0.0.1:8000",
         type=str,
         help='IP and/or port pair to which bind Docker container'
     )

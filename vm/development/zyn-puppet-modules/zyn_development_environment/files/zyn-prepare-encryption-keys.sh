@@ -18,7 +18,7 @@ Subkey-Type: RSA
 Subkey-Length: 2048
 Name-Real: tester
 Name-Comment: Key for testing
-Name-Email: $username@invalid.com
+Name-Email: $email
 Expire-Date: 0
 Passphrase: $password
 %commit
@@ -33,7 +33,7 @@ EOF
 
 }
 
-function install_gpg_fingerprint() {
+function install_gpg_development_environment() {
 
     fingerprint_output="$(gpg --fingerprint --fingerprint "$username")"
     number_of_instances=$(echo "$fingerprint_output" | grep -wc "$username")
@@ -46,6 +46,9 @@ function install_gpg_fingerprint() {
     fingerprint=$(echo "$fingerprint_output" | grep -A2 sub | grep fingerprint | tr -s ' ' | cut -d ' ' -f 5- | sed 's/ //g')
     echo "Installing gpg fingerprint to $path_gpg_fingerprint"
     echo "$fingerprint" > "$path_gpg_fingerprint"
+
+    echo "Installing secret key to $path_gpg_private_key"
+    gpg --export-secret-key "$email" > "$path_gpg_private_key"
 }
 
 
@@ -120,9 +123,11 @@ fi
 path_user_home=$1
 username=tester
 password=pass
+email=$username@invalid.com
 hostname=zyn
 path_gpg_agent_env_settings=$path_user_home/.zyn-gpg-agent-env-settings
 path_gpg_fingerprint=$path_user_home/.zyn-test-user-gpg-fingerprint
+path_gpg_private_key=$path_user_home/.zyn-test-user-gpg-secret-key
 path_gpg_agent_start_cmd=$path_user_home/.zyn-gpg-agent-start-cmd
 path_certificates_folder=$path_user_home/.zyn-certificates
 path_gpg_conf=$path_user_home/.gnupg/gpg.conf
@@ -130,7 +135,7 @@ gpg_agent_cache_expires=$((60 * 60 * 24 * 365 * 10))
 tag="ZYN-GPG-SETTINGS"
 
 generate_gpg_keys
-install_gpg_fingerprint
+install_gpg_development_environment
 install_gpg_agent_start_command
 install_gpg_agent_start_trigger
 update_gpg_conf
