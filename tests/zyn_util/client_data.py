@@ -1007,6 +1007,9 @@ class LocalFilesystemManager:
                                 c.name())
                         )
                 elif c.is_directory():
+                    c._node_id = remote_element.node_id
+                    self._add_element_to_filesystem(c, parent)
+
                     p, e = self._initial_synchronization_for_directory(
                         c,
                         elements,

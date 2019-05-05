@@ -700,7 +700,7 @@ class TestClientCommon(TestClient):
         state.client.server_info().initialize()
         self.assertTrue(state.client.server_info().is_connected_to_same_server())
 
-    def test_client_synchronization(self):
+    def test_client_inital_synchronization(self):
         state = self._start_server_and_client()
         path_1 = self._create_remote_ra_and_fetch(state, '/file')
         path_2 = self._create_remote_directory_and_fetch(state, '/dir')
@@ -729,7 +729,7 @@ class TestClientCommon(TestClient):
         output = self._list(state, '-p /dir')
         self._validate_list_remote_element(output, 'file', element_type='file')
 
-    def test_client_synchronization_conflicting_file_on_remote(self):
+    def test_client_initial_synchronization_conflicting_file_on_remote(self):
         state_1 = self._start_server_and_client(client_id=0)
         path_1 = self._create_local_file_and_add_ra(state_1, '/file-1', 'data')
         path_2 = self._create_local_file_and_add_ra(state_1, '/file-2', 'data')
@@ -743,12 +743,23 @@ class TestClientCommon(TestClient):
         state_1.validate_file_state(path_1, is_tracked=True, exists_locally=True)
         state_1.validate_file_state(path_2, is_tracked=False, exists_locally=True)
 
-    def test_client_synchronization_directory(self):
+    def test_client_initial_synchronization_directory(self):
         state = self._start_server_and_client()
         path_dir = self._create_remote_directory_and_fetch(state, '/dir')
         path_file = self._create_remote_ra_and_fetch(state, '/dir/file')
 
         self._start_new_server_with_different_work_dir()
+        self._restart_client(state)
+        state.client.synchronize_local_files_with_remote()
+        state.validate_dir_state(path_dir, is_tracked=True, exists_locally=True)
+        state.validate_file_state(path_file, is_tracked=True, exists_locally=True)
+
+    def test_client_initial_synchronization_elements_already_exist(self):
+        state = self._start_server_and_client()
+        path_dir = self._create_remote_directory_and_fetch(state, '/dir')
+        path_file = self._create_remote_ra_and_fetch(state, '/dir/file')
+
+        self._restart_server()
         self._restart_client(state)
         state.client.synchronize_local_files_with_remote()
         state.validate_dir_state(path_dir, is_tracked=True, exists_locally=True)
