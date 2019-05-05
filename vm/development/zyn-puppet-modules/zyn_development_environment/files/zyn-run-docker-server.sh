@@ -9,4 +9,6 @@ set -euo pipefail
            "$HOME"/.zyn-certificates/key.pem \
            --init \
            --log-level trace \
-           --bind-to "127.0.0.1:4433"
+           --bind-to "127.0.0.1:4433" \
+           -- \
+           --detach
