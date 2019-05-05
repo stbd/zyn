@@ -56,6 +56,7 @@ declare -a scripts=(
     "zyn-run-server.sh"
     "zyn-static-analysis.sh"
     "zyn-install-web-tools.sh"
+    "zyn-run-docker-server.sh"
     "common.sh"
 )
 
