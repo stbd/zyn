@@ -435,6 +435,21 @@ class ZynCliClient(cmd.Cmd):
         path_files = [self._to_absolute_remote_path(f) for f in args['path-file']]
         self._client.open(path_files, args['poll_sleep'])
 
+    def _parser_show_counters(self):
+        parser = argparse.ArgumentParser(prog='show_counters')
+        return parser
+
+    def help_show_counters(self):
+        print(self._parser_show_counters().format_help())
+
+    def do_show_counters(self, args):
+        parser = self._parser_show_counters()
+        args = vars(parser.parse_args(self._parse_args(args)))
+        rsp = self._client.connection().query_counters().as_query_counters_rsp()
+        if rsp.number_of_counters() != 1:
+            print('Warning: not all counters are show')
+        print('{}: {}'.format('active-connections', rsp.active_connections))
+
 
 def main():
     parser = argparse.ArgumentParser()
