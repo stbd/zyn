@@ -4,7 +4,7 @@ use std::fs::{ OpenOptions, remove_file };
 use std::option::{ Option };
 use std::path::{ PathBuf, Path, Display as PathDisplay };
 use std::ptr::{ copy };
-use std::sync::mpsc::{ channel, Sender, Receiver };
+use std::sync::mpsc::{ channel, Sender, Receiver, TryRecvError };
 use std::vec::{ Vec, Drain };
 
 use node::common::{ utc_timestamp, FileRevision, Buffer, NodeId, FileType, Timestamp };
@@ -323,188 +323,196 @@ impl FileService {
                 ;
 
             for (i, user) in self.users.iter_mut().enumerate() {
-                if let Ok(message) = user.receive_file.try_recv() {
-
-                    let mut send_ok = true;
-                    match message {
-
-                        FileRequestProtocol::RequestAccess { user } => {
-                            add_access = Some((i, user));
-                        },
-
-                        FileRequestProtocol::RequestMetadata => {
-                            let lock = self.file.get_lock();
-                            send_ok = send_response(& user, FileResponseProtocol::Metadata {
-                                metadata: self.file.metadata.clone(),
-                                open_file_properties: OpenFileProperties {
-                                    active_users: current_active_users_ids.clone(),
-                                    lock: lock,
-                                },
-                            }).is_ok();
-                        },
-
-                        FileRequestProtocol::Close => {
-                            if user.is_root_handle() {
-                                notifications.push(
-                                    (true, None, Notification::FileClosing { })
-                                );
-                                exit = true;
-                                break;
-                            } else {
-                                remove_access = Some(i);
-                            }
-                        },
-
-                        FileRequestProtocol::Write { revision, offset, buffer } => {
-                            let size = buffer.len() as u64;
-                            match self.file.write(& user.user, revision, offset, buffer) {
-                                Ok(revision) => {
-                                    notifications.push(
-                                        (true,
-                                         Some(i),
-                                         Notification::PartOfFileModified {
-                                             revision: revision,
-                                             offset: offset,
-                                             size: size
-                                         })
-                                    );
-                                    send_ok = send_response(& user, FileResponseProtocol::Write {
-                                        result: Ok(revision),
-                                    }).is_ok();
-                                },
-                                Err(status) => {
-                                    send_ok = send_response(& user, FileResponseProtocol::Write {
-                                        result: Err(status),
-                                    }).is_ok();
-                                }
-                            };
-                        },
-
-                        FileRequestProtocol::Insert { revision, offset, buffer } => {
-                            let size = buffer.len() as u64;
-                            match self.file.insert(& user.user, revision, offset, buffer) {
-                                Ok(revision) => {
-                                    notifications.push(
-                                        (true,
-                                         Some(i),
-                                         Notification::PartOfFileInserted {
-                                             revision: revision,
-                                             offset: offset,
-                                             size: size
-                                         })
-                                    );
-                                    send_ok = send_response(& user, FileResponseProtocol::Insert {
-                                        result: Ok(revision),
-                                    }).is_ok();
-                                },
-                                Err(status) => {
-                                    send_ok = send_response(& user, FileResponseProtocol::Insert {
-                                        result: Err(status),
-                                    }).is_ok();
-                                }
-                            };
-                        },
-
-                        FileRequestProtocol::Delete { revision, offset, size } => {
-                            match self.file.delete(& user.user, revision, offset, size) {
-                                Ok(revision) => {
-                                    notifications.push(
-                                        (true,
-                                         Some(i),
-                                         Notification::PartOfFileDeleted {
-                                             revision: revision,
-                                             offset: offset,
-                                             size: size
-                                         })
-                                    );
-                                    send_ok = send_response(& user, FileResponseProtocol::Delete {
-                                        result: Ok(revision),
-                                    }).is_ok();
-                                },
-                                Err(status) => {
-                                    send_ok = send_response(& user, FileResponseProtocol::Delete {
-                                        result: Err(status),
-                                    }).is_ok();
-                                }
-                            };
-                        },
-
-                        FileRequestProtocol::DeleteData { revision } => {
-                            match self.file.delete_data(& user.user, revision) {
-                                Ok(revision) => {
-                                    /*
-                                    notifications.push(
-                                        (true,
-                                         Some(i),
-                                         Notification::PartOfFileDeleted {
-                                             revision: revision,
-                                             offset: offset,
-                                             size: size
-                                         })
-                                    );
-                                     */
-                                    send_ok = send_response(& user, FileResponseProtocol::DeleteData {
-                                        result: Ok(revision),
-                                    }).is_ok();
-                                },
-                                Err(status) => {
-                                    send_ok = send_response(& user, FileResponseProtocol::DeleteData {
-                                        result: Err(status),
-                                    }).is_ok();
-                                }
-                            };
-                        },
-
-                        FileRequestProtocol::Read { offset, size } => {
-                            match self.file.read(offset, size) {
-                                Ok((buffer, revision)) => {
-                                    send_ok = send_response(& user, FileResponseProtocol::Read {
-                                        result: Ok((buffer, revision)),
-                                    }).is_ok();
-                                },
-                                Err(status) => {
-                                    send_ok = send_response(& user, FileResponseProtocol::Read {
-                                        result: Err(status),
-                                    }).is_ok();
-                                }
-                            };
-                        },
-
-                        FileRequestProtocol::LockFile { revision, description } => {
-                            match self.file.lock(revision, description) {
-                                Ok(()) => {
-                                    send_ok = send_response(& user, FileResponseProtocol::LockFile {
-                                        result: Ok(()),
-                                    }).is_ok();
-                                },
-                                Err(status) => {
-                                    send_ok = send_response(& user, FileResponseProtocol::LockFile {
-                                        result: Err(status),
-                                    }).is_ok();
-                                }
-                            };
-                        },
-
-                        FileRequestProtocol::UnlockFile { description } => {
-                            match self.file.unlock(description) {
-                                Ok(()) => {
-                                    send_ok = send_response(& user, FileResponseProtocol::UnlockFile {
-                                        result: Ok(()),
-                                    }).is_ok();
-                                },
-                                Err(status) => {
-                                    send_ok = send_response(& user, FileResponseProtocol::UnlockFile {
-                                        result: Err(status),
-                                    }).is_ok();
-                                }
-                            };
-                        },
-                    }
-
-                    if ! send_ok {
-                        debug!("Removing client due send error, index={}", i);
+                match user.receive_file.try_recv() {
+                    Err(TryRecvError::Empty) => {
+                    },
+                    Err(TryRecvError::Disconnected) => {
+                        warn!("Error receiving message to file, removing user");
                         remove_access = Some(i);
-                        break;
+                    },
+                    Ok(message) => {
+
+                        let mut send_ok = true;
+                        match message {
+
+                            FileRequestProtocol::RequestAccess { user } => {
+                                add_access = Some((i, user));
+                            },
+
+                            FileRequestProtocol::RequestMetadata => {
+                                let lock = self.file.get_lock();
+                                send_ok = send_response(& user, FileResponseProtocol::Metadata {
+                                    metadata: self.file.metadata.clone(),
+                                    open_file_properties: OpenFileProperties {
+                                        active_users: current_active_users_ids.clone(),
+                                        lock: lock,
+                                    },
+                                }).is_ok();
+                            },
+
+                            FileRequestProtocol::Close => {
+                                if user.is_root_handle() {
+                                    notifications.push(
+                                        (true, None, Notification::FileClosing { })
+                                    );
+                                    exit = true;
+                                    break;
+                                } else {
+                                    remove_access = Some(i);
+                                }
+                            },
+
+                            FileRequestProtocol::Write { revision, offset, buffer } => {
+                                let size = buffer.len() as u64;
+                                match self.file.write(& user.user, revision, offset, buffer) {
+                                    Ok(revision) => {
+                                        notifications.push(
+                                            (true,
+                                             Some(i),
+                                             Notification::PartOfFileModified {
+                                                 revision: revision,
+                                                 offset: offset,
+                                                 size: size
+                                             })
+                                        );
+                                        send_ok = send_response(& user, FileResponseProtocol::Write {
+                                            result: Ok(revision),
+                                        }).is_ok();
+                                    },
+                                    Err(status) => {
+                                        send_ok = send_response(& user, FileResponseProtocol::Write {
+                                            result: Err(status),
+                                        }).is_ok();
+                                    }
+                                };
+                            },
+
+                            FileRequestProtocol::Insert { revision, offset, buffer } => {
+                                let size = buffer.len() as u64;
+                                match self.file.insert(& user.user, revision, offset, buffer) {
+                                    Ok(revision) => {
+                                        notifications.push(
+                                            (true,
+                                             Some(i),
+                                             Notification::PartOfFileInserted {
+                                                 revision: revision,
+                                                 offset: offset,
+                                                 size: size
+                                             })
+                                        );
+                                        send_ok = send_response(& user, FileResponseProtocol::Insert {
+                                            result: Ok(revision),
+                                        }).is_ok();
+                                    },
+                                    Err(status) => {
+                                        send_ok = send_response(& user, FileResponseProtocol::Insert {
+                                            result: Err(status),
+                                        }).is_ok();
+                                    }
+                                };
+                            },
+
+                            FileRequestProtocol::Delete { revision, offset, size } => {
+                                match self.file.delete(& user.user, revision, offset, size) {
+                                    Ok(revision) => {
+                                        notifications.push(
+                                            (true,
+                                             Some(i),
+                                             Notification::PartOfFileDeleted {
+                                                 revision: revision,
+                                                 offset: offset,
+                                                 size: size
+                                             })
+                                        );
+                                        send_ok = send_response(& user, FileResponseProtocol::Delete {
+                                            result: Ok(revision),
+                                        }).is_ok();
+                                    },
+                                    Err(status) => {
+                                        send_ok = send_response(& user, FileResponseProtocol::Delete {
+                                            result: Err(status),
+                                        }).is_ok();
+                                    }
+                                };
+                            },
+
+                            FileRequestProtocol::DeleteData { revision } => {
+                                match self.file.delete_data(& user.user, revision) {
+                                    Ok(revision) => {
+                                        /*
+                                        notifications.push(
+                                        (true,
+                                        Some(i),
+                                        Notification::PartOfFileDeleted {
+                                        revision: revision,
+                                        offset: offset,
+                                        size: size
+                                    })
+                                    );
+                                         */
+                                        send_ok = send_response(& user, FileResponseProtocol::DeleteData {
+                                            result: Ok(revision),
+                                        }).is_ok();
+                                    },
+                                    Err(status) => {
+                                        send_ok = send_response(& user, FileResponseProtocol::DeleteData {
+                                            result: Err(status),
+                                        }).is_ok();
+                                    }
+                                };
+                            },
+
+                            FileRequestProtocol::Read { offset, size } => {
+                                match self.file.read(offset, size) {
+                                    Ok((buffer, revision)) => {
+                                        send_ok = send_response(& user, FileResponseProtocol::Read {
+                                            result: Ok((buffer, revision)),
+                                        }).is_ok();
+                                    },
+                                    Err(status) => {
+                                        send_ok = send_response(& user, FileResponseProtocol::Read {
+                                            result: Err(status),
+                                        }).is_ok();
+                                    }
+                                };
+                            },
+
+                            FileRequestProtocol::LockFile { revision, description } => {
+                                match self.file.lock(revision, description) {
+                                    Ok(()) => {
+                                        send_ok = send_response(& user, FileResponseProtocol::LockFile {
+                                            result: Ok(()),
+                                        }).is_ok();
+                                    },
+                                    Err(status) => {
+                                        send_ok = send_response(& user, FileResponseProtocol::LockFile {
+                                            result: Err(status),
+                                        }).is_ok();
+                                    }
+                                };
+                            },
+
+                            FileRequestProtocol::UnlockFile { description } => {
+                                match self.file.unlock(description) {
+                                    Ok(()) => {
+                                        send_ok = send_response(& user, FileResponseProtocol::UnlockFile {
+                                            result: Ok(()),
+                                        }).is_ok();
+                                    },
+                                    Err(status) => {
+                                        send_ok = send_response(& user, FileResponseProtocol::UnlockFile {
+                                            result: Err(status),
+                                        }).is_ok();
+                                    }
+                                };
+                            },
+                        }
+
+                        if ! send_ok {
+                            debug!("Removing client due send error, index={}", i);
+                            remove_access = Some(i);
+                            break;
+                        }
                     }
                 }
             }
