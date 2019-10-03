@@ -941,7 +941,11 @@ class LocalFilesystemManager:
                 element = self.local_element_from_node_id(e.node_id)
 
             if element.is_directory():
-                fetched_elements += self.fetch_children_and_add_to_tracked(connection, element, overwrite)
+                fetched_elements += self.fetch_children_and_add_to_tracked(
+                    connection,
+                    element,
+                    overwrite
+                )
 
         return fetched_elements
 
