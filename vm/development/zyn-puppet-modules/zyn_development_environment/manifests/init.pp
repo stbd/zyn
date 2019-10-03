@@ -170,6 +170,25 @@ class zyn_development_environment(
                ],
         }
 
+        file { 'prepare-certificates-script' :
+        ensure => file,
+               path => "${developer_home}/.zyn-prepare-certificates.sh",
+               source => 'puppet:///modules/zyn_development_environment/zyn-prepare-certificates.sh',
+               group => "$developer_name",
+               owner => "$developer_name",
+               mode => 0776,
+               require => User["$developer_name"],
+        }
+
+        exec { 'prepare-certificates' :
+                 command => "${developer_home}/.zyn-prepare-certificates.sh",
+               provider => shell,
+               timeout => 600,
+               require => [
+                 User["$developer_name"],
+               ],
+        }
+
         exec { 'Install Docker Community Edition (CE)':
                  command => 'curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add - ;
          add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable" ;

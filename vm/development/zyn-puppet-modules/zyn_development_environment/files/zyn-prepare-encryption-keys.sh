@@ -95,26 +95,6 @@ function update_gpg_conf() {
     sed -i "s/# use-agent/use-agent/g" "$path_gpg_conf"
 }
 
-function create_certificate() {
-    path_key="$path_certificates_folder"/key.key
-    path_cert="$path_certificates_folder"/cert.pem
-
-    if [ ! -f "$path_key" ] || [ ! -f "$path_cert" ]; then
-        echo "Creating certificates to $path_certificates_folder"
-        mkdir  -p "$path_certificates_folder"
-        openssl req \
-                -newkey rsa:4096 \
-                -nodes \
-                -sha512 \
-                -x509 \
-                -days 3650 \
-                -out "$path_certificates_folder"/cert.pem \
-                -keyout "$path_certificates_folder"/key.pem \
-                -subj "/C=gb/O=$hostname/CN=$hostname/emailAddress=tester@invalid.com"
-    fi
-
-}
-
 if [ "$#" -ne 1 ]; then
     echo "Usage: [path-to-user-home]"
     exit 1
@@ -124,12 +104,10 @@ path_user_home=$1
 username=tester
 password=pass
 email=$username@invalid.com
-hostname=zyn
 path_gpg_agent_env_settings=$path_user_home/.zyn-gpg-agent-env-settings
 path_gpg_fingerprint=$path_user_home/.zyn-test-user-gpg-fingerprint
 path_gpg_private_key=$path_user_home/.zyn-test-user-gpg-secret-key
 path_gpg_agent_start_cmd=$path_user_home/.zyn-gpg-agent-start-cmd
-path_certificates_folder=$path_user_home/.zyn-certificates
 path_gpg_conf=$path_user_home/.gnupg/gpg.conf
 gpg_agent_cache_expires=$((60 * 60 * 24 * 365 * 10))
 tag="ZYN-GPG-SETTINGS"
@@ -139,7 +117,6 @@ install_gpg_development_environment
 install_gpg_agent_start_command
 install_gpg_agent_start_trigger
 update_gpg_conf
-create_certificate
 
 # Cheat cheet
 # http://irtfweb.ifa.hawaii.edu/~lockhart/gpg/

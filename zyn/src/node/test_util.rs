@@ -52,13 +52,7 @@ pub fn create_crypto_context() -> Context {
 }
 
 pub fn certificate_paths() -> (PathBuf, PathBuf) {
-    let mut path_folder = home_dir().unwrap();
-    path_folder.push(".zyn-certificates");
-    let mut cert = path_folder.clone();
-    cert.push("cert.pem");
-    let mut key = path_folder.clone();
-    key.push("key.pem");
-    (cert, key)
+    (PathBuf::from("/etc/ssl/certs/zyn-test.pem"), PathBuf::from("/etc/ssl/private/zyn-test.key"))
 }
 
 pub fn create_file_of_random_1024_blocks(number_of_blocks: usize) -> PathBuf{

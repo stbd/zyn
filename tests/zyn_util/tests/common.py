@@ -14,8 +14,8 @@ import zyn_util.exception
 
 PATH_FILE = os.path.dirname(os.path.abspath(__file__))
 PATH_BIN = PATH_FILE + '/../../../zyn/target/debug/zyn'
-PATH_CERT = os.path.expanduser("~/.zyn-certificates/cert.pem")
-PATH_KEY = os.path.expanduser("~/.zyn-certificates/key.pem")
+PATH_CERT = os.path.expanduser("/etc/ssl/certs/zyn-test.pem")
+PATH_KEY = os.path.expanduser("/etc/ssl/private/zyn-test.key")
 PATH_GPG_FINGERPRINT = os.path.expanduser("~/.zyn-test-user-gpg-fingerprint")
 DEFAULT_TLS_REMOTE_HOSTNAME = 'zyn'
 DEFAULT_SERVER_WORKDIR = 'server-workdir'
