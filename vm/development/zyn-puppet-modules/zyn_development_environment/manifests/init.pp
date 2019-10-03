@@ -7,6 +7,19 @@ class zyn_development_environment(
 
         $developer_home = "/home/$developer_name"
 
+        $packages = [
+          'build-essential',
+          'haveged',            # Used to generate randomness for security operations
+          'python3',
+          'python3-pip',
+          'shellcheck',         # Static analyser for bash scripts
+          'curl',
+          'gnupg2',
+          'apt-transport-https',
+          'software-properties-common',
+	  'ssl-cert',
+        ]
+
         group { 'dev-group' :
         ensure => present,
                name => "$developer_name",
@@ -18,11 +31,12 @@ class zyn_development_environment(
                name => "$developer_name",
                uid => "$developer_user_pid",
                gid => "$developer_group_pid",
-               groups => ['sudo', 'docker'],
+               groups => ['sudo', 'docker', 'ssl-cert'],
                managehome => true,
                shell => '/bin/bash',
                require => [
                    Group['dev-group'],
+		   Package['ssl-cert'],
 	           Exec['Install Docker Community Edition (CE)'],
 	       ]
         }
@@ -74,18 +88,6 @@ class zyn_development_environment(
                  File["prepare-home-script"],
                ]
         }
-
-        $packages = [
-          'build-essential',
-          'haveged',            # Used to generate randomness for security operations
-          'python3',
-          'python3-pip',
-          'shellcheck',         # Static analyser for bash scripts
-          'curl',
-          'gnupg2',
-          'apt-transport-https',
-          'software-properties-common',
-        ]
 
         package { $packages :
         ensure => present,
@@ -185,6 +187,7 @@ class zyn_development_environment(
                provider => shell,
                timeout => 600,
                require => [
+	         Package['ssl-cert'],
                  User["$developer_name"],
                ],
         }
