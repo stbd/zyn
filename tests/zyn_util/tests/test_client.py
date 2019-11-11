@@ -757,13 +757,26 @@ class TestClientCommon(TestClient):
     def test_client_initial_synchronization_elements_already_exist(self):
         state = self._start_server_and_client()
         path_dir = self._create_remote_directory_and_fetch(state, '/dir')
-        path_file = self._create_remote_ra_and_fetch(state, '/dir/file')
+        path_file_1 = self._create_remote_ra_and_fetch(state, '/file-1')
+        path_file_2 = self._create_remote_ra_and_fetch(state, '/dir/file-2')
 
         self._restart_server()
         self._restart_client(state)
         state.client.synchronize_local_files_with_remote()
         state.validate_dir_state(path_dir, is_tracked=True, exists_locally=True)
-        state.validate_file_state(path_file, is_tracked=True, exists_locally=True)
+        state.validate_file_state(path_file_1, is_tracked=True, exists_locally=True)
+        state.validate_file_state(path_file_2, is_tracked=True, exists_locally=True)
+
+    def test_client_synchronization_after_client_restart(self):
+        state = self._start_server_and_client()
+        path_dir = self._create_remote_directory_and_fetch(state, '/dir')
+        path_file_1 = self._create_remote_ra_and_fetch(state, '/file-1')
+        path_file_2 = self._create_remote_ra_and_fetch(state, '/dir/file-2')
+
+        self._restart_client(state)
+        self._sync(state, path_dir)
+        self._sync(state, path_file_1)
+        self._sync(state, path_file_2)
 
 
 class TestClientList(TestClient):

@@ -17,11 +17,11 @@ class ZynClientException(zyn_util.exception.ZynException):
 
 
 class LocalFileSystemElement:
-    def __init__(self, path_remote, fs, node_id=None):
+    def __init__(self, path_remote, fs, node_id=None, node_id_parent=None):
         self._path_remote = zyn_util.util.normalized_remote_path(path_remote)
         self._fs = fs
         self._node_id = node_id
-        self._node_id_parent = None
+        self._node_id_parent = node_id_parent
 
     def is_root(self):
         return self._path_remote == _REMOTE_PATH_ROOT
@@ -87,8 +87,15 @@ class LocalFileSystemElement:
 
 
 class LocalDirectory(LocalFileSystemElement):
-    def __init__(self, path_in_remote, fs, node_id=None, node_id_children=None):
-        super().__init__(path_in_remote, fs, node_id)
+    def __init__(
+            self,
+            path_in_remote,
+            fs,
+            node_id=None,
+            node_id_children=None,
+            node_id_parent=None,
+    ):
+        super().__init__(path_in_remote, fs, node_id, node_id_parent)
         if node_id_children is None:
             self._node_id_children = []
         else:
@@ -115,6 +122,7 @@ class LocalDirectory(LocalFileSystemElement):
         return {
             'data-format': 1,
             'node-id': self._node_id,
+            'node-id-parent': self._node_id_parent,
             'path-remote': self._path_remote,
             'children': self._node_id_children,
         }
@@ -130,7 +138,8 @@ class LocalDirectory(LocalFileSystemElement):
             data['path-remote'],
             fs,
             node_id=data['node-id'],
-            node_id_children=data['children']
+            node_id_children=data['children'],
+            node_id_parent=data['node-id-parent'],
         )
         return dir
 
@@ -281,8 +290,9 @@ class LocalFile(LocalFileSystemElement):
             fs,
             node_id=None,
             revision=None,
+            node_id_parent=None,
     ):
-        super().__init__(path_in_remote, fs, node_id)
+        super().__init__(path_in_remote, fs, node_id, node_id_parent)
         self._file_type = type_of
         self._revision = revision
         self._local_file_metadata = LocalFileMetadata(self)
@@ -317,6 +327,7 @@ class LocalFile(LocalFileSystemElement):
             'revision': self._revision,
             'file-type': self._file_type,
             'node-id': self._node_id,
+            'node-id-parent': self._node_id_parent,
             'path-remote': self._path_remote,
             'local-file': self._local_file_metadata.to_json(),
         }
@@ -333,6 +344,7 @@ class LocalFile(LocalFileSystemElement):
             fs,
             data['node-id'],
             data['revision'],
+            data['node-id-parent'],
         )
         local_file._local_file_metadata = LocalFileMetadata.from_json(
             data['local-file'],
