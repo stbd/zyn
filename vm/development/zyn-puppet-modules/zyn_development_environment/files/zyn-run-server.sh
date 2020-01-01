@@ -7,7 +7,7 @@ RUST_LOG=trace "$ZYN_ROOT"/zyn/target/debug/zyn \
         --local-address 127.0.0.1 \
         --default-user-name admin \
         --default-user-password admin \
-        --path-cert "$HOME"/.zyn-certificates/cert.pem \
-        --path-key "$HOME"/.zyn-certificates/key.pem \
+        --path-cert /etc/ssl/certs/zyn-test.pem \
+        --path-key /etc/ssl/private/zyn-test.key \
         --gpg-fingerprint "$(< "$HOME"/.zyn-test-user-gpg-fingerprint)" \
         "$@"

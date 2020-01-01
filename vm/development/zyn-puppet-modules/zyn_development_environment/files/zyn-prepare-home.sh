@@ -8,7 +8,7 @@ fi
 
 username=$1
 path_user_home=$2
-path_scripts_source=$3
+path_scripts_source="$(realpath $3)"
 path_scripts_dest=$path_user_home/.zyn-scripts
 
 # Make sure home has all files from skeleton
@@ -26,7 +26,7 @@ cat <<EOF >> "$path_user_home/.bashrc"
 # $tag
 export ZYN_ROOT=$path_user_home/zyn
 function zyn-reload-home() {
-    $(realpath "$0") $username $path_user_home
+    $(realpath "$0") $username $path_user_home $path_scripts_source
 }
 PATH=\$PATH:$path_scripts_dest
 echo -e "
