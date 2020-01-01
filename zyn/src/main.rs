@@ -106,10 +106,6 @@ impl Arguments {
         "--default-user-password"
     }
 
-    pub fn default_user_disable_expiration() -> & 'static str {
-        "--default-user-disable-expiration"
-    }
-
     pub fn max_num_files_per_dir() -> & 'static str {
         "--max-number-of-files-per-directory"
     }
@@ -162,12 +158,8 @@ impl Arguments {
                  Argument::String { value: Some(String::from("admin")) }),
 
                 (Arguments::default_user_password(),
-                 "Password of the default user",
+                 "Password for the default user",
                  Argument::String { value: Some(String::from("admin")) }),
-
-                (Arguments::default_user_disable_expiration(),
-                 "Disable default user expiration",
-                 Argument::Bool { value: Some(false) }),
 
                 (Arguments::max_num_files_per_dir(),
                  "Maximum number of files per single directory",
@@ -366,7 +358,6 @@ fn run() -> Result<(), ()> {
     let fs_capacity = args.take(Arguments::filesystem_capacity()).take_uint();
     let max_page_size_random_access = args.take(Arguments::max_page_size_random_access()).take_uint() as usize;
     let max_page_size_blob = args.take(Arguments::max_page_size_blob()).take_uint() as usize;
-    let disable_expiration = args.take(Arguments::default_user_disable_expiration()).take_bool();
 
     if ! args.is_empty() {
         panic!("Unused arguments");
@@ -390,15 +381,7 @@ fn run() -> Result<(), ()> {
             .map_err(| () | error!("Failed to configure admin group"))
             ? ;
 
-        let default_user_expiration = {
-            if disable_expiration {
-                None
-            } else {
-                Some(utc_timestamp() + 5 * 60)
-            }
-        };
-
-        let user = user_authority.add_user(& username, & password, default_user_expiration)
+        let user = user_authority.add_user(& username, & password, None)
             .map_err(| () | error!("Failed to create default user"))
             ? ;
 

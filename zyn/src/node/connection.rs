@@ -133,12 +133,12 @@ impl Server {
             .arg(path_cert.to_str().unwrap())
             .output()
             .map_err(| error | {
-                error!("Failed to query openssl not after date, error=\"{}\"", error);
+                error!("Failed to query openssl \"not after date\", error=\"{}\"", error);
             })
             ? ;
 
         if ! output_not_after_date.status.success() {
-            error!("openssl not after date query failed with code: {:?}", output_not_after_date.status);
+            error!("openssl \"not after date\" query failed with code: {:?}", output_not_after_date.status);
             return Err(());
         }
 
