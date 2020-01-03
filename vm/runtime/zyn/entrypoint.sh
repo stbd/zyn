@@ -51,7 +51,7 @@ head -c 500 /dev/urandom | base64 > $path_password
 
 echo "Starting Zyn server"
 
-/zyn \
+exec /zyn \
     --path-data-dir /zyn-data \
     --gpg-fingerprint "$(< $path_fingerprint base64 -d)" \
     --path-cert "$path_pem_cert" \
