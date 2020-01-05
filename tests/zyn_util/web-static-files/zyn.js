@@ -310,6 +310,7 @@ class ZynFileHandler {
     }
 
     read(offset, size, callback) {
+
         this._client.execute_command(
             'read-file',
             {
@@ -319,6 +320,31 @@ class ZynFileHandler {
             },
             callback,
         );
+    }
+
+    read_full_file(callback) {
+        class FullFileReader {
+            constructor(file, callback) {
+                this._file = file;
+                this._callback = callback;
+                this._buffer = '';
+                this._read_block();
+            }
+
+            _read_block() {
+                this._file.read(this._buffer.length, this._file._block_size, (msg) => { this.handle_rsp(msg); });
+            }
+
+            handle_rsp(msg) {
+                this._buffer += atob(msg.content()['bytes']);
+                if (this._buffer.length == this._file._size) {
+                    this._callback(this._buffer);
+                } else {
+                    this._read_block();
+                }
+            }
+        }
+        new FullFileReader(this, callback);
     }
 
     render(mode, target_id, callback=null) {
@@ -369,9 +395,8 @@ class ZynPdfHandler {
             return ;
         }
 
-        this._base.read(0, this._base._size, (msg) => {
-            let bytes = msg.content()['bytes'];
-            this._content = atob(bytes);
+        this._base.read_full_file((content) => {
+            this._content = content;
             callback();
         });
     }
