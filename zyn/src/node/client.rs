@@ -705,7 +705,6 @@ impl Client {
                 break;
             }
         }
-
         if buffer.len() == buffer.capacity() {
             Ok(())
         } else {
@@ -2056,7 +2055,7 @@ static MAX_NUMBER_OF_MESSAGES_FROM_NODE: u64 = 5;
 
 fn node_receive<OkType>(
     client: & mut Client,
-    handler: & Fn(ClientProtocol, & mut Client) -> (Option<ClientProtocol>, Option<Result<OkType, ()>>)
+    handler: & dyn Fn(ClientProtocol, & mut Client) -> (Option<ClientProtocol>, Option<Result<OkType, ()>>)
 ) -> Result<OkType, ()> {
 
     let sleep_duration = MAX_WAIT_DURATION_FOR_NODE_RESPONSE_MS / MAX_NUMBER_OF_MESSAGES_FROM_NODE;

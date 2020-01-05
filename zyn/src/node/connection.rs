@@ -66,23 +66,33 @@ impl Connection {
     }
 
     pub fn read(& self, buffer: & mut Buffer) -> Result<bool, ()> {
-        let current_size = buffer.len();
-        let available_size = buffer.capacity();
-        let space_left = available_size - current_size;
-        buffer.resize(available_size, 0);
-
         unsafe {
-            let start_point = buffer.as_ptr().offset(current_size as isize);
-            let read_result = tls_sys::tls_read(self.context, start_point as * mut _, space_left);
 
-            if read_result > 0 {
-                buffer.resize(current_size + read_result as usize, 0);
-                return Ok(true);
-            } else if read_result == 0 {
+            let original_size = buffer.len();
+            let available_size = buffer.capacity();
+            let space_left = available_size - original_size;
+            let mut current_size = original_size;
+            buffer.resize(available_size, 0);
+
+            let mut read_result;
+            loop {
+                let start_point = buffer.as_ptr().offset(current_size as isize);
+                read_result = tls_sys::tls_read(self.context, start_point as * mut _, space_left);
+                if read_result <= 0 {
+                    break
+                }
+                current_size += read_result as usize;
+            }
+
+            if read_result == 0 {
                 return Err(());
             } else if read_result == TLS_WANT_POLLIN {
                 buffer.resize(current_size, 0);
-                return Ok(false)
+                if current_size > original_size {
+                    return Ok(true);
+                } else {
+                    return Ok(false)
+                }
             } else if read_result == TLS_WANT_POLLOUT {
                 warn!("TLS request POLLOUT, unhanled");
                 // todo: Not sure what the correct behavior is
