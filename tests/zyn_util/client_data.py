@@ -891,7 +891,9 @@ class LocalFilesystemManager:
         try:
             element.create_on_remote(parent, connection)
         except zyn_util.exception.ZynServerException as create_error:
-            self._log.warn('Creating element on remote failed, trying to cleanup')
+            self._log.warn('Creating element on remote failed "{}", trying to cleanup'.format(
+                create_error
+            ))
             try:
                 element.delete_on_remote(connection)
             except zyn_util.exception.ZynServerException as delete_error:

@@ -564,7 +564,7 @@ static MAX_NUMBER_OF_ITERATIONS_PER_MESSAGE: u64 = 20;
 
 fn file_receive<OkType>(
     access: & mut FileAccess,
-    handler: & Fn(FileResponseProtocol) -> (Option<FileResponseProtocol>, Option<Result<OkType, FileError>>)
+    handler: & dyn Fn(FileResponseProtocol) -> (Option<FileResponseProtocol>, Option<Result<OkType, FileError>>)
 )
     -> Result<OkType, FileError> {
 

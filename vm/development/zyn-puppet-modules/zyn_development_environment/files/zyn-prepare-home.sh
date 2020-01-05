@@ -8,7 +8,7 @@ fi
 
 username=$1
 path_user_home=$2
-path_scripts_source="$(realpath $3)"
+path_scripts_source="$(realpath "$3")"
 path_scripts_dest=$path_user_home/.zyn-scripts
 
 # Make sure home has all files from skeleton

@@ -1200,7 +1200,7 @@ impl Node {
                     .unwrap()
                     .parent()
             } else {
-                let mut file = fs.mut_file(& node_id).unwrap();
+                let file = fs.mut_file(& node_id).unwrap();
                 let properties = file.properties(& crypto)
                     .map_err(| () | node_error_to_rsp(NodeError::InternalCommunicationError))
                     ? ;
