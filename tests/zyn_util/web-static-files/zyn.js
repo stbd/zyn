@@ -272,15 +272,8 @@ class ZynFileHandler {
     }
 
     initial_load(callback) {
-        if (this._size === 0) {
-            this._content = '';
-            callback();
-            return ;
-        }
-
-        this.read(0, this._size, (msg) => {
-            let bytes = msg.content()['bytes'];
-            this._content = atob(bytes);
+        this.read_full_file((content) => {
+            this._content = content;
             callback();
         });
     }
@@ -328,10 +321,26 @@ class ZynFileHandler {
                 this._file = file;
                 this._callback = callback;
                 this._buffer = '';
-                this._read_block();
+                if (this._file._size > 0) {
+                    this._read_block();
+                } else {
+                    callback(this._buffer)
+                }
+            }
+
+            set_loading_modal() {
+                if (zyn_is_modal_loading_vissible()) {
+                    let number_of_blocks = Math.floor(this._file._size / this._file._block_size) + 1;
+                    let current_block = 1;
+                    if (this._buffer.length > 0) {
+                        current_block = (this._buffer.length / this._file._block_size) + 1;
+                    }
+                    zyn_show_modal_loading(`Loading file ${current_block} / ${number_of_blocks}`);
+                }
             }
 
             _read_block() {
+                this.set_loading_modal();
                 this._file.read(this._buffer.length, this._file._block_size, (msg) => { this.handle_rsp(msg); });
             }
 
@@ -389,12 +398,6 @@ class ZynPdfHandler {
     }
 
     load_full_file(callback) {
-        if (this._base._size === 0) {
-            this._content = '';
-            callback();
-            return ;
-        }
-
         this._base.read_full_file((content) => {
             this._content = content;
             callback();
@@ -476,17 +479,10 @@ class ZynMarkdownHandler {
     }
 
     load_full_file(callback) {
-        if (this._base._size === 0) {
-            this._content = '';
+        this._base.read_full_file((content) => {
+            this._content = utf8.decode(content);
             callback();
-            return ;
-        }
-
-        this._base.read(0, this._base._size, (msg) => {
-            let bytes = msg.content()['bytes'];
-            this._content = utf8.decode(atob(bytes));
-            callback();
-        });
+        })
     }
 
     render(mode, target_id, callback=null) {
