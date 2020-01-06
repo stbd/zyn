@@ -5,6 +5,7 @@ import getpass
 import logging
 import os.path
 import sys
+import traceback
 
 import zyn_util.client
 import zyn_util.connection
@@ -580,7 +581,7 @@ def main():
             cli.cmdloop()
         except zyn_util.exception.ZynException as e:
             print('Exception while processing command')
-            print(e)
+            traceback.print_exc()
         except KeyboardInterrupt:
             break
         except SystemExit:
