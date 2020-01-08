@@ -619,11 +619,31 @@ class TestClientSync(TestClient):
         self.assertNotEqual(self._revision(state_2, path_2), r_2)
         self.assertEqual(self._revision(state_1, path_2), self._revision(state_2, path_2))
 
-    def test_client_validate_sync_works_mutitple_times_in_succession(self):
+    def test_client_sync_works_mutitple_times_in_succession(self):
         state = self._start_server_and_client()
         self._create_remote_ra_and_fetch(state, '/file-1')
         self._sync(state)
         self._sync(state)
+
+    def test_client_sync_works_when_file_edited_by_another_client(self):
+        state_1 = self._start_server_and_client(client_id=0)
+        state_2 = self._init_client(client_id=1)
+        path_file = self._create_remote_ra_and_fetch(state_1, '/file-1')
+        node_id = state_1.element(path_file).node_id()
+
+        c_2 = state_2.cli._client.connection()
+        c_2.open_file_write(node_id=node_id)
+        data_1 = 'data'
+        c_2.ra_write(node_id, 0, 0, data_1.encode('utf-8')).as_write_rsp()
+
+        self._sync(state_1)
+        state_1.validate_text_file_content(path_file, data_1)
+
+        data_2 = 'values'
+        c_2.ra_write(node_id, 1, 0, data_2.encode('utf-8')).as_write_rsp()
+
+        self._sync(state_1)
+        state_1.validate_text_file_content(path_file, data_2)
 
 
 class TestClientRemove(TestClient):

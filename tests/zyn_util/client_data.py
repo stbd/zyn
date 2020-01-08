@@ -220,7 +220,12 @@ class LocalDirectory(LocalFileSystemElement):
             element = self._fs.local_element_from_node_id(c.node_id)
             if c.is_file():
                 try:
-                    if element.synchronize(connection, c.revision, discard_local_changes):
+                    if element.synchronize(
+                            connection,
+                            c.revision,
+                            c.is_open,
+                            discard_local_changes,
+                    ):
                         synchronized_elements.append(element)
 
                 except Exception:
@@ -511,7 +516,19 @@ class LocalFile(LocalFileSystemElement):
         self._local_file_metadata.update()
         return local_data
 
-    def synchronize(self, connection, remote_revision, discard_local_changes):
+    def synchronize(self, connection, remote_revision, is_open, discard_local_changes):
+
+        # If the file is opened by other users at remote, it is possible it has been changed
+        # since the list values were saved, thus query element info to make sure
+        # client has the latest revision
+        if is_open:
+            self._fs._log.debug(
+                'File is open, query element info to get latest revision, path={}'.format(
+                    self._path_remote,
+                ))
+            rsp = self._fs.query_element(self, connection)
+            remote_revision = rsp.revision
+
         has_changes_remote = remote_revision > self._revision
         has_changes_local = False
 
@@ -519,11 +536,14 @@ class LocalFile(LocalFileSystemElement):
             has_changes_local = self._local_file_metadata.has_changed()
 
         self._fs._log.debug(
-            'Synchronizing: revision: local: {}, remote: {}, changed: {}, discard: {}, path="{}"'
-            .format(
+            (
+                'Synchronizing: revision: local: {}, remote: {}, local changes: {}, is open: {}, '
+                'discard: {}, path="{}"'
+            ).format(
                 self._revision,
                 remote_revision,
                 has_changes_local,
+                str(is_open),
                 str(discard_local_changes),
                 self._path_remote,
             ))

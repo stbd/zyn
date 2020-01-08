@@ -230,27 +230,7 @@ impl FileHandle {
     }
 
     pub fn cached_properties(& mut self) -> Result<CachedFileProperties, ()> {
-        self.update();
-
-        if self.file_service.is_none() {
-            return Ok(self.cached_properties.clone());
-        }
-
-        if let Some(ref mut file_service) = self.file_service {
-            let result = file_service.access.properties();
-            if result.is_ok() {
-                return Ok(CachedFileProperties::from_properties(result.unwrap()))
-            }
-            warn!("There was a problem receiving properties from open file");
-        }
-
-        self.update();
-        if self.file_service.is_some() {
-            error!("Failed to get properties from file service for cached properties");
-            return Err(());
-        }
-
-        Ok(self.cached_properties.clone())
+        return Ok(self.cached_properties.clone());
     }
 
     pub fn open(& mut self, crypto: & Crypto, user: Id) -> Result<FileAccess, ()> {

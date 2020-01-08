@@ -386,8 +386,10 @@ fn test_cached_properties_are_updated() {
     let buffer_1: Buffer = vec![4, 5, 6, 7, 8];
 
     access.write(0, 0, buffer_1.clone()).unwrap();
-    assert!(state.cached_properties().size == state.properties().size);
-    assert!(state.cached_properties().revision == state.properties().revision);
+
+    // Cached properties are only updated when file is closed
+    assert!(state.cached_properties().size != state.properties().size);
+    assert!(state.cached_properties().revision != state.properties().revision);
     assert!(state.cached_properties().file_type == state.properties().file_type);
 
     state.file_handle.close();

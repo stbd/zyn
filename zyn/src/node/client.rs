@@ -1559,11 +1559,13 @@ fn handle_query_counters_req(client: & mut Client) -> Result<(), ()>
 }
 
 /*
-Query element children
+Query element children and their cached properties, i.e. state of file when last closed
 <- [Version]Q-LIST:[Transaction Id][FileDescriptor];[End]
 -> [Version]RSP:[Transaction Id][List-of-Element-Info];[End]
- * Element-Info: List-of-(String: name, node_id, uint: type-of-element)
+ * Element-Info for file: List-of-(String: name, node_id, uint: type-of-element, uint: revision, uint: size, uint: is_open)
+ * Element-Info for direcotry: List-of-(String: name, node_id, user-authority: reading, user-authority: writing)
  * type-of-element: 0: file, 1: directory
+ * is_open: 1: file opened by at least one another user, revision and size may not be up-to-date
 */
 fn handle_query_fs_children(client: & mut Client) -> Result<(), ()>
 {
@@ -1601,6 +1603,7 @@ fn handle_query_fs_children(client: & mut Client) -> Result<(), ()>
                                 revision,
                                 file_type,
                                 size,
+                                is_open,
                             } => {
                                 try_in_receive_loop!(client, buffer.write_unsigned(FILE), Status::FailedToWriteToSendBuffer);
                                 try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
@@ -1608,7 +1611,7 @@ fn handle_query_fs_children(client: & mut Client) -> Result<(), ()>
                                 try_in_receive_loop!(client, buffer.write_unsigned(revision as u64), Status::FailedToWriteToSendBuffer);
                                 try_in_receive_loop!(client, buffer.write_unsigned(file_type as u64), Status::FailedToWriteToSendBuffer);
                                 try_in_receive_loop!(client, buffer.write_unsigned(size as u64), Status::FailedToWriteToSendBuffer);
-
+                                try_in_receive_loop!(client, buffer.write_unsigned(is_open as u64), Status::FailedToWriteToSendBuffer);
                             },
                             FileSystemListElement::Directory {
                                 name,

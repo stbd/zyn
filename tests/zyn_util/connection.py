@@ -1095,6 +1095,7 @@ class QueryElement:
             self.revision = msg[3].as_uint()
             self.file_type = msg[4].as_uint()
             self.size = msg[5].as_uint()
+            self.is_open = msg[6].as_uint() == 1
 
         elif self.is_directory():
             self.name = msg[1].as_string()

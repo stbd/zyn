@@ -100,6 +100,7 @@ pub enum FileSystemListElement {
         revision: FileRevision,
         file_type: FileType,
         size: u64,
+        is_open: bool,
     },
     Directory {
         name: String,
@@ -570,6 +571,7 @@ impl Node {
                                     & mut node_id_buffer,
                                     & mut self.filesystem,
                                     & mut self.auth,
+                                    & mut self.crypto,
                                     user,
                                     fd,
                                     fd_parent,
@@ -992,6 +994,7 @@ impl Node {
             let is_file = fs.node(& child.node_id).unwrap().is_file();
             if is_file {
                 let file = fs.mut_file(& child.node_id).unwrap();
+                let is_open = file.is_open();
                 let properties = file.cached_properties().unwrap();
                 result.push(
                     FileSystemListElement::File {
@@ -1000,6 +1003,7 @@ impl Node {
                         revision: properties.revision,
                         file_type: properties.file_type,
                         size: properties.size,
+                        is_open: is_open,
                     })
             } else {
                 let dir = fs.node(& child.node_id)
@@ -1030,6 +1034,7 @@ impl Node {
         node_id_buffer: & mut [NodeId],
         fs: & mut Filesystem,
         auth: & mut UserAuthority,
+        crypto: & mut Crypto,
         user: Id,
         file_descriptor: FileDescriptor,
         parent_file_descriptor: FileDescriptor,
@@ -1073,7 +1078,7 @@ impl Node {
         if is_file {
 
             let file = fs.mut_file(& node_id).unwrap();
-            let properties = file.cached_properties().unwrap();
+            let properties = file.properties(crypto).unwrap();
             Ok(FilesystemElementProperties::File {
                 name: name,
                 node_id: node_id,

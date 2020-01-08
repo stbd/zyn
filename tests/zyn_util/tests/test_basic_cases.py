@@ -306,6 +306,35 @@ class TestBasicFilesystem(TestBasicOperatinsCommon):
             zyn_util.connection.FILESYSTEM_ELEMENT_DIRECTORY,
         )
 
+    def test_query_fs_children_when_file_is_being_edited(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        create = self._create_file_ra(c, 'file-ra', parent_path='/')
+
+        # Query element and query element children should be up-to-date since file is closed
+        query_list = self._query_fs_children(c, path='/')
+        query_element = self._query_fs_element(c, node_id=create.node_id)
+        self.assertEqual(query_list.elements[0].revision, create.revision)
+        self.assertEqual(query_element.revision, create.revision)
+
+        # Open file and edit it
+        self._open_file_write(c, node_id=create.node_id)
+        edit = c.ra_insert(create.node_id, create.revision, 0, 'dd'.encode('utf-8')).as_write_rsp()
+
+        # Query children has the revision from last time file was closed since it
+        # does not query open file thread.
+        # Query element has latest revision as it does send request to file thread
+        query_list = self._query_fs_children(c, path='/')
+        query_element = self._query_fs_element(c, node_id=create.node_id)
+        self.assertEqual(query_list.elements[0].revision, create.revision)
+        self.assertEqual(query_element.revision, edit.revision)
+
+        # Close file which updates the values seen by query children
+        self._close_file(c, node_id=create.node_id)
+        query_list = self._query_fs_children(c, path='/')
+        query_element = self._query_fs_element(c, node_id=create.node_id)
+        self.assertEqual(query_list.elements[0].revision, edit.revision)
+        self.assertEqual(query_element.revision, edit.revision)
+
     def _validate_fs_query_element(
             self,
             query,
@@ -374,11 +403,12 @@ class TestBasicFilesystem(TestBasicOperatinsCommon):
         rsp_create = self._create_file_ra(c, 'file', parent_path='/')
         node_id = rsp_create.node_id
         data = 'data'.encode('utf-8')
+
         rsp_query_1 = self._query_fs_element_properties(c, node_id=node_id, parent_path='/')
         self._open_file_write(c, node_id=node_id)
         rsp_edit = c.ra_write(node_id, rsp_create.revision, 0, data).as_write_rsp()
-        rsp_query_2 = self._query_fs_element_properties(c, node_id=node_id, parent_path='/')
 
+        rsp_query_2 = self._query_fs_element_properties(c, node_id=node_id, parent_path='/')
         self.assertEqual(rsp_query_1.revision, rsp_create.revision)
         self.assertEqual(rsp_query_2.revision, rsp_edit.revision)
         self.assertEqual(rsp_query_1.size, 0)
