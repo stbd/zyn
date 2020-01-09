@@ -209,7 +209,15 @@ class WebSocket(tornado.websocket.WebSocketHandler):
             self._log.debug('Register, user_id={}'.format(user_id))
             self._user_id = user_id
             self._session = user_sessions.find_session(self._user_id)
-            self._tab_id = self._session.add_websocket(self)
+            try:
+                self._tab_id = self._session.add_websocket(self)
+            except ValueError as e:
+                self._log.warn('Login for user user_id="{}" failed, removing session'.format(
+                    self._user_id,
+                ))
+                user_sessions.remove(self._user_id)
+                raise e
+
             self._send_response(msg_type)
 
             self._log.info("Registered, user_id={}, tab_id={}, session.size()={}".format(
