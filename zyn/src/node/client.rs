@@ -1533,8 +1533,10 @@ fn handle_query_counters_req(client: & mut Client) -> Result<(), ()>
                     result: Ok(counters),
                 } => {
                     let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
-                    try_in_receive_loop!(client, buffer.write_list_start(1), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, buffer.write_list_start(3), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "active-connections", counters.active_connections as u64), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "number-of-files", counters.number_of_files as u64), Status::FailedToWriteToSendBuffer);
+                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "number-of-open-files", counters.number_of_open_files as u64), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
                     try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);

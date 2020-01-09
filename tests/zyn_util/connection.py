@@ -1225,11 +1225,13 @@ class QueryCountersResponse:
             _malfomed_message()
 
         desc = response.field(0).key_value_list_to_dict()
-        self._number_of_counters = 1
+        self._number_of_counters = 3
         if len(desc) != self._number_of_counters:
             _malfomed_message()
 
         self.active_connections = desc['active-connections'].as_uint()
+        self.number_of_files = desc['number-of-files'].as_uint()
+        self.number_of_open_files = desc['number-of-open-files'].as_uint()
 
     def number_of_counters(self):
         return self._number_of_counters

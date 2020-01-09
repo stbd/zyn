@@ -99,6 +99,17 @@ impl Filesystem {
         self.max_number_of_files_per_dir
     }
 
+    pub fn number_of_open_files(& mut self) -> usize {
+        let mut open_files = 0;
+        for file in self.nodes.iter_mut().filter(|x| x.is_file()) {
+            let f = file.to_mut_file().unwrap();
+            if f.is_open() {
+                open_files += 1;
+            }
+        }
+        open_files
+    }
+
     pub fn empty_with_capacity(crypto: Crypto, path_storage_directory: & Path, capacity: usize, max_number_of_files_per_directory: usize)
                              -> Filesystem {
 

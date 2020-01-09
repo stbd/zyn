@@ -178,8 +178,43 @@ class TestQuery(TestBasicOperatinsCommon):
     def test_query_counters(self):
         c = self._start_and_connect_to_node_and_handle_auth()
         counters = self._query_counters(c)
-        self.assertEqual(counters.number_of_counters(), 1)
+        self.assertEqual(counters.number_of_counters(), 3)
         self.assertEqual(counters.active_connections, 1)
+        self.assertEqual(counters.number_of_files, 0)
+        self.assertEqual(counters.number_of_open_files, 0)
+
+    def test_query_counters_number_of_files(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        counters = self._query_counters(c)
+        self.assertEqual(counters.number_of_files, 0)
+
+        self._create_file_ra(c, 'file-1', parent_path='/')
+        counters = self._query_counters(c)
+        self.assertEqual(counters.number_of_files, 1)
+
+        self._create_file_ra(c, 'file-2', parent_path='/')
+        counters = self._query_counters(c)
+        self.assertEqual(counters.number_of_files, 2)
+
+    def test_query_counters_number_of_open_files(self):
+        c = self._start_and_connect_to_node_and_handle_auth()
+        counters = self._query_counters(c)
+        self.assertEqual(counters.number_of_open_files, 0)
+
+        self._create_file_ra(c, 'file-1', parent_path='/')
+        self._create_file_ra(c, 'file-2', parent_path='/')
+
+        self._open_file_read(c, path='/file-1')
+        counters = self._query_counters(c)
+        self.assertEqual(counters.number_of_open_files, 1)
+
+        rsp_2 = self._open_file_read(c, path='/file-2')
+        counters = self._query_counters(c)
+        self.assertEqual(counters.number_of_open_files, 2)
+
+        self._close_file(c, rsp_2.node_id)
+        counters = self._query_counters(c)
+        self.assertEqual(counters.number_of_open_files, 1)
 
     def test_query_system(self):
         c = self._start_and_connect_to_node_and_handle_auth()

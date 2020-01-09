@@ -112,6 +112,8 @@ pub enum FileSystemListElement {
 
 pub struct Counters {
     pub active_connections: u32,
+    pub number_of_open_files: u32,
+    pub number_of_files: u32,
 }
 
 pub struct AdminSystemInformation {
@@ -507,6 +509,7 @@ impl Node {
 
                                 let result = Node::handle_counters_request(
                                     & self.clients,
+                                    & mut self.filesystem,
                                     & mut self.auth,
                                     user,
                                 );
@@ -917,6 +920,7 @@ impl Node {
 
     fn handle_counters_request(
         clients: & Vec<ClientInfo>,
+        fs: & mut Filesystem,
         auth: & mut UserAuthority,
         user: Id,
     ) -> Result<Counters, ErrorResponse> {
@@ -927,6 +931,8 @@ impl Node {
 
         Ok(Counters {
             active_connections: clients.len() as u32,
+            number_of_files: fs.number_of_files() as u32,
+            number_of_open_files: fs.number_of_open_files() as u32,
         })
     }
 
