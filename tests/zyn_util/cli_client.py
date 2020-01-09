@@ -447,7 +447,7 @@ class ZynCliClient(cmd.Cmd):
         parser = self._parser_show_counters()
         args = vars(parser.parse_args(self._parse_args(args)))
         rsp = self._client.connection().query_counters().as_query_counters_rsp()
-        if rsp.number_of_counters() != 2:
+        if rsp.number_of_counters() != 3:
             print('Warning: not all counters are show')
         print('{}: {}'.format('active-connections', rsp.active_connections))
         print('{}: {}'.format('number-of-files', rsp.number_of_files))
