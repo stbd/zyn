@@ -73,6 +73,7 @@ class TestZyn(unittest.TestCase):
             max_number_of_files_per_directory=None,
             max_block_size_random_access=None,
             max_block_size_blob=None,
+            max_inactity_duration_secs=None,
             init=False
     ):
         params = []
@@ -122,6 +123,10 @@ class TestZyn(unittest.TestCase):
         if max_block_size_blob is not None:
             params.append('--max-page-size-for-blob')
             params.append(str(max_block_size_blob))
+
+        if max_inactity_duration_secs is not None:
+            params.append('--max-inactivity-duration-seconds')
+            params.append(str(max_inactity_duration_secs))
 
         process = self._start_server_process(params)
         time.sleep(.1)  # Give some time for the process to start up
@@ -248,6 +253,10 @@ class TestCommon(TestZyn):
         self._handle_auth(c, username, password)
         return c
 
-    def _start_and_connect_to_node_and_handle_auth(self, server_workdir=DEFAULT_SERVER_WORKDIR):
-        self._start_node(server_workdir)
+    def _start_and_connect_to_node_and_handle_auth(
+            self,
+            server_workdir=DEFAULT_SERVER_WORKDIR,
+            **kwargs
+    ):
+        self._start_node(server_workdir, **kwargs)
         return self._connect_to_node_and_handle_auth()

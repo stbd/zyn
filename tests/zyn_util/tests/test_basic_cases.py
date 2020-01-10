@@ -1,3 +1,5 @@
+import time
+
 import zyn_util.tests.common
 import zyn_util.errors
 from zyn_util.connection import DataStream
@@ -138,7 +140,6 @@ class TestBasicOperatinsCommon(zyn_util.tests.common.TestCommon):
         self.assertEqual(
             msg.notification_type(),
             notification_type,
-            zyn_util.connection.Notification.TYPE_DISCONNECTED
         )
 
 
@@ -171,6 +172,17 @@ class TestBasicServerUsage(TestBasicOperatinsCommon):
         for i in range(3):
             rsp = c.authenticate(self._username, "invalid")
             self._validate_response(rsp, c, zyn_util.errors.InvalidUsernamePassword)
+        self._validate_socket_is_disconnected(c)
+
+    def test_max_inactivity_duration(self):
+        max_inactity_duration_secs = 2
+        c = self._start_and_connect_to_node_and_handle_auth(
+            max_inactity_duration_secs=max_inactity_duration_secs
+        )
+        time.sleep(max_inactity_duration_secs + 1)
+        msg = c.read_message()
+        self._validate_msg_is_notification(msg)
+        self._validate_notification_type(msg, zyn_util.connection.Notification.TYPE_DISCONNECTED)
         self._validate_socket_is_disconnected(c)
 
 

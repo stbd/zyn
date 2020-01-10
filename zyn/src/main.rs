@@ -122,6 +122,10 @@ impl Arguments {
         "--max-page-size-for-blob"
     }
 
+    pub fn max_inactivity_duration_secs() -> & 'static str {
+        "--max-inactivity-duration-seconds"
+    }
+
     pub fn defaults() -> Arguments {
         Arguments {
             values: vec![
@@ -176,6 +180,10 @@ impl Arguments {
                 (Arguments::max_page_size_blob(),
                  "Maximum page size for blob files",
                  Argument::Uint { value: Some(MEGABYTE * 10) }),
+
+                (Arguments::max_inactivity_duration_secs(),
+                 "Maximum duration allowed for inactive client connections, in seconds",
+                 Argument::Uint { value: Some(60 * 60 * 5) }),
             ],
         }
     }
@@ -358,6 +366,7 @@ fn run() -> Result<(), ()> {
     let fs_capacity = args.take(Arguments::filesystem_capacity()).take_uint();
     let max_page_size_random_access = args.take(Arguments::max_page_size_random_access()).take_uint() as usize;
     let max_page_size_blob = args.take(Arguments::max_page_size_blob()).take_uint() as usize;
+    let max_inactivity_duration_secs = args.take(Arguments::max_inactivity_duration_secs()).take_uint() as i64;
 
     if ! args.is_empty() {
         panic!("Unused arguments");
@@ -398,7 +407,12 @@ fn run() -> Result<(), ()> {
             ? ;
     }
 
-    let mut node = Node::load(crypto, server, & data_dir)
+    let mut node = Node::load(
+        crypto,
+        server,
+        & data_dir,
+        max_inactivity_duration_secs,
+    )
         .map_err(| () | error!("Failed to load node"))
         ? ;
 

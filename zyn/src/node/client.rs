@@ -7,7 +7,7 @@ use std::vec::{ Vec };
 use std::{ str };
 
 use node::client_protocol_buffer::{ ReceiveBuffer, SendBuffer };
-use node::common::{ NodeId, Buffer, OpenMode, FileType, Timestamp };
+use node::common::{ NodeId, Buffer, OpenMode, FileType, Timestamp, utc_timestamp };
 use node::connection::{ Connection };
 use node::file_handle::{ FileAccess, FileError, Notification, FileLock, FileProperties };
 use node::filesystem::{ FilesystemError };
@@ -164,6 +164,7 @@ const MAX_NUMBER_OF_OPEN_FILES: usize = 5;
 
 const DISCONNET_REASON_INTERNAL_ERROR: & str = "internal-error";
 const DISCONNET_REASON_NODE_CLOSING: & str = "node-closing";
+const DISCONNET_REASON_INACTIVITY_TIMEOUT: & str = "inactivity-timeout";
 
 // ## Messages:
 // todo
@@ -200,6 +201,7 @@ enum Status {
     ShutdownOrderedByNode,
     InternalError,
     ProtocolProcessingError,
+    InactivityTimeout,
 }
 
 impl Display for Status {
@@ -227,6 +229,8 @@ impl Display for Status {
                 write!(f, "ProtocolProcessingError"),
             Status::FailedToreceiveFromClient =>
                 write!(f, "FailedToreceiveFromClient"),
+            Status::InactivityTimeout =>
+                write!(f, "InactivityTimeout"),
         }
     }
 }
@@ -284,6 +288,7 @@ pub struct Client {
     user: Option<Id>,
     status: Status,
     node_message_buffer: Vec<ClientProtocol>,
+    max_incativity_duration_secs: i64,
 }
 
 impl Display for Client {
@@ -389,9 +394,14 @@ impl Client {
         node_receive: Receiver<ClientProtocol>,
         node_send: Sender<NodeProtocol>,
         socket_buffer_size: usize,
+        max_incativity_duration_secs: i64,
     ) -> Client {
 
-        info!("Creating new client, socket_buffer_size={}", socket_buffer_size);
+        info!(
+            "Creating new client, socket_buffer_size={}, max_incativity_duration_secs={}",
+            socket_buffer_size,
+            max_incativity_duration_secs,
+        );
 
         Client {
             connection: connection,
@@ -402,6 +412,7 @@ impl Client {
             user: None,
             status: Status::Ok,
             node_message_buffer: Vec::with_capacity(5),
+            max_incativity_duration_secs: max_incativity_duration_secs,
         }
     }
 
@@ -427,6 +438,7 @@ impl Client {
             ("MOD-USER-GROUP:", handle_mod_user_group, 1),
         ];
 
+        let mut latest_succesfull_command_timestamp: Timestamp = utc_timestamp();
         loop {
 
             let mut is_processing: bool = false;
@@ -467,9 +479,18 @@ impl Client {
             }
 
             if ! is_processing {
+                let duration_since_activity = utc_timestamp() - latest_succesfull_command_timestamp;
+                if duration_since_activity > self.max_incativity_duration_secs {
+                    info!("Closing connection due inactivity, client=\"{}\"", self);
+                    self.status.set(Status::InactivityTimeout);
+                    let _ = self.send_close_notification(DISCONNET_REASON_INACTIVITY_TIMEOUT);
+                    break;
+                }
+
                 sleep(Duration::from_millis(100));
                 continue ;
             }
+            latest_succesfull_command_timestamp = utc_timestamp();
 
             if ! self.buffer.is_complete_message() {
                 continue ;

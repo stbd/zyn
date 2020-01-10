@@ -221,6 +221,7 @@ pub struct Node {
     max_page_size_random_access_file: usize,
     max_page_size_blob_file: usize,
     client_socket_buffer_size: usize,
+    max_inactivity_duration_secs: i64,
 }
 
 impl Node {
@@ -332,7 +333,12 @@ impl Node {
         Ok(())
     }
 
-    pub fn load(crypto: Crypto, server: Server, path_workdir: & Path) -> Result<Node, ()> {
+    pub fn load(
+        crypto: Crypto,
+        server: Server,
+        path_workdir: & Path,
+        max_inactivity_duration_secs: i64,
+    ) -> Result<Node, ()> {
 
         info!("Loading node, path_workdir={}", path_workdir.display());
 
@@ -368,6 +374,7 @@ impl Node {
             client_socket_buffer_size: settings.client_input_buffer_size as usize,
             started_at: utc_timestamp(),
             server_id: random::<u64>(),
+            max_inactivity_duration_secs: max_inactivity_duration_secs,
         })
     }
 
@@ -740,6 +747,7 @@ impl Node {
                     let (tx_node, rx_node) = channel::<ClientProtocol>();
                     let (tx_client, rx_client) = channel::<NodeProtocol>();
                     let buffer_size = self.client_socket_buffer_size;
+                    let max_inactivity_duration_secs = self.max_inactivity_duration_secs;
 
                     let handle = spawn( move || {
                         let mut client = Client::new(
@@ -747,6 +755,7 @@ impl Node {
                             rx_node,
                             tx_client,
                             buffer_size,
+                            max_inactivity_duration_secs,
                         );
                         client.process();
                     });
