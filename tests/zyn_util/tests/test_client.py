@@ -281,6 +281,15 @@ class TestClient(zyn_util.tests.common.TestCommon):
         state.cli.do_create_directory(self._params([path]))
         return path
 
+    def _open_file(self, state, path, iteration_duration, number_of_iterations):
+        state.cli.do_open(self._params([
+            path,
+            '--poll-sleep',
+            str(iteration_duration),
+            '--number-of-iterations',
+            str(number_of_iterations),
+        ]))
+
     def _write_to_stdin(self, content):
         sys.stdin = io.StringIO(content)
 
@@ -797,6 +806,11 @@ class TestClientCommon(TestClient):
         self._sync(state, path_dir)
         self._sync(state, path_file_1)
         self._sync(state, path_file_2)
+
+    def test_client_open(self):
+        state = self._start_server_and_client()
+        path_file = self._create_remote_ra_and_fetch(state, '/file')
+        self._open_file(state, path_file, 1, 1)
 
 
 class TestClientList(TestClient):

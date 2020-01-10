@@ -425,6 +425,7 @@ class ZynCliClient(cmd.Cmd):
         parser = argparse.ArgumentParser(prog='open')
         parser.add_argument('path-file', type=str, action='append')
         parser.add_argument('-s', '--poll-sleep', type=int, default=5)
+        parser.add_argument('-i', '--number-of-iterations', type=int)
         return parser
 
     def help_open(self):
@@ -434,7 +435,7 @@ class ZynCliClient(cmd.Cmd):
         parser = self._parser_open()
         args = vars(parser.parse_args(self._parse_args(args)))
         path_files = [self._to_absolute_remote_path(f) for f in args['path-file']]
-        self._client.open(path_files, args['poll_sleep'])
+        self._client.open(path_files, args['poll_sleep'], args['number_of_iterations'])
 
     def _parser_show_counters(self):
         parser = argparse.ArgumentParser(prog='show_counters')

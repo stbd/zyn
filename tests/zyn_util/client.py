@@ -378,7 +378,7 @@ class ZynFilesystemClient:
     def reset_local_filesystem(self):
         self._fs.reset_data()
 
-    def open(self, path_files, sleep_duration):
+    def open(self, path_files, sleep_duration, number_of_iterations=None):
 
         files = {}
         for p in path_files:
@@ -398,6 +398,7 @@ class ZynFilesystemClient:
             for f in files.values():
                 f.open_and_sync(self.connection())
 
+            iteration = 1
             while True:
                 self._log.debug('Synchronizing')
 
@@ -422,6 +423,10 @@ class ZynFilesystemClient:
                 for f in files.values():
                     f.push_local_changes(self.connection())
 
+                if number_of_iterations is not None and iteration >= number_of_iterations:
+                    raise KeyboardInterrupt()
+
+                iteration += 1
                 time.sleep(sleep_duration)
 
         except KeyboardInterrupt as e:
