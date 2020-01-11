@@ -2076,25 +2076,25 @@ fn handle_mod_user_group(client: & mut Client) -> Result<(), ()>
     Ok(())
 }
 
-static MAX_WAIT_DURATION_FOR_NODE_RESPONSE_MS: u64 = 1000; // todo: probably needs to be increased
-static MAX_NUMBER_OF_MESSAGES_FROM_NODE: u64 = 5;
+static MAX_WAIT_DURATION_FOR_NODE_RESPONSE_SECONDS: i64 = 5;
 
 fn node_receive<OkType>(
     client: & mut Client,
     handler: & dyn Fn(ClientProtocol, & mut Client) -> (Option<ClientProtocol>, Option<Result<OkType, ()>>)
 ) -> Result<OkType, ()> {
 
-    let sleep_duration = MAX_WAIT_DURATION_FOR_NODE_RESPONSE_MS / MAX_NUMBER_OF_MESSAGES_FROM_NODE;
-    for _ in 0..MAX_NUMBER_OF_MESSAGES_FROM_NODE {
+    let sent_timestamp: Timestamp = utc_timestamp();
+    loop {
 
         let msg = match client.node_receive.try_recv() {
             Ok(msg) => msg,
             Err(TryRecvError::Disconnected) => {
+                error!("Node disconnected from client");
                 client.status.set(Status::FailedToreceiveFromNode);
                 return Err(())
             },
             Err(TryRecvError::Empty) => {
-                sleep(Duration::from_millis(sleep_duration));
+                sleep(Duration::from_millis(100));
                 continue;
             },
         };
@@ -2106,9 +2106,12 @@ fn node_receive<OkType>(
             },
             (_, _) => panic!()
         };
-    }
 
-    warn!("No response received from node in time, client={}", client);
-    client.status.set(Status::FailedToreceiveFromNode);
-    Err(())
+        let duration = utc_timestamp() - sent_timestamp;
+        if duration > MAX_WAIT_DURATION_FOR_NODE_RESPONSE_SECONDS {
+            warn!("Failed to receive response in time from node");
+            client.status.set(Status::FailedToreceiveFromNode);
+            return Err(())
+        }
+    }
 }
