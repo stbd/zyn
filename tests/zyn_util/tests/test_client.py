@@ -810,7 +810,10 @@ class TestClientCommon(TestClient):
     def test_client_open(self):
         state = self._start_server_and_client()
         path_file = self._create_remote_ra_and_fetch(state, '/file')
+        state.write_local_file_text(path_file, 'data')
         self._open_file(state, path_file, 1, 1)
+        state.write_local_file_text(path_file, 'more')
+        self._sync(state, path_file)
 
 
 class TestClientList(TestClient):
