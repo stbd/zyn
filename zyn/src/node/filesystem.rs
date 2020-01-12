@@ -223,6 +223,8 @@ impl Filesystem {
                 fs.nodes[*node_id as usize] = Node::Directory{ directory: directory };
             }
 
+        info!("Filesystem loaded with {} files", fs.number_of_files);
+
         Ok(fs)
     }
 
