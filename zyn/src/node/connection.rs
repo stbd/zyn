@@ -43,19 +43,25 @@ impl Connection {
                 let write_result = tls_sys::tls_write(self.context, start_point as _, bytes_left);
 
                 if write_result > 0 {
+
                     offset += write_result as usize;
                     if offset == buffer.len() {
                         return Ok(offset);
                     }
                     continue;
-                } else if write_result == TLS_WANT_POLLIN {
-                    warn!("TLS requested POLLIN, unhandled");
-                    // todo: Not sure what to do here
+
                 } else if write_result == TLS_WANT_POLLOUT {
-                    // Try again after sleep
+
+                    sleep(Duration::from_millis(50));
+                    continue;
+
+                } else if write_result == TLS_WANT_POLLIN {
+
+                    // todo: Not sure what to do here, try again afren sleep
+                    warn!("TLS requested POLLIN");
+
                 } else {
                     error!("Read error: read_result={}", write_result);
-                    return Err(());
                 }
 
                 sleep(Duration::from_millis(DEFAULT_SLEEP_DURATION_MS));
