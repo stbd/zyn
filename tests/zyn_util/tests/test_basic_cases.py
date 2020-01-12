@@ -151,6 +151,19 @@ class TestBasicServerUsage(TestBasicOperatinsCommon):
         self._restart_node()
         self._connect_to_node_and_handle_auth('admin', password)
 
+    def test_restarting_server_saves_filesystem(self):
+        data = 'data'.encode('utf-8')
+        c = self._start_and_connect_to_node_and_handle_auth()
+        rsp = self._create_file_ra(c, 'file-1', parent_path='/')
+        rsp = self._open_file_write(c, path='/file-1')
+        c.ra_insert(rsp.node_id, rsp.revision, 0, data).as_write_rsp()
+        self._restart_node()
+
+        c = self._connect_to_node_and_handle_auth()
+        rsp = self._open_file_read(c, path='/file-1')
+        rsp, d = c.read_file(rsp.node_id, 0, len(data))
+        self.assertEqual(d, data)
+
     def test_restarting_server_with_init_failes_gracefully(self):
         self._start_and_connect_to_node_and_handle_auth()
         self._stop_node()
