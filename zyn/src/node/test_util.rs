@@ -8,7 +8,6 @@ use std::io::Read;
 use std::path::{ PathBuf };
 
 use std::process::{ Command, Stdio };
-use std::str;
 use std::sync::{ Once, ONCE_INIT };
 use std::thread::{ sleep };
 use std::time::{ Duration };
@@ -40,7 +39,7 @@ pub fn create_crypto() -> Crypto {
     let mut buffer = String::new();
     let mut path = home_dir().unwrap();
     path.push(".zyn-test-user-gpg-fingerprint");
-    let mut file = File::open(path).unwrap();;
+    let mut file = File::open(path).unwrap();
     file.read_to_string(& mut buffer).unwrap();
     buffer.pop();
     Crypto::new(buffer).unwrap()

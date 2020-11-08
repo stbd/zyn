@@ -129,8 +129,8 @@ impl FileHandle {
         path_folder.join("root")
     }
 
-    pub fn state(& self) -> (PathBuf) {
-        (self.path.clone())
+    pub fn state(& self) -> PathBuf {
+        self.path.clone()
     }
 
     pub fn path(& self) -> & Path {

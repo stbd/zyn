@@ -1,5 +1,5 @@
 use std::fs::{ create_dir, read_dir };
-use std::mem::{ uninitialized };
+use std::mem::{ MaybeUninit };
 use std::path::{ Path, PathBuf };
 use std::ptr::{ null_mut };
 use std::sync::mpsc::{ channel, Sender, Receiver, TryRecvError };
@@ -167,7 +167,7 @@ pub enum NodeProtocol {
 fn start_signal_listener() -> Result<Receiver<()>, ()> {
 
     let (sender, receiver) = channel::<()>();
-    let mut signal_set: [size_t; 32] = unsafe { uninitialized() };
+    let mut signal_set: [size_t; 32] = unsafe { MaybeUninit::uninit().assume_init() };
     if unsafe { sigemptyset(signal_set.as_mut_ptr() as _) } != 0 {
         return Err(())
     }
