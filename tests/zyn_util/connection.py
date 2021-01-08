@@ -563,7 +563,7 @@ class ZynConnection:
                 d = self._socket.recv()
             except ssl.SSLWantReadError:
                 d = None
-            except socket.timeout as e:
+            except socket.timeout:
                 d = None
 
             if d is None:
@@ -723,10 +723,10 @@ class ZynConnection:
                 if self._tag:
                     children = []
                     for c in self._children:
-                        l = c.to_list()
-                        if isinstance(l, list) and not l:
+                        list_of = c.to_list()
+                        if isinstance(list_of, list) and not list_of:
                             continue
-                        children.append(l)
+                        children.append(list_of)
                     return [self._tag] + children
                 elif self._value or isinstance(self._value, int):
                     return self._value
@@ -1003,7 +1003,7 @@ class Message:
     RESPONSE = 2
 
     def type(self):
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def __init__(self, rsp):
         self._rsp = rsp
@@ -1332,7 +1332,7 @@ class Notification(Message):
         elif n.notification_type() == Notification.TYPE_DELETED:
             return NotificationModified(msg)
         else:
-            raise NotImplemented()
+            raise NotImplementedError()
 
     def __init__(self, msg):
         super(Notification, self).__init__(msg)

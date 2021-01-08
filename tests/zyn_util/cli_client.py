@@ -582,7 +582,7 @@ def main():
     while True:
         try:
             cli.cmdloop()
-        except zyn_util.exception.ZynException as e:
+        except zyn_util.exception.ZynException:
             print('Exception while processing command')
             traceback.print_exc()
         except KeyboardInterrupt:

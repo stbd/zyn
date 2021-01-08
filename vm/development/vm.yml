@@ -1,0 +1,66 @@
+---
+- hosts: localhost
+  tasks:
+    - name: "Install packages"
+      become: yes
+      apt:
+        name: "{{ packages }}"
+      vars:
+        packages:
+          - 'build-essential'
+          - 'haveged'            # Used to generate randomness for security operations
+          - 'python3'
+          - 'python3-pip'
+          - 'shellcheck'         # Static analyser for bash scripts
+          - 'curl'
+          - 'gnupg2'
+          - 'gnupg-agent'        # https://unix.stackexchange.com/questions/512173/gpg-gpg-preset-passphrase-installation
+          - 'apt-transport-https'
+          - 'software-properties-common'
+          - 'ssl-cert'
+
+    - name: "Init home"
+      script: "/zyn/vm/development/files/zyn-prepare-home.sh /home/vagrant"
+
+    - name: "Install Rust"
+      script: "/zyn/vm/development/files/zyn-install-rust-debian.sh"
+
+    - name: "Install Libressl"
+      script: "/zyn/vm/development/files/zyn-install-libressl-debian.sh"
+
+    - name: "Configure encryption"
+      script: "/zyn/vm/development/files/zyn-prepare-encryption-keys.sh"
+
+    - name: "Configure certificates"
+      become: yes
+      script: "/zyn/vm/development/files/zyn-prepare-certificates.sh"
+
+    - name: "Install Docker"
+      become: yes
+      shell: |
+        #!/usr/bin/env bash
+        set -eu
+        is_installed=1
+        which docker || is_installed=0
+        if [ $is_installed -eq 1 ]; then
+            echo "Docker already installed"
+            exit 0
+        fi
+        curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add -
+        add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable"
+        apt-get update
+        apt-get -y install docker-ce
+
+    - name: "Install zyn-util"
+      become: yes
+      shell: pip3 install -e /zyn/tests
+
+    - name: "Configure developer user"
+      become: yes
+      user:
+        name: vagrant
+        append: yes
+        groups:
+          - 'sudo'
+          - 'docker'
+          - 'ssl-cert'

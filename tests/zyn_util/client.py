@@ -265,13 +265,13 @@ class ZynFilesystemClient:
 
         rsp = self._fs.query_fs_children(path_remote, self.connection())
         for e in rsp.elements:
-            l = None
+            local = None
             if self._fs.is_tracked(node_id=e.node_id):
-                l = self._fs.local_element_from_node_id(e.node_id)
+                local = self._fs.local_element_from_node_id(e.node_id)
 
             children.append(Element(
                 e,
-                l,
+                local,
             ))
         return element, children
 
@@ -429,7 +429,7 @@ class ZynFilesystemClient:
                 iteration += 1
                 time.sleep(sleep_duration)
 
-        except KeyboardInterrupt as e:
+        except KeyboardInterrupt:
             pass
 
         finally:

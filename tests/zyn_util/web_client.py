@@ -317,7 +317,7 @@ class WebSocket(tornado.websocket.WebSocketHandler):
 
             try:
                 del self._open_files[node_id]
-            except:
+            except Exception:
                 pass
 
             rsp = self._connection().close_file(node_id=node_id)

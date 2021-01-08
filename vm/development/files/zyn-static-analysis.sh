@@ -1,4 +1,4 @@
-#/usr/bin/env bash
+#!/usr/bin/env bash
 
 set -euo pipefail
 
@@ -8,7 +8,7 @@ pushd "$path_project" &> /dev/null
 for file in $(git ls-files); do
 
     if [[ "$file" = *".py" ]]; then
-        flake8 "$file" || result=1
+        flake8 --config /zyn/tests/zyn_util/setup.cfg "$file" || result=1
     elif [[ "$file" = *".sh" ]]; then
         shellcheck "$file" || result=1
     else

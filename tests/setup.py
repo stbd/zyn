@@ -9,7 +9,7 @@ setup(
     packages=['zyn_util'],
     install_requires=[
         'nose==1.3.7',
-        'flake8==3.3.0',
+        'flake8==3.8.4',
         'tornado==4.5.2',
         'certifi',
     ],

@@ -1,4 +1,4 @@
-#/usr/bin/env bash
+#!/usr/bin/env bash
 
 sourced=0
 if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
@@ -20,8 +20,8 @@ system_test_files=( \
 function zyn-system-tests() {
     path_project=$ZYN_ROOT/tests/zyn_util/tests
     result=0
-    pushd "$path_project" &> /dev/null
+    pushd "$path_project" &> /dev/null || exit 1
     nosetests "${system_test_files[@]}" --nologcapture --nocapture -vv "$@" || result=1
-    popd &> /dev/null
+    popd &> /dev/null || exit 1
     return "$result"
 }
