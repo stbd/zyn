@@ -7,19 +7,26 @@ gpg_agent_cache_expires=$((60 * 60 * 24 * 365 * 10))
 path_password=$path_import_configuration/gpg-password
 path_private_key=$path_import_configuration/gpg-private-key
 path_fingerprint=$path_import_configuration/gpg-fingerprint
+path_keygrip=$path_import_configuration/gpg-keygrip
 path_pem_cert=$path_import_configuration/cert.pem
 path_pem_key=$path_import_configuration/key.pem
 
 echo "Starting GPG agent"
 
-eval "$(gpg-agent \
-     --default-cache-ttl $gpg_agent_cache_expires \
-     --max-cache-ttl $gpg_agent_cache_expires  \
-     --allow-preset-passphrase \
-     --write-env-file /zyn-gpg-agent-env-settings \
-      --daemon  \
-      )" \
-    &> /dev/null
+# Call GPG with some command to make sure .gnupg is generated to user home
+gpg --list-keys
+
+cat <<EOF > "$HOME/.gnupg/gpg.conf"
+use-agent
+EOF
+
+cat <<EOF > "$HOME/.gnupg/gpg-agent.conf"
+default-cache-ttl $gpg_agent_cache_expires
+max-cache-ttl $gpg_agent_cache_expires
+allow-preset-passphrase
+EOF
+
+gpg-connect-agent 'RELOADAGENT' /bye
 
 echo "Importing private key"
 
@@ -37,13 +44,11 @@ expect -c "spawn gpg --edit-key \
        expect eof" \
     &> /dev/null
 
-echo "use-agent" > /root/.gnupg/gpg.conf
-
 /usr/lib/gnupg2/gpg-preset-passphrase \
     --preset \
     --passphrase "$(< $path_password base64 -d)" \
     -v \
-    "$(< $path_fingerprint base64 -d)" \
+    "$(< $path_keygrip base64 -d)" \
     &> /dev/null
 
 # Password is not needed anymore, write garbage over it

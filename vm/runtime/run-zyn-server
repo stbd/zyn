@@ -52,6 +52,10 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
         help='Fingerprint of the key used for encrypting'
     )
     parser.add_argument(
+        'gpg-keygrip',
+        help='Keygrip of the key used for encrypting'
+    )
+    parser.add_argument(
         'path-cert-pem',
         help='Path to exported certifcation pem file that will be used for TLS'
     )
@@ -90,7 +94,6 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
         'Docker configuration, as it avoids constantly needing to rebuilding image',
     )
 
-
     system_args = sys.argv[1:]
     docker_args = []
     if '--' in system_args:
@@ -123,7 +126,8 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
         password = getpass.getpass('Password for private GPG key: ')
         os.mkdir(PATH_TEMP_FOLDER)
         path_fingerprint = _base64_file_in_temp_folder('file-1', args['gpg-fingerprint'])
-        path_password = _base64_file_in_temp_folder('file-2', password)
+        path_keygrip = _base64_file_in_temp_folder('file-2', args['gpg-keygrip'])
+        path_password = _base64_file_in_temp_folder('file-3', password)
 
         run_cmd = [
             'docker',
@@ -132,6 +136,7 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
             '-v', '{}:{}'.format(args['path-cert-pem'], '/zyn-configuration/cert.pem'),
             '-v', '{}:{}'.format(args['path-key-pem'], '/zyn-configuration/key.pem'),
             '-v', '{}:{}'.format(path_fingerprint, '/zyn-configuration/gpg-fingerprint'),
+            '-v', '{}:{}'.format(path_keygrip, '/zyn-configuration/gpg-keygrip'),
             '-v', '{}:{}'.format(path_password, '/zyn-configuration/gpg-password'),
             '-e', 'RUST_LOG={}'.format(args['log_level']),
             '-p', '{}:8080/tcp'.format(args['bind_to']),
@@ -165,6 +170,8 @@ run-zyn-in-docker $PWD/private.key 1234 $PWD/fullchain.pem $PWD/privkey.pem --in
         if os.path.exists(PATH_TEMP_FOLDER):
             if path_fingerprint is not None:
                 _delete_file(path_fingerprint)
+            if path_keygrip is not None:
+                _delete_file(path_keygrip)
             if path_password is not None:
                 _delete_file(path_password)
             os.rmdir(PATH_TEMP_FOLDER)

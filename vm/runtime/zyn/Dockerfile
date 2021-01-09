@@ -1,4 +1,4 @@
-from debian:jessie as build_libressl
+from debian:buster as build_libressl
 
 workdir /workdir
 
@@ -17,7 +17,7 @@ make check install && \
 popd \
 "
 
-from debian:jessie as build_zyn
+from debian:buster as build_zyn
 
 workdir /workdir
 
@@ -31,7 +31,7 @@ run /bin/bash -euc " \
 curl https://sh.rustup.rs -sSf \
     | sh -s -- -y \
          --default-host x86_64-unknown-linux-gnu \
-         --default-toolchain 1.38.0 \
+         --default-toolchain 1.47.0 \
 "
 
 copy --from=build_libressl /usr/libressl /usr
@@ -49,7 +49,7 @@ popd \
 
 run cp /workdir/zyn/target/debug/zyn /zyn
 
-from debian:jessie
+from debian:buster
 
 copy --from=build_libressl /usr/libressl /usr
 copy --from=build_zyn /zyn /zyn
@@ -58,6 +58,7 @@ run apt-get update \
     && apt-get install \
        expect \
        gnupg2 \
+       gnupg-agent \
        haveged \
        -y
 
