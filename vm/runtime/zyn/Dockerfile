@@ -8,7 +8,7 @@ run apt-get update && apt-get install \
        -y
 
 run /bin/bash -euc " \
-libressl_version=2.4.3; \
+libressl_version=3.2.3; \
 wget https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-\${libressl_version}.tar.gz && \
 tar xf libressl-\${libressl_version}.tar.gz && \
 pushd libressl-\${libressl_version} && \

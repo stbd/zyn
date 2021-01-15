@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-version=2.4.3
+version=3.2.3
 workdir="$(mktemp -d)"
 
 pushd "$workdir"
