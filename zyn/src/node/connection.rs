@@ -3,29 +3,30 @@ use std::io::{ ErrorKind };
 use std::net::{ TcpListener, TcpStream };
 use std::os::unix::io::AsRawFd;
 use std::path::{ Path };
+use std::process::{ Command };
 use std::ptr;
 use std::string::String;
 use std::thread::{ sleep };
 use std::time::{ Duration };
-use std::process::{ Command };
 
-use tls_sys;
+use crate::node::common::{ Buffer, Timestamp };
+use crate::libressl::tls::{
+    tls, TLS_WANT_POLLIN, TLS_WANT_POLLOUT,
+    tls_init, tls_config_new, tls_config_set_key_file, tls_config_set_cert_file, tls_server, tls_configure,
+    tls_error, tls_accept_socket, tls_close, tls_free, tls_write, tls_read
+};
 
-use node::common::{ Buffer, Timestamp };
-
-static TLS_WANT_POLLIN: isize = tls_sys::WANT_POLLIN as isize;
-static TLS_WANT_POLLOUT: isize = tls_sys::WANT_POLLOUT as isize;
 static DEFAULT_SLEEP_DURATION_MS: u64 = 100;
 
-fn _get_tls_error(server: tls_sys::Tls) -> String {
+fn _get_tls_error(server: * mut tls) -> String {
     unsafe {
-        return String::from(ffi::CStr::from_ptr(tls_sys::tls_error(server)).to_str().unwrap());
+        return String::from(ffi::CStr::from_ptr(tls_error(server)).to_str().unwrap());
     }
 }
 
 pub struct Connection {
     _socket: TcpStream,
-    context: tls_sys::Tls,
+    context: * mut tls,
 }
 
 unsafe impl Send for Connection {}
@@ -40,7 +41,7 @@ impl Connection {
             while trial < 10 {
                 let start_point = buffer.as_ptr().offset(offset as isize);
                 let bytes_left = buffer.len() - offset;
-                let write_result = tls_sys::tls_write(self.context, start_point as _, bytes_left);
+                let write_result = tls_write(self.context, start_point as _, bytes_left as u64);
 
                 if write_result > 0 {
 
@@ -50,12 +51,12 @@ impl Connection {
                     }
                     continue;
 
-                } else if write_result == TLS_WANT_POLLOUT {
+                } else if write_result == TLS_WANT_POLLOUT as i64 {
 
                     sleep(Duration::from_millis(50));
                     continue;
 
-                } else if write_result == TLS_WANT_POLLIN {
+                } else if write_result == TLS_WANT_POLLIN as i64 {
 
                     // todo: Not sure what to do here, try again afren sleep
                     warn!("TLS requested POLLIN");
@@ -83,7 +84,7 @@ impl Connection {
             let mut read_result;
             loop {
                 let start_point = buffer.as_ptr().offset(current_size as isize);
-                read_result = tls_sys::tls_read(self.context, start_point as * mut _, space_left);
+                read_result = tls_read(self.context, start_point as * mut _, space_left as u64);
                 if read_result <= 0 {
                     break
                 }
@@ -92,14 +93,14 @@ impl Connection {
 
             if read_result == 0 {
                 return Err(());
-            } else if read_result == TLS_WANT_POLLIN {
+            } else if read_result == TLS_WANT_POLLIN as i64 {
                 buffer.resize(current_size, 0);
                 if current_size > original_size {
                     return Ok(true);
                 } else {
                     return Ok(false)
                 }
-            } else if read_result == TLS_WANT_POLLOUT {
+            } else if read_result == TLS_WANT_POLLOUT as i64{
                 warn!("TLS request POLLOUT, unhanled");
                 // todo: Not sure what the correct behavior is
                 // do the same sleep as POLLIN
@@ -116,20 +117,20 @@ impl Drop for Connection {
     fn drop(& mut self) {
         debug!("Closing TLS connection");
         unsafe {
-            match tls_sys::tls_close(self.context) {
+            match tls_close(self.context) {
                 0 => (),
                 _ => {
-                    error!("Error closing TLS connection, error={}", _get_tls_error(self.context));
+                    error!("Error closing TLS connection, ignoring...");
                 },
             };
-            tls_sys::tls_free(self.context);
+            tls_free(self.context);
         }
     }
 }
 
 pub struct Server {
     socket: TcpListener,
-    context: tls_sys::Tls,
+    context: * mut tls,
     certificate_expiration: Timestamp,
 }
 
@@ -196,7 +197,7 @@ impl Server {
             ? ;
 
         unsafe {
-            match tls_sys::tls_init() {
+            match tls_init() {
                 0 => (),
                 value => {
                     error!("Failed to init TLS: {}", value);
@@ -204,13 +205,13 @@ impl Server {
                 }
             }
 
-            let config = tls_sys::tls_config_new();
+            let config = tls_config_new();
             if config.is_null() {
                 error!("Failed to create TLS config");
                 return Err(());
             }
 
-            match tls_sys::tls_config_set_key_file(config, path_key.to_str().unwrap().as_ptr() as * mut _) {
+            match tls_config_set_key_file(config, path_key.to_str().unwrap().as_ptr() as * mut _) {
                 0 => (),
                 value => {
                     error!("Failed to set key file for TLS, code {}", value);
@@ -218,7 +219,7 @@ impl Server {
                 }
             }
 
-            match tls_sys::tls_config_set_cert_file(config, path_cert.to_str().unwrap().as_ptr() as * mut _) {
+            match tls_config_set_cert_file(config, path_cert.to_str().unwrap().as_ptr() as * mut _) {
                 0 => (),
                 value => {
                     error!("Failed to set cert file for TLS, code {}", value);
@@ -226,13 +227,13 @@ impl Server {
                 }
             }
 
-            let server = tls_sys::tls_server();
+            let server = tls_server();
             if server.is_null() {
                 error!("Failed to create TLS server");
                 return Err(());
             }
 
-            match tls_sys::tls_configure(server, config) {
+            match tls_configure(server, config) {
                 0 => (),
                 value => {
                     error!("Failed to create configuration for server, error {}: \"{}\"", value, _get_tls_error(server));
@@ -267,30 +268,28 @@ impl Server {
                     ? ;
 
                 unsafe {
-                    let mut context = ptr::null_mut();
-                    match tls_sys::tls_accept_socket(self.context, & mut context, stream.as_raw_fd()) {
+                    let mut client_context: * mut tls = ptr::null_mut();
+                    match tls_accept_socket(self.context, & mut client_context, stream.as_raw_fd()) {
                         0 => (),
                         error => {
                             warn!("Failed to accept TLS connection from {}, error: {}", remote_info, error);
                             return Err(());
                         }
                     }
-
                     info!("Accepted connection from: {}", remote_info);
 
                     return Ok(Some(Connection {
                         _socket: stream,
-                        context: context,
+                        context: client_context,
                     }))
                 }
             },
-
             Err(error) => {
                 if error.kind() == ErrorKind::WouldBlock {
                     return Ok(None);
                 }
                 warn!("Error accpeting connection: {}", error);
-                return Err(())
+                Err(())
             }
         }
     }

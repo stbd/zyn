@@ -1,5 +1,4 @@
 extern crate libc;
-extern crate tls_sys;
 extern crate chrono;
 extern crate sha2;
 extern crate rand;
@@ -14,3 +13,4 @@ extern crate serde_json;
 #[macro_use]
 pub mod tests;
 pub mod node;
+pub mod libressl;
