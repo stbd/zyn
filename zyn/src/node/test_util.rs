@@ -2,18 +2,22 @@ pub extern crate tempdir;
 extern crate log;
 use self::tempdir::{ TempDir };
 use log::{ LogRecord, LogMetadata, LogLevelFilter };
-use std::env::{ home_dir };
+use std::env;
 use std::fs::{ File };
 use std::io::Read;
 use std::path::{ PathBuf };
 
 use std::process::{ Command, Stdio };
-use std::sync::{ Once, ONCE_INIT };
+use std::sync::{ Once };
 use std::thread::{ sleep };
 use std::time::{ Duration };
 
 use crate::node::crypto::{ Crypto, Context };
 
+
+fn path_home() -> PathBuf {
+    PathBuf::from(env::var("HOME").unwrap())
+}
 
 #[allow(dead_code)]
 pub fn create_temp_folder() -> TempDir {
@@ -25,7 +29,7 @@ pub fn sleep_ms(duration_ms: u64) {
     sleep(Duration::from_millis(duration_ms));
 }
 
-pub fn assert_retry(function: & mut FnMut() -> bool) {
+pub fn assert_retry(function: & mut dyn FnMut() -> bool) {
     for trial in 1..4 {
         if function() {
             return ;
@@ -37,7 +41,7 @@ pub fn assert_retry(function: & mut FnMut() -> bool) {
 
 pub fn create_crypto() -> Crypto {
     let mut buffer = String::new();
-    let mut path = home_dir().unwrap();
+    let mut path = path_home();
     path.push(".zyn-test-user-gpg-fingerprint");
     let mut file = File::open(path).unwrap();
     file.read_to_string(& mut buffer).unwrap();
@@ -57,7 +61,7 @@ pub fn certificate_paths() -> (PathBuf, PathBuf) {
 pub fn create_file_of_random_1024_blocks(number_of_blocks: usize) -> PathBuf{
 
     let size = 1024 * number_of_blocks;
-    let mut path = home_dir().unwrap();
+    let mut path = path_home();
     path.push(format!(".zyn-test-data-{}.data", size));
 
     info!("Creating random data file, size={}, path=\"{}\"",
@@ -120,7 +124,7 @@ impl log::Log for UnitTestLogger {
     }
 }
 
-static LOGGING_GUARD: Once = ONCE_INIT;
+static LOGGING_GUARD: Once = Once::new();
 pub fn init_logging() {
     LOGGING_GUARD.call_once( || {
         match log::set_logger(|max_log_level| {
