@@ -1,8 +1,21 @@
-extern crate zyn;
+extern crate libc;
+extern crate chrono;
+extern crate sha2;
+extern crate rand;
+
 #[macro_use]
 extern crate log;
 extern crate env_logger;
-extern crate chrono;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
+
+// Modules
+#[macro_use]
+pub mod tests;
+pub mod node;
+pub mod libressl;
 
 use std::env::{ args };
 use std::path::{ PathBuf };
@@ -11,11 +24,11 @@ use std::str::{ FromStr };
 use std::string::{ String } ;
 use std::vec::{ Vec };
 
-use zyn::node::node::{ Node, NodeSettings };
-use zyn::node::common::{ ADMIN_GROUP, ADMIN_GROUP_NAME, utc_timestamp };
-use zyn::node::connection::{ Server };
-use zyn::node::crypto::{ Crypto };
-use zyn::node::user_authority::{ UserAuthority };
+use crate::node::node::{ Node, NodeSettings };
+use crate::node::common::{ ADMIN_GROUP, ADMIN_GROUP_NAME, utc_timestamp };
+use crate::node::connection::{ Server };
+use crate::node::crypto::{ Crypto };
+use crate::node::user_authority::{ UserAuthority };
 
 const EXIT_STATUS_OK: i32 = 0;
 const EXIT_STATUS_ERROR: i32 = 1;

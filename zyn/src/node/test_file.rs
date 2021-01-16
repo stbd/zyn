@@ -3,10 +3,10 @@ use std::path::{ PathBuf };
 extern crate tempdir;
 use self::tempdir::{ TempDir };
 
-use node::file_handle::{ FileHandle, FileAccess, FileLock, FileProperties, CachedFileProperties };
-use node::common::{ Buffer, FileRevision, NodeId, FileType };
-use node::user_authority::{ Id };
-use node::test_util;
+use crate::node::file_handle::{ FileHandle, FileAccess, FileLock, FileProperties, CachedFileProperties };
+use crate::node::common::{ Buffer, FileRevision, NodeId, FileType };
+use crate::node::user_authority::{ Id };
+use crate::node::test_util;
 
 struct State {
     _dir: TempDir,

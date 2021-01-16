@@ -7,11 +7,11 @@ use std::ptr::{ copy };
 use std::sync::mpsc::{ channel, Sender, Receiver, TryRecvError };
 use std::vec::{ Vec, Drain };
 
-use node::common::{ utc_timestamp, FileRevision, Buffer, NodeId, FileType, Timestamp };
-use node::crypto::{ Context };
-use node::file_handle::{ FileError, FileLock, FileAccess, Notification, OpenFileProperties };
-use node::serialize::{ SerializedMetadata };
-use node::user_authority::{ Id };
+use crate::node::common::{ utc_timestamp, FileRevision, Buffer, NodeId, FileType, Timestamp };
+use crate::node::crypto::{ Context };
+use crate::node::file_handle::{ FileError, FileLock, FileAccess, Notification, OpenFileProperties };
+use crate::node::serialize::{ SerializedMetadata };
+use crate::node::user_authority::{ Id };
 
 pub enum FileRequestProtocol {
     Close,

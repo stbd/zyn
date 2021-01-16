@@ -6,10 +6,10 @@ use std::thread::{ spawn, JoinHandle };
 use std::time::{ Duration };
 use std::vec::{ Vec };
 
-use node::common::{ log_crypto_context_error, FileRevision, Buffer, NodeId, FileType, Timestamp };
-use node::crypto::{ Crypto, Context };
-use node::file::{ FileService, FileImpl, Metadata, FileResponseProtocol, FileRequestProtocol };
-use node::user_authority::{ Id };
+use crate::node::common::{ log_crypto_context_error, FileRevision, Buffer, NodeId, FileType, Timestamp };
+use crate::node::crypto::{ Crypto, Context };
+use crate::node::file::{ FileService, FileImpl, Metadata, FileResponseProtocol, FileRequestProtocol };
+use crate::node::user_authority::{ Id };
 
 #[derive(Debug)]
 pub enum FileError {

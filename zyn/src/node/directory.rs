@@ -1,8 +1,8 @@
 use std::slice::{ Iter };
 use std::vec::{ Vec };
 
-use node::common::{ NodeId, Timestamp, utc_timestamp };
-use node::user_authority::{ Id };
+use crate::node::common::{ NodeId, Timestamp, utc_timestamp };
+use crate::node::user_authority::{ Id };
 
 #[derive(Clone)]
 pub struct Child {

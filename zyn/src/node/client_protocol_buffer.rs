@@ -2,8 +2,8 @@ use std::io::{ Write };
 use std::path::{ PathBuf };
 use std::vec::{ Vec };
 
-use node::common::{ Buffer, NodeId, FileDescriptor, Timestamp };
-use node::node::{ Authority };
+use crate::node::common::{ Buffer, NodeId, FileDescriptor, Timestamp };
+use crate::node::node::{ Authority };
 
 // todo: collect all static str to constants
 pub static FIELD_END_MARKER: & 'static str = "E:;";

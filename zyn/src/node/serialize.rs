@@ -7,9 +7,9 @@ use serde::de::{ Error as SerdeError };
 use serde::{ Deserialize, Deserializer, Serialize, Serializer };
 use serde_json;
 
-use node::crypto::{ Context };
-use node::user_authority::{ Id };
-use node::common::{ log_utf_error, Timestamp, FileRevision, NodeId, FileType };
+use crate::node::crypto::{ Context };
+use crate::node::user_authority::{ Id };
+use crate::node::common::{ log_utf_error, Timestamp, FileRevision, NodeId, FileType };
 
 
 fn path_with_version(path_basename: & Path, version_number: u32) -> PathBuf {

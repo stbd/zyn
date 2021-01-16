@@ -8,9 +8,9 @@ use std::vec::{ Vec };
 use sha2::{ Sha256, Digest };
 use rand::{ random };
 
-use node::crypto::{ Context };
-use node::common::{ Timestamp };
-use node::serialize::{ SerializedUserAuthority };
+use crate::node::crypto::{ Context };
+use crate::node::common::{ Timestamp };
+use crate::node::serialize::{ SerializedUserAuthority };
 
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub enum Id {

@@ -4,7 +4,7 @@ use std::fmt::{ Display, Formatter, Result as FmtResult };
 
 use chrono::{ UTC };
 
-use node::user_authority::{ Id };
+use crate::node::user_authority::{ Id };
 
 pub type NodeId = u64;
 pub type Buffer = Vec<u8>;

@@ -6,14 +6,14 @@ use std::time::{ Duration };
 use std::vec::{ Vec };
 use std::{ str };
 
-use node::client_protocol_buffer::{ ReceiveBuffer, SendBuffer };
-use node::common::{ NodeId, Buffer, OpenMode, FileType, Timestamp, utc_timestamp };
-use node::connection::{ Connection };
-use node::file_handle::{ FileAccess, FileError, Notification, FileLock, FileProperties };
-use node::filesystem::{ FilesystemError };
-use node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, ErrorResponse, NodeError, ShutdownReason, FileSystemListElement, Authority,
+use crate::node::client_protocol_buffer::{ ReceiveBuffer, SendBuffer };
+use crate::node::common::{ NodeId, Buffer, OpenMode, FileType, Timestamp, utc_timestamp };
+use crate::node::connection::{ Connection };
+use crate::node::file_handle::{ FileAccess, FileError, Notification, FileLock, FileProperties };
+use crate::node::filesystem::{ FilesystemError };
+use crate::node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, ErrorResponse, NodeError, ShutdownReason, FileSystemListElement, Authority,
                   FilesystemElementProperties, };
-use node::user_authority::{ Id };
+use crate::node::user_authority::{ Id };
 
 /*
 # Protocol definition

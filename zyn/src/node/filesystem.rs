@@ -6,12 +6,12 @@ use std::result::{ Result };
 use std::str;
 use std::vec::{ Vec };
 
-use node::file_handle::{ FileHandle, FileProperties };
-use node::directory::{ Directory };
-use node::crypto::{ Crypto };
-use node::user_authority::{ Id };
-use node::serialize::{ SerializedFilesystem };
-use node::common::{ NodeId, NODE_ID_ROOT, ADMIN_GROUP, FileType,
+use crate::node::file_handle::{ FileHandle, FileProperties };
+use crate::node::directory::{ Directory };
+use crate::node::crypto::{ Crypto };
+use crate::node::user_authority::{ Id };
+use crate::node::serialize::{ SerializedFilesystem };
+use crate::node::common::{ NodeId, NODE_ID_ROOT, ADMIN_GROUP, FileType,
                     log_crypto_context_error, utc_timestamp };
 
 #[derive(Debug)]
