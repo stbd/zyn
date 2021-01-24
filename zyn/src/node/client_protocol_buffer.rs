@@ -33,16 +33,16 @@ impl ReceiveBuffer {
     }
 
     pub fn take(& mut self, output: & mut Buffer) {
-        let requested_max = self.buffer_index + output.len();
-        let used_max = {
-            if requested_max > self.buffer.len() {
+        let requested_data_index = self.buffer_index + output.capacity();
+        let data_available_index = {
+            if requested_data_index > self.buffer.len() {
                 self.buffer.len()
             } else {
-                requested_max
+                requested_data_index
             }
         };
-        output.extend(& self.buffer[self.buffer_index .. used_max]);
-        self.buffer_index = used_max;
+        output.extend(& self.buffer[self.buffer_index .. data_available_index]);
+        self.buffer_index = data_available_index;
     }
 
     pub fn drop_consumed_buffer(& mut self) {

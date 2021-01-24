@@ -684,6 +684,105 @@ class TestBasicEditFile(TestBasicOperatinsCommon):
         rsp, data = self._read(c, create_rsp_2.node_id, 0, 100, rsp_2.revision, data_2)
 
 
+class TestBatchEdit(TestBasicEditFile):
+
+    def _init_batch_edit_test(self, content=None):
+        if content is None:
+            content = '''line-1
+line-2
+line-3
+'''
+
+        c = self._start_and_connect_to_node_and_handle_auth()
+        create_rsp = self._create_file_ra(c, 'file-1', parent_path='/')
+        open_rsp = self._open_file_write(c, node_id=create_rsp.node_id)
+        rsp = self._ra_write(c, create_rsp.node_id, open_rsp.revision, 0, content)
+        return c, create_rsp.node_id, rsp.revision
+
+    def _validate_data(self, connection, node_id, expected_data):
+        size = len(expected_data) + 100
+        rsp, data = connection.read_file(node_id, 0, size)
+        data = data.decode('utf-8')
+        if data != expected_data:
+            print('Batch edit result data does not match expected')
+            print('Expected: "{}"'.format(expected_data))
+            print('Received: "{}"'.format(data))
+            self.assertEqual(data, expected_data)
+
+    def _validate_rsp(self, rsp, revision):
+        self.assertFalse(rsp.is_error())
+        rsp = rsp.as_write_rsp()
+        self.assertGreater(rsp.revision, revision)
+
+    def _validate_rsp_error(self, rsp, expected_error_code, expected_operation_index=None):
+        self.assertEqual(rsp.error_code(), expected_error_code)
+        rsp = rsp.as_batch_edit_error_response()
+        if expected_operation_index is not None:
+            self.assertTrue(rsp.is_incomplete)
+            self.assertEqual(rsp.operation_index, expected_operation_index)
+
+    def test_batch_edit_delete_first(self):
+        c, node_id, revision = self._init_batch_edit_test()
+        batch_edit = c.ra_batch_edit(node_id, revision)
+        batch_edit.delete(7, 7)
+        batch_edit.insert(14, '123456\n'.encode('utf-8'))
+        batch_edit.write(21, 'line-4\n'.encode('utf-8'))
+        self._validate_rsp(batch_edit.commit(), revision)
+        self._validate_data(c, node_id, 'line-1\n123456\nline-3\nline-4\n')
+
+    def test_batch_edit_write_first(self):
+        c, node_id, revision = self._init_batch_edit_test()
+        batch_edit = c.ra_batch_edit(node_id, revision)
+        batch_edit.write(0, '123456\n'.encode('utf-8'))
+        batch_edit.delete(7, 7)
+        batch_edit.insert(14, '------\n'.encode('utf-8'))
+        self._validate_rsp(batch_edit.commit(), revision)
+        self._validate_data(c, node_id, '123456\n------\nline-3\n')
+
+    def test_batch_edit_insert_first(self):
+        c, node_id, revision = self._init_batch_edit_test()
+        batch_edit = c.ra_batch_edit(node_id, revision)
+        batch_edit.insert(0, '------\n'.encode('utf-8'))
+        batch_edit.delete(7, 7)
+        batch_edit.write(14, '123456\n'.encode('utf-8'))
+        self._validate_rsp(batch_edit.commit(), revision)
+        self._validate_data(c, node_id, '------\nline-1\n123456\n')
+
+    def test_batch_edit_overlapping_modification(self):
+        c, node_id, revision = self._init_batch_edit_test()
+        batch_edit = c.ra_batch_edit(node_id, revision)
+        batch_edit.write(0, '------\n'.encode('utf-8'))
+        batch_edit.write(6, '123456\n'.encode('utf-8'))
+        self._validate_rsp_error(
+            batch_edit.commit(),
+            zyn_util.errors.BatchEditOperationNotSequntialError,
+            1,
+        )
+
+    def test_batch_edit_non_sequential_modification(self):
+        c, node_id, revision = self._init_batch_edit_test()
+        batch_edit = c.ra_batch_edit(node_id, revision)
+        batch_edit.write(7, '123456\n'.encode('utf-8'))
+        batch_edit.write(0, '------\n'.encode('utf-8'))
+        self._validate_rsp_error(
+            batch_edit.commit(),
+            zyn_util.errors.BatchEditOperationNotSequntialError,
+            1,
+        )
+
+    def test_batch_edit_operation_index_on_error(self):
+        c, node_id, revision = self._init_batch_edit_test()
+        batch_edit = c.ra_batch_edit(node_id, revision)
+        batch_edit.insert(0, 'line-0\n'.encode('utf-8'))
+        batch_edit.write(7, '123456\n'.encode('utf-8'))
+        batch_edit.write(13, '------\n'.encode('utf-8'))
+        self._validate_rsp_error(
+            batch_edit.commit(),
+            zyn_util.errors.BatchEditOperationNotSequntialError,
+            2,
+        )
+
+
 class TestArguments(zyn_util.tests.common.TestCommon):
     def test_filesystem_capacity(self):
         self._start_node(filesystem_capacity=1)

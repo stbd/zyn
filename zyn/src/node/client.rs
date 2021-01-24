@@ -103,6 +103,8 @@ enum CommonErrorCodes {
     InvalidEditError = 7,
     FailedToReceiveDataError = 8,
     TooManyFilesOpenError = 9,
+    InvalidBatchOperationError = 10,
+    BatchEditOperationNotSequntialError = 11,
 }
 
 fn map_node_error_to_uint(error: ErrorResponse) -> u64 {
@@ -352,6 +354,16 @@ macro_rules! try_send_response_without_fields {
     }}
 }
 
+macro_rules! try_send_batch_edit_response_without_fields {
+    ($class:expr, $transaction_id:expr, $rsp_error_code:expr, $operation_index:expr, $revision:expr) => {{
+        let mut buffer = try_write_buffer!($class, Client::create_response_buffer($transaction_id, $rsp_error_code as u64));
+        try_write_buffer!($class, buffer.write_unsigned($operation_index));
+        try_write_buffer!($class, buffer.write_unsigned($revision));
+        try_write_buffer!($class, buffer.write_end_of_message());
+        try_with_set_error_state!($class, $class.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient)
+    }}
+}
+
 macro_rules! try_in_receive_loop {
     ($class:expr, $operation:expr, $error_code:expr) => {{
         let result = $operation;
@@ -423,6 +435,7 @@ impl Client {
             ("CREATE-DIRECTORY:", handle_create_directory_req, 1),
             ("O:", handle_open_req, 1),
             ("CLOSE:", handle_close_req, 1),
+            ("RA-BATCH-EDIT:", handle_batch_edit_req, 1),
             ("RA-W:", handle_write_random_access_req, 1),
             ("RA-I:", handle_random_access_insert_req, 1),
             ("RA-D:", handle_random_access_delete_req, 1),
@@ -711,7 +724,7 @@ impl Client {
         }
 
         let mut trial = 1;
-        const MAX_NUMBER_OF_TRIALS: usize = 10;
+        const MAX_NUMBER_OF_TRIALS: usize = 100;
 
         while buffer.len() != buffer.capacity() && trial < MAX_NUMBER_OF_TRIALS {
             match connection.read(buffer) {
@@ -731,6 +744,29 @@ impl Client {
         } else {
             Err(())
         }
+    }
+
+    fn read_message(buffer: & mut ReceiveBuffer, connection: & mut Connection) -> Result<(), ()> {
+
+        const MAX_NUMBER_OF_TRIALS: usize = 10;
+        let mut trial = 0;
+
+        while trial < MAX_NUMBER_OF_TRIALS {
+            match connection.read(& mut buffer.get_mut_buffer()) {
+                Ok(true) => (),
+                Ok(false) => {
+                    sleep(Duration::from_millis(100));
+                    trial += 1;
+                },
+                Err(()) => {
+                    return Err(());
+                }
+            }
+            if buffer.is_complete_message() {
+                return Ok(());
+            }
+        }
+        Err(())
     }
 }
 
@@ -1073,6 +1109,228 @@ fn is_random_access_edit_allowed(page_size: u64, offset: u64, size: u64) -> bool
     is_block_in_page(page_size, offset, size)
 }
 
+/*
+Write sequence of modifications to random access file
+<- [Version]RA-BATCH-EDIT:[Transaction Id][Node-Id: file][Uint: revision][Uint: number of operations];[End]
+ * file needs to be open
+ * file needs to be of type random access
+-> [Version]RSP:[Transaction Id][Uint: error code];[End]
+
+If no errors, client is allowed to send operations. Each operation is sent one at the time after which
+server send a response, if there are no errors, next operation is allowed to be sent.
+Each operation looks like below:
+<- [Uint: operation-code][Uint: offset][Uint: size];[End]
+<- [data in case of insert and write]
+-> [Version]RSP:[Transaction Id][Uint: error code];[End]
+
+* Operation codes are described below.
+
+ * If there is an error in one of the operations, server responds with batch edit error message:
+-> [Version]RSP:[Transaction Id][Uint: error code](Uint: operation-number)(Uint: revision);[End]
+
+Notes
+ * Edited areas must not overlap: to keep server simple, client is responsible for reducing operations to non-overlapping steps
+ * All edits must be sequential: again to keep server simple, each operation can only affect areas after previous modifications
+ */
+const RA_BATCH_EDIT_OPERATION_DELETE: u64 = 1;
+const RA_BATCH_EDIT_OPERATION_INSERT: u64 = 2;
+const RA_BATCH_EDIT_OPERATION_WRITE: u64 = 3;
+fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
+
+    let mut file_offset_corrector_negative = 0;
+    let mut file_offset_corrector_positive = 0;
+    let mut offset_to_latest_edit = 0;
+
+    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
+    let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
+    let mut revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let number_of_operations = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    try_parse!(client.buffer.expect(";"), client, transaction_id);
+    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+    trace!("Batch_edit: user={}, node_id={}, revision={}, number_of_operations={}",
+           client, node_id, revision, number_of_operations);
+
+    let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
+        Err(()) => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileIsNotOpenError as u64);
+            return Err(());
+        },
+        Ok(v) => v,
+    };
+
+    match open_file.open_mode {
+        OpenMode::Read => {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileOpenedInReadModeError as u64);
+            return Err(());
+        },
+        OpenMode::ReadWrite => (),
+    }
+
+    let user = client.user.as_ref().unwrap();
+    let lock = FileLock::LockedBySystemForRaBatchEdit {
+        user: user.clone(),
+    };
+
+    if let Err(error) = open_file.access.lock(revision, & lock) {
+        try_send_response_without_fields!(client, transaction_id, map_file_error_to_uint(error));
+        return Err(());
+    }
+
+    let lock_container = LockContainer {
+        lock: lock,
+        locked_file: open_file,
+    };
+
+    try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+
+    for i in 0 .. number_of_operations {
+
+        client.buffer.drop_consumed_buffer();
+        match Client::read_message(& mut client.buffer, & mut client.connection) {
+            Ok(()) => (),
+            Err(()) => {
+                warn!("Failed to read message from socket");
+                try_send_batch_edit_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError, i, revision);
+                return Err(());
+            }
+        }
+
+        let operation_type = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+        trace!("Applying batch edit operation, i={} type={}, file_offset_corrector_negative={}, file_offset_corrector_positive={}, offset_to_latest_edit={}",
+               i, operation_type, file_offset_corrector_negative, file_offset_corrector_positive, offset_to_latest_edit);
+
+        if operation_type == RA_BATCH_EDIT_OPERATION_DELETE {
+
+            let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+            let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+            try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+            if offset < offset_to_latest_edit {
+                try_send_batch_edit_response_without_fields!(
+                    client,
+                    transaction_id,
+                    CommonErrorCodes::BatchEditOperationNotSequntialError as u64,
+                    i,
+                    revision
+                );
+                return Err(());
+            }
+
+            let corrected_offset = offset - file_offset_corrector_negative + file_offset_corrector_positive;
+            trace!("Batch edit delete, offset={}, size={}, corrected_offset={}", offset, size, corrected_offset);
+            if ! is_random_access_edit_allowed(lock_container.locked_file.page_size, offset, size) {
+                warn!("Invalid edit, edited block not in fist page, page_size={}, offset={}, size={}",
+                      lock_container.locked_file.page_size, offset, size);
+                try_send_batch_edit_response_without_fields!(client, transaction_id, CommonErrorCodes::InvalidEditError as u64, i, revision);
+                return Err(());
+            }
+
+            match lock_container.locked_file.access.delete(revision, corrected_offset, size) {
+                Ok(revision_after_edit) => {
+                    revision = revision_after_edit;
+                    file_offset_corrector_negative += size;
+                    offset_to_latest_edit = offset + size;
+                },
+                Err(error) => {
+                    try_send_batch_edit_response_without_fields!(client, transaction_id, map_file_error_to_uint(error), i, revision);
+                    return Err(())
+                }
+            }
+
+        } else if operation_type == RA_BATCH_EDIT_OPERATION_INSERT {
+
+            let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+            let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+            try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+            if offset < offset_to_latest_edit {
+                try_send_batch_edit_response_without_fields!(
+                    client,
+                    transaction_id,
+                    CommonErrorCodes::BatchEditOperationNotSequntialError as u64,
+                    i,
+                    revision
+                );
+                return Err(());
+            }
+
+            let corrected_offset = offset - file_offset_corrector_negative + file_offset_corrector_positive;
+            trace!("Batch edit insert, offset={}, size={}, corrected_offset={}", offset, size, corrected_offset);
+
+            let mut data = Buffer::with_capacity(size as usize);
+            if Client::fill_buffer(& mut client.buffer, & mut client.connection, & mut data).is_err() {
+                client.status.set(Status::FailedToreceiveFromClient);
+                try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError as u64);
+                return Err(());
+            }
+
+            match lock_container.locked_file.access.insert(revision, corrected_offset, data) {
+                Ok(revision_after_edit) => {
+                    revision = revision_after_edit;
+                    file_offset_corrector_positive += size;
+                    offset_to_latest_edit = offset + size;
+                },
+                Err(error) => {
+                    try_send_batch_edit_response_without_fields!(client, transaction_id, map_file_error_to_uint(error), i, revision);
+                    return Err(());
+                }
+            }
+
+        } else if operation_type == RA_BATCH_EDIT_OPERATION_WRITE {
+
+            let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+            let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+            try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+
+            if offset < offset_to_latest_edit {
+                try_send_batch_edit_response_without_fields!(
+                    client,
+                    transaction_id,
+                    CommonErrorCodes::BatchEditOperationNotSequntialError as u64,
+                    i,
+                    revision
+                );
+                return Err(());
+            }
+
+            let corrected_offset = offset - file_offset_corrector_negative + file_offset_corrector_positive;
+            trace!("Batch edit write, offset={}, size={}, corrected_offset={}", offset, size, corrected_offset);
+
+            let mut data = Buffer::with_capacity(size as usize);
+            if Client::fill_buffer(& mut client.buffer, & mut client.connection, & mut data).is_err() {
+                client.status.set(Status::FailedToreceiveFromClient);
+                try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError as u64);
+                return Err(());
+            }
+
+            match lock_container.locked_file.access.write(revision, corrected_offset, data) {
+                Ok(revision_after_edit) => {
+                    revision = revision_after_edit;
+                    offset_to_latest_edit = offset + size;
+                },
+                Err(error) => {
+                    try_send_batch_edit_response_without_fields!(client, transaction_id, map_file_error_to_uint(error), i, revision);
+                    return Err(());
+                }
+            }
+
+        } else {
+            try_send_batch_edit_response_without_fields!(client, transaction_id, CommonErrorCodes::InvalidBatchOperationError, i, revision);
+            return Err(());
+        }
+
+        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+    }
+
+    trace!("All batch edit operations completed");
+
+    let mut buffer = try_write_buffer!(client, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
+    try_write_buffer!(client, buffer.write_unsigned(revision));
+    try_write_buffer!(client, buffer.write_end_of_message());
+    try_with_set_error_state!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+    Ok(())
+}
 
 /*
 Write to random access file request

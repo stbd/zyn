@@ -8,6 +8,8 @@ BlockSizeIsTooLargeError = 6
 InvalidEditError = 7
 FailedToReceiveDataError = 8
 TooManyFilesOpenError = 9
+InvalidBatchOperationError = 10
+BatchEditOperationNotSequntialError = 11
 InvalidUsernamePassword = 100
 ParentIsNotDirectory = 101
 UnauthorizedOperation = 102
@@ -59,6 +61,10 @@ def error_to_string(error):
         return "FailedToReceiveDataError"
     elif error == 9:
         return "TooManyFilesOpenError"
+    elif error == 10:
+        return "InvalidBatchOperationError"
+    elif error == 11:
+        return "BatchEditOperationNotSequntialError"
     elif error == 100:
         return "InvalidUsernamePassword"
     elif error == 101:

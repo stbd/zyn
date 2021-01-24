@@ -16,6 +16,33 @@ FILE_TYPE_BLOB = 1
 TYPE_USER = 0
 TYPE_GROUP = 1
 EXPIRATION_NEVER_EXPIRE = 0
+BATCH_EDIT_TYPE_DELETE = 1
+BATCH_EDIT_TYPE_INSERT = 2
+BATCH_EDIT_TYPE_WRITE = 3
+
+
+class RandomAccessBatchEdit:
+    def __init__(self, connection, node_id, revision, transaction_id):
+        self.connection = connection
+        self.node_id = node_id
+        self.revision = revision
+        self.transaction_id = transaction_id
+        self.operations = []
+
+    def number_of_operations(self):
+        return len(self.operations)
+
+    def delete(self, offset, size):
+        self.operations.append((BATCH_EDIT_TYPE_DELETE, offset, size))
+
+    def insert(self, offset, data):
+        self.operations.append((BATCH_EDIT_TYPE_INSERT, offset, data))
+
+    def write(self, offset, data):
+        self.operations.append((BATCH_EDIT_TYPE_WRITE, offset, data))
+
+    def commit(self):
+        return self.connection._commit_ra_batch(self)
 
 
 class ZynConnection:
@@ -245,6 +272,74 @@ class ZynConnection:
                 return rsp
 
         return self.read_response()
+
+    def ra_batch_edit(self, node_id, revision, transaction_id=None):
+        return RandomAccessBatchEdit(
+            self,
+            node_id,
+            revision,
+            transaction_id,
+        )
+
+    def _commit_ra_batch(self, batch):
+
+        req = \
+            self.field_version() \
+            + 'RA-BATCH-EDIT:' \
+            + self.field_transaction_id(batch.transaction_id or self._consume_transaction_id()) \
+            + self.field_node_id(batch.node_id) \
+            + self.field_unsigned(batch.revision) \
+            + self.field_unsigned(batch.number_of_operations()) \
+            + ';' \
+            + self.field_end_of_message() \
+
+        rsp = self._send_receive(req)
+        if rsp.is_error():
+            return rsp
+
+        for operation_type, offset, param in batch.operations:
+            if operation_type == BATCH_EDIT_TYPE_DELETE:
+                req = \
+                    self.field_unsigned(operation_type) \
+                    + self.field_unsigned(offset) \
+                    + self.field_unsigned(param) \
+                    + self.field_end_of_message()
+                self.write(req)
+
+            elif operation_type == BATCH_EDIT_TYPE_INSERT:
+                data = param
+                req = \
+                    self.field_unsigned(operation_type) \
+                    + self.field_unsigned(offset) \
+                    + self.field_unsigned(len(data)) \
+                    + self.field_end_of_message()
+
+                self.write(req)
+                self._socket.sendall(data)
+
+            elif operation_type == BATCH_EDIT_TYPE_WRITE:
+                data = param
+                req = \
+                    self.field_unsigned(operation_type) \
+                    + self.field_unsigned(offset) \
+                    + self.field_unsigned(len(data)) \
+                    + self.field_end_of_message()
+
+                self.write(req)
+                self._socket.sendall(data)
+
+            else:
+                raise RuntimeError()
+
+            rsp = self.read_message(timeout=120)
+            if rsp is not None:
+                if rsp.is_error():
+                    return rsp
+            else:
+                raise RuntimeError()
+
+        rsp = self.read_response(timeout=120)
+        return rsp
 
     def blob_write_stream(self, node_id, revision, stream, block_size=None, transaction_id=None):
         # If block size is not set, try to use data length as size
@@ -1055,6 +1150,19 @@ class InsertResponse(WriteResponse):
     pass
 
 
+class BatchEditErrordResponse:
+    def __init__(self, response):
+        self._rsp = response
+        if response.number_of_fields() == 0:
+            self.is_incomplete = False
+        elif response.number_of_fields() == 2:
+            self.is_incomplete = True
+            self.operation_index = response.field(0).as_uint()
+            self.revision = response.field(1).as_uint()
+        else:
+            _malfomed_message()
+
+
 class ReadResponse:
     def __init__(self, response):
         self._rsp = response
@@ -1309,6 +1417,9 @@ class Response(Message):
 
     def as_query_system_rsp(self):
         return QuerySystemResponse(self)
+
+    def as_batch_edit_error_response(self):
+        return BatchEditErrordResponse(self)
 
 
 class Notification(Message):
