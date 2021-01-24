@@ -767,6 +767,12 @@ impl FileImpl {
                 }
                 Ok(())
             },
+            Some(FileLock::LockedBySystemForRaBatchEdit { ref user }) => {
+                if user_id != user {
+                    return Err(FileError::FileLockedByOtherUser);
+                }
+                Ok(())
+            },
         }
     }
 

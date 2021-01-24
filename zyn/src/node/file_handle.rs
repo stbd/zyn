@@ -105,6 +105,7 @@ impl CachedFileProperties {
 #[derive(Clone, PartialEq)]
 pub enum FileLock {
     LockedBySystemForBlobWrite { user: Id },
+    LockedBySystemForRaBatchEdit { user: Id },
 }
 
 impl FileLock {
