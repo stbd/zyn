@@ -2,7 +2,7 @@ use std::str::{ Utf8Error };
 use std::path::{ PathBuf };
 use std::fmt::{ Display, Formatter, Result as FmtResult };
 
-use chrono::{ UTC };
+use chrono::{ Utc };
 
 use crate::node::user_authority::{ Id };
 
@@ -16,7 +16,7 @@ pub static ADMIN_GROUP: Id = Id::Group(0);
 pub static ADMIN_GROUP_NAME: & str = "admin";
 
 pub fn utc_timestamp() -> Timestamp {
-    UTC::now().timestamp()
+    Utc::now().timestamp()
 }
 
 pub fn log_crypto_context_error() {

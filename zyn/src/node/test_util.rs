@@ -1,7 +1,7 @@
 pub extern crate tempdir;
 extern crate log;
 use self::tempdir::{ TempDir };
-use log::{ LogRecord, LogMetadata, LogLevelFilter };
+use log::{ Record, Metadata, LevelFilter };
 use std::env;
 use std::fs::{ File };
 use std::io::Read;
@@ -113,26 +113,27 @@ pub fn create_file_of_random_1024_blocks(number_of_blocks: usize) -> PathBuf{
 
 struct UnitTestLogger;
 impl log::Log for UnitTestLogger {
-    fn enabled(&self, _: &LogMetadata) -> bool {
+    fn enabled(&self, _: &Metadata) -> bool {
         true
     }
 
-    fn log(&self, record: &LogRecord) {
+    fn log(&self, record: & Record) {
         if self.enabled(record.metadata()) {
             println!("{} - {}", record.level(), record.args());
         }
     }
+
+    fn flush(&self) { }
 }
 
+static LOGGER: UnitTestLogger = UnitTestLogger;
 static LOGGING_GUARD: Once = Once::new();
 pub fn init_logging() {
     LOGGING_GUARD.call_once( || {
-        match log::set_logger(|max_log_level| {
-            max_log_level.set(LogLevelFilter::Trace);
-            Box::new(UnitTestLogger)
-        }) {
-            Err(e) => { println!("Error initializing unit test logger: {}", e); }
-            Ok(()) => ()
-        }
+        match log::set_logger(&LOGGER)
+            .map(|()| log::set_max_level(LevelFilter::Trace)) {
+                Err(e) => { println!("Error initializing unit test logger: {}", e); }
+                Ok(()) => ()
+            }
     });
 }

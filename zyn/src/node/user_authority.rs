@@ -292,10 +292,10 @@ impl UserAuthority {
     fn hash(& self, content: & str, salt: u64) -> Vec<u8> {
         let mut hasher = Sha256::default();
 
-        hasher.input(content.as_bytes());
-        hasher.input(format!("{}", salt).as_bytes());
+        hasher.update(content.as_bytes());
+        hasher.update(format!("{}", salt).as_bytes());
 
-        let result = hasher.result();
+        let result = hasher.finalize();
         let length = result.as_slice().len();
         let mut buffer: Vec<u8> = vec![0; length];
         buffer.clone_from_slice(result.as_slice());

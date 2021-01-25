@@ -1,4 +1,4 @@
-use chrono::{ DateTime, UTC, NaiveDateTime };
+use chrono::{ DateTime, Utc, NaiveDateTime };
 
 use crate::node::test_util::tempdir::{ TempDir };
 use crate::node::user_authority::{ UserAuthority };
@@ -30,7 +30,7 @@ impl State {
     }
 
     pub fn datetime_plus(seconds: Timestamp) -> Timestamp {
-        let dt = DateTime::<UTC>::from_utc(NaiveDateTime::from_timestamp(seconds, 0), UTC);
+        let dt = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(seconds, 0), Utc);
         dt.timestamp()
     }
 

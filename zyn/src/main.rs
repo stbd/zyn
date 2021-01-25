@@ -433,11 +433,7 @@ fn run() -> Result<(), ()> {
 }
 
 fn main() {
-    match env_logger::init() {
-        Err(desc) => println!("Failed to init logging: {}", desc),
-        Ok(()) => (),
-    };
-
+    env_logger::init();
     match run() {
         Ok(()) => exit(EXIT_STATUS_OK),
         Err(()) => exit(EXIT_STATUS_ERROR),
