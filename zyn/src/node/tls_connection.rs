@@ -24,15 +24,15 @@ fn _get_tls_error(server: * mut tls) -> String {
     }
 }
 
-pub struct Connection {
+pub struct TlsConnection {
     _socket: TcpStream,
     context: * mut tls,
 }
 
-unsafe impl Send for Connection {}
-unsafe impl Sync for Connection {}
+unsafe impl Send for TlsConnection {}
+unsafe impl Sync for TlsConnection {}
 
-impl Connection {
+impl TlsConnection {
     pub fn write_with_sleep(& self, buffer: & [u8]) -> Result<usize, ()> {
 
         unsafe {
@@ -113,7 +113,7 @@ impl Connection {
     }
 }
 
-impl Drop for Connection {
+impl Drop for TlsConnection {
     fn drop(& mut self) {
         debug!("Closing TLS connection");
         unsafe {
@@ -128,19 +128,19 @@ impl Drop for Connection {
     }
 }
 
-pub struct Server {
+pub struct TlsServer {
     socket: TcpListener,
     context: * mut tls,
     certificate_expiration: Timestamp,
 }
 
-impl Server {
+impl TlsServer {
     pub fn certificate_expiration(& self) -> Timestamp {
         self.certificate_expiration
     }
 
     pub fn new(local_address: & str, port: u16, path_key: & Path, path_cert: & Path)
-               -> Result<Server, ()> {
+               -> Result<TlsServer, ()> {
 
         let output_not_after_date = Command::new("openssl")
             .arg("x509")
@@ -251,7 +251,7 @@ impl Server {
                 .map_err(| error | warn!("Failed to set socket to non-bloking mode: {}", error))
                 ? ;
 
-            Ok(Server {
+            Ok(TlsServer {
                 socket: socket,
                 context: server,
                 certificate_expiration: expiration,
@@ -259,7 +259,7 @@ impl Server {
         }
     }
 
-    pub fn accept(& self) -> Result<Option<Connection>, ()> {
+    pub fn accept(& self) -> Result<Option<TlsConnection>, ()> {
         match self.socket.accept() {
             Ok((stream, remote_info)) => {
 
@@ -278,7 +278,7 @@ impl Server {
                     }
                     info!("Accepted connection from: {}", remote_info);
 
-                    return Ok(Some(Connection {
+                    return Ok(Some(TlsConnection {
                         _socket: stream,
                         context: client_context,
                     }))

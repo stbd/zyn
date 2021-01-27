@@ -8,7 +8,7 @@ use std::{ str };
 
 use crate::node::client_protocol_buffer::{ ReceiveBuffer, SendBuffer };
 use crate::node::common::{ NodeId, Buffer, OpenMode, FileType, Timestamp, utc_timestamp };
-use crate::node::connection::{ Connection };
+use crate::node::tls_connection::{ TlsConnection };
 use crate::node::file_handle::{ FileAccess, FileError, Notification, FileLock, FileProperties };
 use crate::node::filesystem::{ FilesystemError };
 use crate::node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, ErrorResponse, NodeError, ShutdownReason, FileSystemListElement, Authority,
@@ -282,7 +282,7 @@ struct OpenFile {
 }
 
 pub struct Client {
-    connection: Connection,
+    connection: TlsConnection,
     buffer: ReceiveBuffer,
     node_receive: Receiver<ClientProtocol>,
     node_send: Sender<NodeProtocol>,
@@ -402,7 +402,7 @@ macro_rules! try_in_receive_loop_to_send_response_without_fields {
 
 impl Client {
     pub fn new(
-        connection: Connection,
+        connection: TlsConnection,
         node_receive: Receiver<ClientProtocol>,
         node_send: Sender<NodeProtocol>,
         socket_buffer_size: usize,
@@ -682,7 +682,7 @@ impl Client {
         Ok(buffer)
     }
 
-    fn send_response_without_fields(connection: & mut Connection, transaction_id: u64, error_code: u64) -> Result<(), Status> {
+    fn send_response_without_fields(connection: & mut TlsConnection, transaction_id: u64, error_code: u64) -> Result<(), Status> {
         let mut buffer = Client::create_response_buffer(transaction_id, error_code)
             .map_err(| () | Status::FailedToWriteToSendBuffer)
             ? ;
@@ -716,7 +716,7 @@ impl Client {
         Ok(())
     }
 
-    fn fill_buffer(receive_buffer: & mut ReceiveBuffer, connection: & mut Connection, mut buffer: & mut Buffer) -> Result<(), ()> {
+    fn fill_buffer(receive_buffer: & mut ReceiveBuffer, connection: & mut TlsConnection, mut buffer: & mut Buffer) -> Result<(), ()> {
 
         receive_buffer.take(& mut buffer);
         if buffer.len() == buffer.capacity() {
@@ -746,7 +746,7 @@ impl Client {
         }
     }
 
-    fn read_message(buffer: & mut ReceiveBuffer, connection: & mut Connection) -> Result<(), ()> {
+    fn read_message(buffer: & mut ReceiveBuffer, connection: & mut TlsConnection) -> Result<(), ()> {
 
         const MAX_NUMBER_OF_TRIALS: usize = 10;
         let mut trial = 0;

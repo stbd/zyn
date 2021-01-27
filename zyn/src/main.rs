@@ -26,7 +26,7 @@ use std::vec::{ Vec };
 
 use crate::node::node::{ Node, NodeSettings };
 use crate::node::common::{ ADMIN_GROUP, ADMIN_GROUP_NAME, utc_timestamp };
-use crate::node::connection::{ Server };
+use crate::node::tls_connection::{ TlsServer };
 use crate::node::crypto::{ Crypto };
 use crate::node::user_authority::{ UserAuthority };
 
@@ -361,7 +361,7 @@ fn run() -> Result<(), ()> {
 
     let data_dir = args.take(Arguments::name_data_dir()).take_path();
 
-    let server = Server::new(
+    let server = TlsServer::new(
         & args.take(Arguments::name_local_address()).take_string(),
         args.take(Arguments::name_local_port()).take_uint() as u16,
         & args.take(Arguments::name_path_key()).take_path(),

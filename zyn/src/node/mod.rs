@@ -5,7 +5,7 @@ pub mod directory;
 pub mod file_handle;
 pub mod file;
 pub mod crypto;
-pub mod connection;
+pub mod tls_connection;
 pub mod serialize;
 pub mod common;
 pub mod user_authority;
@@ -20,7 +20,7 @@ mod test_crypto;
 #[cfg(test)]
 mod test_util;
 #[cfg(test)]
-mod test_connection;
+mod test_tls_connection;
 #[cfg(test)]
 mod test_user_authority;
 #[cfg(test)]

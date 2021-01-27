@@ -12,7 +12,7 @@ use rand::{ random };
 
 use crate::node::client::{ Client };
 use crate::node::common::{ NodeId, FileDescriptor, OpenMode, ADMIN_GROUP, Timestamp, FileType, FileRevision, log_crypto_context_error, utc_timestamp };
-use crate::node::connection::{ Server };
+use crate::node::tls_connection::{ TlsServer };
 use crate::node::crypto::{ Crypto };
 use crate::node::file_handle::{ FileAccess, FileProperties };
 use crate::node::filesystem::{ Filesystem, FilesystemError, Node as FsNode };
@@ -210,7 +210,7 @@ pub struct NodeSettings {
 }
 
 pub struct Node {
-    server: Server,
+    server: TlsServer,
     clients: Vec<ClientInfo>,
     filesystem: Filesystem,
     auth: UserAuthority,
@@ -335,7 +335,7 @@ impl Node {
 
     pub fn load(
         crypto: Crypto,
-        server: Server,
+        server: TlsServer,
         path_workdir: & Path,
         max_inactivity_duration_secs: i64,
     ) -> Result<Node, ()> {
@@ -947,7 +947,7 @@ impl Node {
 
     fn handle_query_system_request(
         auth: & mut UserAuthority,
-        server: & Server,
+        server: & TlsServer,
         started_at: Timestamp,
         server_id: u64,
         user: Id,
