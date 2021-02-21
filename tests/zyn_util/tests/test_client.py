@@ -305,10 +305,10 @@ class TestClient(zyn_util.tests.common.TestCommon):
         finally:
             if stdout is not None:
                 sys.stdout = stdout
-                print('----------Output----------')
+                print('----------List Output----------')
                 output = stream.getvalue()
                 print(output, end='')
-                print('----------Output----------')
+                print('----------/List Output----------')
         return output
 
     def _validate_list_remote_element(

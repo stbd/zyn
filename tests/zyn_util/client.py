@@ -64,19 +64,20 @@ class ServerInfo:
             path_cert,
             debug_protocol,
     ):
-        connection = zyn_util.connection.ZynConnection(
-            path_cert,
+        if path_cert is None:
+            socket = zyn_util.connection.ZynSocket.create(self.address, self.port)
+        else:
+            socket = zyn_util.connection.ZynSocket.create_with_custom_cert(
+                self.address,
+                self.port,
+                path_cert,
+                remote_hostname
+            )
+
+        self.connection = zyn_util.connection.ZynConnection(
+            socket,
             debug_protocol,
         )
-        if path_cert is None:
-            connection.load_default_certificate_bundle()
-
-        connection.connect(
-            self.address,
-            self.port,
-            remote_hostname,
-        )
-        self.connection = connection
 
     def to_json(self):
         return {

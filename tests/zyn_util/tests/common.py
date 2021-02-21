@@ -139,16 +139,15 @@ class TestZyn(unittest.TestCase):
             remote_ip=None,
             remote_hostname=DEFAULT_TLS_REMOTE_HOSTNAME
     ):
-        connection = zyn_util.connection.ZynConnection(
-            path_cert or PATH_CERT
 
-        )
-        connection.connect(
+        socket = zyn_util.connection.ZynSocket.create_with_custom_cert(
             remote_ip or self._remote_ip,
             remote_port or self._remote_port,
+            path_cert or PATH_CERT,
             remote_hostname=remote_hostname,
         )
-        return connection
+
+        return zyn_util.connection.ZynConnection(socket)
 
 
 class TestCommon(TestZyn):

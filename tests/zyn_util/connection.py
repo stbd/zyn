@@ -45,35 +45,59 @@ class RandomAccessBatchEdit:
         return self.connection._commit_ra_batch(self)
 
 
+class ZynSocket:
+    def __init__(self, context, socket, ssl_socket):
+        self._context = context
+        self._socket_ = socket
+        self._socket = ssl_socket
+
+    def _create(context, remote_address, remote_port, remote_hostname=None):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect((remote_address, remote_port))
+        ssl = context.wrap_socket(
+            s,
+            server_hostname=remote_hostname or remote_address,
+        )
+        return ZynSocket(context, socket, ssl)
+
+    def create_with_custom_cert(remote_address, remote_port, path_cert, remote_hostname=None):
+        context = ssl.create_default_context()
+        context.load_verify_locations(path_cert)
+        return ZynSocket._create(context, remote_address, remote_port, remote_hostname)
+
+    def create(remote_address, remote_port):
+        context = ssl.create_default_context()
+        context.load_verify_locations(certifi.where())
+        return ZynSocket._create(context, remote_address, remote_port)
+
+    def settimeout(self, timeout):
+        return self._socket.settimeout(timeout)
+
+    def recv(self, size=None):
+        if size is None:
+            return self._socket.recv()
+        else:
+            return self._socket.recv(size)
+
+    def sendall(self, data):
+        return self._socket.sendall(data)
+
+    def close(self):
+        self._socket.shutdown(socket.SHUT_WR)
+        self._socket.close()
+
+
 class ZynConnection:
 
-    def __init__(self, path_cert=None, debug_messages=False):
-        self._context = ssl.create_default_context()
-        if path_cert is not None:
-            self._context.load_verify_locations(path_cert)
+    def __init__(self, zyn_socket, debug_messages=False):
+        self._socket = zyn_socket
         self._log = logging.getLogger(__name__)
         self._transaction_id = 1
         self._debug_messages = debug_messages
         self._input_buffer = b''
         self._notifications = []
 
-    def load_default_certificate_bundle(self):
-        self._context.load_verify_locations(certifi.where())
-
-    def connect(self, remote_address, remote_port, remote_hostname=None):
-        self._log.debug("Connecting to {}:{}".format(remote_address, remote_port))
-
-        self._socket_ = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._socket_.connect((remote_address, remote_port))
-        self._socket = self._context.wrap_socket(
-            self._socket_,
-            server_hostname=remote_hostname or remote_address,
-        )
-
-        self._log.debug("Connected to {}:{}".format(remote_address, remote_port))
-
     def disconnect(self):
-        self._socket.shutdown(socket.SHUT_WR)
         self._socket.close()
 
     def enable_debug_messages(self):
@@ -265,7 +289,7 @@ class ZynConnection:
         self._socket.settimeout(60)
         while index_start < (len(data) - 1):
             index_end = index_start + block_size
-            self._socket.send(data[index_start:index_end])
+            self._socket.sendall(data[index_start:index_end])
             index_start += block_size
             rsp = self.read_response(timeout=60*5)
             if rsp.is_error():
@@ -369,7 +393,7 @@ class ZynConnection:
             block = stream.get(block_size)
             if block is None:
                 break
-            self._socket.send(block)
+            self._socket.sendall(block)
             bytes_send += len(block)
             rsp = self.read_response(timeout=60*5)
             if rsp.is_error():
@@ -393,7 +417,7 @@ class ZynConnection:
         rsp = self._send_receive(req)
         if rsp.is_error():
             return rsp
-        self._socket.send(data)
+        self._socket.sendall(data)
         return self.read_response()
 
     def ra_insert(self, node_id, revision, offset, data, transaction_id=None):
@@ -410,7 +434,7 @@ class ZynConnection:
         rsp = self._send_receive(req)
         if rsp.is_error():
             return rsp
-        self._socket.send(data)
+        self._socket.sendall(data)
         return self.read_response()
 
     def ra_delete(self, node_id, revision, offset, size, transaction_id=None):
@@ -651,8 +675,8 @@ class ZynConnection:
         eom = end_of_message_field or self.field_end_of_message()
         eom = eom.encode('utf-8')
         self._socket.settimeout(timeout)
-
         message = ''
+
         while True:
             try:
                 d = self._socket.recv()

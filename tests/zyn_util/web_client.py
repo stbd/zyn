@@ -792,20 +792,20 @@ class ZynConnectionFactory:
         self._remote_hostname = remote_hostname
 
     def create_connection_and_connect(self):
-        connection = zyn_util.connection.ZynConnection(
-            self._path_cert,
-            self._debug_protocol
-        )
 
         if self._path_cert is None:
-            connection.load_default_certificate_bundle()
-
-        connection.connect(
-            self._server_ip,
-            self._server_port,
-            self._remote_hostname,
+            socket = zyn_util.connection.ZynSocket.create(self._server_ip, self._server_port)
+        else:
+            socket = zyn_util.connection.ZynSocket.create_with_custom_cert(
+                self._server_ip,
+                self._server_port,
+                self._path_cert,
+                self._remote_hostname,
+            )
+        return zyn_util.connection.ZynConnection(
+            socket,
+            self._debug_protocol
         )
-        return connection
 
 
 def _timer_callback():
