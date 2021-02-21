@@ -1,8 +1,11 @@
 import time
+import ssl
+
+import websocket
 
 import zyn_util.tests.common
 import zyn_util.errors
-from zyn_util.connection import DataStream
+from zyn_util.connection import DataStream, ZynConnection
 
 
 class TestBasicOperatinsCommon(zyn_util.tests.common.TestCommon):
@@ -873,3 +876,120 @@ class TestUserAuthority(zyn_util.tests.common.TestCommon):
             expiration=self.utc_timestamp() + zyn_util.tests.common.DAY_SECONDS,
         )
         self._validate_response(rsp, c)
+
+
+class TestWebsocket(TestBasicEditFile):
+
+    class Websocket:
+        def __init__(self, remote_ip, remote_port):
+            url = 'wss://{}:{}'.format(remote_ip, remote_port)
+            ssl_options = {
+                'ca_cert': zyn_util.tests.common.PATH_CERT,
+                'server_hostname': zyn_util.tests.common.DEFAULT_TLS_REMOTE_HOSTNAME,
+                'cert_reqs': ssl.CERT_NONE
+            }
+            self._socket = websocket.create_connection(url, sslopt=ssl_options)
+
+        def settimeout(self, timeout):
+            return self._socket.settimeout(timeout)
+
+        def recv(self, size=None):
+            data = b''
+            while True:
+                data += self._socket.recv()
+                if size is None:
+                    break
+                elif len(data) == size:
+                    break
+                elif len(data) > size:
+                    raise RuntimeError('Received too much data from websocket')
+                else:
+                    pass
+
+            return data
+
+        def sendall(self, data):
+            max_msg_size = 1024 * 64 - 1
+            start_index = 0
+            # There seems to be something wrong with either Python websocket-client library
+            # or with Rust embedded websocket, but for whatever reason messages larger than
+            # 1024 * 64 = 65536 are corrupted. To get around testing, I will limit Python code
+            # messages to 65536 and see how browser behave. If they have problems it's in Embedded
+            # Websocket and must be investigated further.
+            # return self._socket.send_binary(data)
+            while True:
+                end_index = start_index + max_msg_size
+                block = data[start_index:end_index]
+                self._socket.send_binary(block)
+                start_index += len(block)
+                if start_index >= len(data):
+                    return
+
+        def close(self):
+            self._socket.close()
+
+        def ping(self):
+            self._socket.ping()
+
+    def _start_node_and_connect_with_websocket_and_handle_auth(self):
+        self._start_node()
+        socket = TestWebsocket.Websocket(self._remote_ip, self._remote_port)
+        connection = ZynConnection(socket, True)
+        self._handle_auth(connection)
+        return connection
+
+    def test_websocket_basic_usage(self):
+        data = ('qwerty1234' * 10 + 'qw') * 10
+
+        c = self._start_node_and_connect_with_websocket_and_handle_auth()
+        create_rsp = self._create_file_ra(c, 'file', parent_path='/')
+        open_rsp = self._open_file_write(c, node_id=create_rsp.node_id)
+        rsp = self._ra_write(c, create_rsp.node_id, open_rsp.revision, 0, data)
+        rsp, rsp_data = c.read_file(create_rsp.node_id, 0, len(data))
+        self.assertEqual(data, rsp_data.decode('utf-8'))
+
+    def test_websocket_close(self):
+        c = self._start_node_and_connect_with_websocket_and_handle_auth()
+        self._create_file_ra(c, 'file', parent_path='/')
+        c.disconnect()
+        time.sleep(1)
+        with self.assertRaises(websocket._exceptions.WebSocketConnectionClosedException):
+            c.read_message()
+
+    def test_websocket_ping(self):
+        c = self._start_node_and_connect_with_websocket_and_handle_auth()
+        c._socket.ping()
+        # Test that connection is still open
+        self._create_file_ra(c, 'file', parent_path='/')
+
+    def test_websocket_with_non_binary_data(self):
+        pass
+
+    def test_websocket_large_file(self):
+        filename = 'file'
+        block_size = int(1024 * 100)
+
+        c = self._start_node_and_connect_with_websocket_and_handle_auth()
+        path_data = self._create_binary_blob_for_test_data(block_size)
+
+        create_rsp = c.create_file_blob(
+            filename,
+            parent_path='/',
+            block_size=block_size,
+        ).as_create_rsp()
+        open_rsp = c.open_file_write(node_id=create_rsp.node_id).as_open_rsp()
+
+        data = open(path_data, 'rb').read()
+        c.blob_write(
+            open_rsp.node_id,
+            open_rsp.revision,
+            data,
+            block_size
+        ).as_write_rsp()
+        self._read_file_and_validate_with_file_on_disk(
+            c,
+            create_rsp.node_id,
+            path_data,
+            block_size,
+        )
+        c.close_file(open_rsp.node_id)

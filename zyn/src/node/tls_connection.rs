@@ -33,7 +33,7 @@ unsafe impl Send for TlsConnection {}
 unsafe impl Sync for TlsConnection {}
 
 impl TlsConnection {
-    pub fn write_with_sleep(& self, buffer: & [u8]) -> Result<usize, ()> {
+    pub fn write_with_sleep(& self, buffer: & Buffer) -> Result<usize, ()> {
 
         unsafe {
             let mut offset: usize = 0;
@@ -77,7 +77,7 @@ impl TlsConnection {
 
             let original_size = buffer.len();
             let available_size = buffer.capacity();
-            let space_left = available_size - original_size;
+            let mut space_left = available_size - original_size;
             let mut current_size = original_size;
             buffer.resize(available_size, 0);
 
@@ -89,6 +89,10 @@ impl TlsConnection {
                     break
                 }
                 current_size += read_result as usize;
+                space_left -= read_result as usize;
+                if current_size == available_size {
+                    return Ok(true);
+                }
             }
 
             if read_result == 0 {

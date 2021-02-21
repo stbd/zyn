@@ -12,6 +12,7 @@ setup(
         'flake8==3.8.4',
         'tornado==4.5.2',
         'certifi',
+        'websocket-client==0.57.0',
     ],
     entry_points={
         'console_scripts': [

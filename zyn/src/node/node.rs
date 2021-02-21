@@ -750,14 +750,20 @@ impl Node {
                     let max_inactivity_duration_secs = self.max_inactivity_duration_secs;
 
                     let handle = spawn( move || {
-                        let mut client = Client::new(
+                        match Client::new(
                             connection,
                             rx_node,
                             tx_client,
                             buffer_size,
                             max_inactivity_duration_secs,
-                        );
-                        client.process();
+                        ) {
+                            Ok(mut client) => {
+                                client.process();
+                            },
+                            Err(()) => {
+                                error!("Failed to create client");
+                            }
+                        }
                     });
 
                     self.clients.push(ClientInfo {

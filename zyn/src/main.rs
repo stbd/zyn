@@ -2,6 +2,7 @@ extern crate libc;
 extern crate chrono;
 extern crate sha2;
 extern crate rand;
+extern crate embedded_websocket;
 
 #[macro_use]
 extern crate log;

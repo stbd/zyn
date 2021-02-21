@@ -1,85 +1,92 @@
+use std::cmp::{ min };
 use std::io::{ Write };
 use std::path::{ PathBuf };
-use std::vec::{ Vec };
 
 use crate::node::common::{ Buffer, NodeId, FileDescriptor, Timestamp };
 use crate::node::node::{ Authority };
 
-// todo: collect all static str to constants
-pub static FIELD_END_MARKER: & 'static str = "E:;";
+static ZYN_FIELD_END_MARKER: & [u8] = "E:;".as_bytes();
+pub static ZYN_FIELD_END: & [u8] = ";".as_bytes();
 
 const TYPE_USER: u64 = 0;
 const TYPE_GROUP: u64 = 1;
 
 pub struct ReceiveBuffer {
-    pub buffer: Buffer,
-    pub buffer_index: usize,
+    input_buffer: Buffer,
+    buffer_index: usize,
 }
 
 impl ReceiveBuffer {
-    pub fn with_capacity(size: usize) -> ReceiveBuffer {
+
+    pub fn with_capacity(buffer_size: usize) -> ReceiveBuffer {
         ReceiveBuffer {
-            buffer: Vec::with_capacity(size),
+            input_buffer: Buffer::with_capacity(buffer_size),
             buffer_index: 0,
         }
     }
 
-    pub fn is_complete_message(& mut self) -> bool {
-        let end_marker_bytes = FIELD_END_MARKER.as_bytes();
-        self.buffer
-            .windows(end_marker_bytes.len())
-            .position(| window | window == end_marker_bytes)
+    pub fn starts_with(& self, bytes: & [u8]) -> bool {
+        self.input_buffer.starts_with(bytes)
+    }
+
+    pub fn amount_of_unprocessed_data_available(& self) -> usize {
+        self.input_buffer.len() - self.buffer_index
+    }
+
+    pub fn is_complete_message(& self) -> bool {
+        let marker = ZYN_FIELD_END_MARKER;
+        self.input_buffer
+            .windows(marker.len())
+            .position(| window | window == marker)
             .is_some()
     }
 
-    pub fn take(& mut self, output: & mut Buffer) {
-        let requested_data_index = self.buffer_index + output.capacity();
-        let data_available_index = {
-            if requested_data_index > self.buffer.len() {
-                self.buffer.len()
-            } else {
-                requested_data_index
-            }
-        };
-        output.extend(& self.buffer[self.buffer_index .. data_available_index]);
-        self.buffer_index = data_available_index;
+    pub fn debug_buffer(& self) {
+        let size = self.input_buffer.len();
+        debug!("Buffer ({}, {}): {}", size, self.buffer_index, String::from_utf8_lossy(& self.input_buffer));
+
+        // To print hex output of message
+        /*
+        let mut s = String::new();
+        for x in & self.input_buffer {
+            s.push_str(& format!(" {:#x}", x));
+        }
+        debug!("Buffer {}", s);
+         */
     }
 
-    pub fn drop_consumed_buffer(& mut self) {
-        self.buffer.drain(0..self.buffer_index);
+    pub fn drop_consumed_data(& mut self) {
+        self.input_buffer.drain(0..self.buffer_index);
         self.buffer_index = 0;
     }
 
-    pub fn debug_buffer(& self) {
-        let size = self.buffer.len();
-        debug!("Buffer ({}): {}", size, String::from_utf8_lossy(& self.buffer));
+    pub fn get_buffer(& mut self) -> & Buffer {
+        & self.input_buffer
     }
 
-    pub fn get_mut_buffer(& mut self) -> & mut Vec<u8> {
-        & mut self.buffer
+    pub fn get_mut_buffer(& mut self) -> & mut Buffer {
+        & mut self.input_buffer
     }
 
-    pub fn get_buffer(& self) -> & [u8] {
-        & self.buffer[self.buffer_index .. ]
+    pub fn length(& self) -> usize {
+        self.input_buffer.len()
     }
 
-    pub fn get_buffer_length(& self) -> usize {
-        self.buffer.len() - self.buffer_index + 1
+    pub fn take_data(& mut self, requested_size: usize) -> & [u8] {
+        let index = self.buffer_index;
+        let size = min(requested_size, self.amount_of_unprocessed_data_available());
+        self.buffer_index += size;
+        & self.input_buffer[index .. index + size]
     }
 
-    pub fn get_buffer_with_length(& self, size: usize) -> & [u8] {
-        & self.buffer[self.buffer_index .. self.buffer_index + size]
-    }
+    pub fn expect(& mut self, expected_bytes: & [u8]) -> Result<(), ()> {
 
-    pub fn expect(& mut self, expected: & str) -> Result<(), ()> {
-
-        let expected_bytes = expected.as_bytes();
         {
-            if self.get_buffer_length() < expected_bytes.len() {
+            if self.amount_of_unprocessed_data_available() < expected_bytes.len() {
                 return Err(())
             }
 
-            let elements = self.get_buffer_with_length(expected_bytes.len());
+            let elements = & self.input_buffer[self.buffer_index .. self.buffer_index + expected_bytes.len()];
             if expected_bytes != elements {
                 return Err(())
             }
@@ -88,96 +95,14 @@ impl ReceiveBuffer {
         return Ok(())
     }
 
-    pub fn parse_end_of_message(& mut self) -> Result<(), ()> {
-        self.expect(FIELD_END_MARKER)
-    }
-
-    pub fn parse_transaction_id(& mut self) -> Result<u64, ()> {
-        self.expect("T:") ? ;
-        let id = self.parse_unsigned() ? ;
-        self.expect(";") ? ;
-        Ok(id)
-    }
-
-    pub fn parse_node_id(& mut self) -> Result<NodeId, ()> {
-        self.expect("N:") ? ;
-        let id = self.parse_unsigned() ? ;
-        self.expect(";") ? ;
-        Ok(id as NodeId)
-    }
-
-    pub fn parse_block(& mut self) -> Result<(u64, u64), ()> {
-        self.expect("BL:") ? ;
-        let offset = self.parse_unsigned() ? ;
-        let size = self.parse_unsigned() ? ;
-        self.expect(";") ? ;
-        Ok((offset, size))
-    }
-
-    pub fn parse_file_descriptor(& mut self) -> Result<FileDescriptor, ()> {
-        self.expect("F:") ? ;
-        let result_path = self.parse_path();
-        let desc = {
-            if result_path.is_ok() {
-                let fd = FileDescriptor::from_path(result_path.unwrap()) ? ;
-                fd
-            } else {
-                let id = self.parse_node_id() ? ;
-                let fd = FileDescriptor::from_node_id(id as u64) ? ;
-                fd
-            }
-        };
-        self.expect(";") ? ;
-        Ok(desc)
-    }
-
-    pub fn parse_path(& mut self) -> Result<PathBuf, ()> {
-        self.expect("P:") ? ;
-        let string = self.parse_string() ? ;
-        self.expect(";") ? ;
-
-        let path = PathBuf::from(string);
-        if ! path.is_absolute() {
-            return Err(())
-        }
-        Ok(path)
-    }
-
-    pub fn parse_string(& mut self) -> Result<String, ()> {
-        self.expect("S:") ? ;
-        let length = self.parse_unsigned() ? ;
-        self.expect("B:") ? ;
-
-        let value: String;
-        {
-            let buffer = self.get_buffer();
-            value = String::from_utf8_lossy(& buffer[0 .. length as usize])
-                .into_owned();
-        }
-        self.buffer_index += length as usize;
-        self.expect(";") ? ;
-        self.expect(";") ? ;
-        Ok(value)
-    }
-
-    pub fn parse_message_namespace(& mut self) -> Result<u64, ()> {
-        self.expect("V:") ? ;
-        self.parse_numeric()
-    }
-
-    pub fn parse_unsigned(& mut self) -> Result<u64, ()> {
-        self.expect("U:") ? ;
-        self.parse_numeric()
-    }
-
     fn parse_numeric(& mut self) -> Result<u64, ()> {
         let mut value: Option<u64> = None;
         let mut size: usize = 0;
         {
-            let limiter = ";".as_bytes();
+            let limiter = ZYN_FIELD_END;
             let limiter_length = limiter.len();
-            let buffer = self.get_buffer();
-            let buffer_length = self.buffer.len();
+            let buffer_length = self.input_buffer.len() - self.buffer_index;
+            let buffer = & self.input_buffer[self.buffer_index ..];
 
             let mut i = 0;
             while i < buffer_length {
@@ -206,29 +131,112 @@ impl ReceiveBuffer {
         }
     }
 
+    pub fn parse_unsigned(& mut self) -> Result<u64, ()> {
+        self.expect("U:".as_bytes()) ? ;
+        self.parse_numeric()
+    }
+
+    pub fn parse_end_of_message(& mut self) -> Result<(), ()> {
+        self.expect(ZYN_FIELD_END_MARKER)
+    }
+
+    pub fn parse_message_namespace(& mut self) -> Result<u64, ()> {
+        self.expect("V:".as_bytes()) ? ;
+        self.parse_numeric()
+    }
+
+    pub fn parse_transaction_id(& mut self) -> Result<u64, ()> {
+        self.expect("T:".as_bytes()) ? ;
+        let id = self.parse_unsigned() ? ;
+        self.expect(ZYN_FIELD_END) ? ;
+        Ok(id)
+    }
+
     pub fn parse_list_start(& mut self) -> Result<u64, ()> {
-        self.expect("L:") ? ;
+        self.expect("L:".as_bytes()) ? ;
         self.parse_unsigned()
     }
 
     pub fn parse_list_end(& mut self) -> Result<(), ()> {
-        self.expect(";")
+        self.expect(ZYN_FIELD_END)
     }
 
     pub fn parse_list_element_start(& mut self) -> Result<(), ()> {
-        self.expect("LE:")
+        self.expect("LE:".as_bytes())
     }
 
     pub fn parse_list_element_end(& mut self) -> Result<(), ()> {
-        self.expect(";")
+        self.expect(ZYN_FIELD_END)
     }
 
     pub fn parse_key_value_pair_start(& mut self) -> Result<(), ()> {
-        self.expect("KVP:")
+        self.expect("KVP:".as_bytes())
     }
 
     pub fn parse_key_value_pair_end(& mut self) -> Result<(), ()> {
-        self.expect(";")
+        self.expect(ZYN_FIELD_END)
+    }
+
+    pub fn parse_node_id(& mut self) -> Result<NodeId, ()> {
+        self.expect("N:".as_bytes()) ? ;
+        let id = self.parse_unsigned() ? ;
+        self.expect(ZYN_FIELD_END) ? ;
+        Ok(id as NodeId)
+    }
+
+    pub fn parse_block(& mut self) -> Result<(u64, u64), ()> {
+        self.expect("BL:".as_bytes()) ? ;
+        let offset = self.parse_unsigned() ? ;
+        let size = self.parse_unsigned() ? ;
+        self.expect(ZYN_FIELD_END) ? ;
+        Ok((offset, size))
+    }
+
+    pub fn parse_file_descriptor(& mut self) -> Result<FileDescriptor, ()> {
+        self.expect("F:".as_bytes()) ? ;
+        let result_path = self.parse_path();
+        let desc = {
+            if result_path.is_ok() {
+                let fd = FileDescriptor::from_path(result_path.unwrap()) ? ;
+                fd
+            } else {
+                let id = self.parse_node_id() ? ;
+                let fd = FileDescriptor::from_node_id(id as u64) ? ;
+                fd
+            }
+        };
+        self.expect(ZYN_FIELD_END) ? ;
+        Ok(desc)
+    }
+
+    pub fn parse_path(& mut self) -> Result<PathBuf, ()> {
+        self.expect("P:".as_bytes()) ? ;
+        let string = self.parse_string() ? ;
+        self.expect(ZYN_FIELD_END) ? ;
+
+        let path = PathBuf::from(string);
+        if ! path.is_absolute() {
+            return Err(())
+        }
+        Ok(path)
+    }
+
+    pub fn parse_string(& mut self) -> Result<String, ()> {
+        self.expect("S:".as_bytes()) ? ;
+        let length = self.parse_unsigned() ? ;
+        self.expect("B:".as_bytes()) ? ;
+
+        let value: String;
+        {
+            let buffer = & self.input_buffer[self.buffer_index .. ];
+            value = String::from_utf8_lossy(& buffer[0 .. length as usize])
+                .into_owned();
+        }
+
+        self.buffer_index += length as usize;
+        self.expect(ZYN_FIELD_END) ? ;
+        self.expect(ZYN_FIELD_END) ? ;
+        Ok(value)
     }
 }
 
@@ -239,17 +247,32 @@ pub struct SendBuffer {
 impl SendBuffer {
     pub fn with_capacity(size: usize) -> SendBuffer {
         SendBuffer {
-            buffer: Vec::with_capacity(size),
+            buffer: Buffer::with_capacity(size),
         }
     }
 
-    pub fn write_response(& mut self, transaction_id: u64, error_code: u64) -> Result<(), ()> {
+    pub fn get_buffer(& self) -> & Buffer {
+        & self.buffer
+    }
 
-        write!(self.buffer, "RSP:T:").map_err(| _ | ()) ? ;
-        self.write_unsigned(transaction_id) ? ;
-        write!(self.buffer, ";").map_err(| _ | ()) ? ;
-        self.write_unsigned(error_code) ? ;
-        write!(self.buffer, ";").map_err(| _ | ())
+    pub fn get_mut_buffer(& mut self) -> & mut Buffer {
+        & mut self.buffer
+    }
+
+    pub fn size(& self) -> usize {
+        self.buffer.len()
+    }
+
+    pub fn resize_to_capacity(& mut self) {
+        self.resize(self.buffer.capacity());
+    }
+
+    pub fn resize(& mut self, size: usize) {
+        self.buffer.resize(size, 0);
+    }
+
+    pub fn drop_data_from_start(& mut self, size: usize) {
+        self.buffer.drain(0..size);
     }
 
     pub fn write_message_namespace(& mut self, value: u64) -> Result<(), ()> {
@@ -257,7 +280,12 @@ impl SendBuffer {
     }
 
     pub fn write_end_of_message(& mut self) -> Result<(), ()> {
-        write!(self.buffer, "{}", FIELD_END_MARKER).map_err(| _ | ())
+        let size = self.buffer.write(ZYN_FIELD_END_MARKER).map_err(| _ | ()) ?;
+        if size == ZYN_FIELD_END_MARKER.len() {
+            Ok(())
+        } else {
+            Err(())
+        }
     }
 
     pub fn write_unsigned(& mut self, value: u64) -> Result<(), ()> {
@@ -273,6 +301,15 @@ impl SendBuffer {
     pub fn write_node_id(& mut self, node_id: NodeId) -> Result<(), ()> {
         write!(self.buffer, "N:").map_err(| _ | ()) ? ;
         self.write_unsigned(node_id as u64) ? ;
+        write!(self.buffer, ";").map_err(| _ | ())
+    }
+
+    pub fn write_response(& mut self, transaction_id: u64, error_code: u64) -> Result<(), ()> {
+
+        write!(self.buffer, "RSP:T:").map_err(| _ | ()) ? ;
+        self.write_unsigned(transaction_id) ? ;
+        write!(self.buffer, ";").map_err(| _ | ()) ? ;
+        self.write_unsigned(error_code) ? ;
         write!(self.buffer, ";").map_err(| _ | ())
     }
 
@@ -388,16 +425,5 @@ impl SendBuffer {
         self.write_end_of_message()
     }
 
-    pub fn buffer(& self) -> & Buffer {
-        & self.buffer
-    }
 
-    pub fn debug_buffer(& self) {
-        let size = self.buffer.len();
-        debug!("Buffer ({}): {}", size, String::from_utf8_lossy(& self.buffer));
-    }
-
-    pub fn as_bytes(& self) -> & [u8] {
-        & self.buffer
-    }
 }

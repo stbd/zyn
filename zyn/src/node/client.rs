@@ -6,7 +6,6 @@ use std::time::{ Duration };
 use std::vec::{ Vec };
 use std::{ str };
 
-use crate::node::client_protocol_buffer::{ ReceiveBuffer, SendBuffer };
 use crate::node::common::{ NodeId, Buffer, OpenMode, FileType, Timestamp, utc_timestamp };
 use crate::node::tls_connection::{ TlsConnection };
 use crate::node::file_handle::{ FileAccess, FileError, Notification, FileLock, FileProperties };
@@ -14,6 +13,8 @@ use crate::node::filesystem::{ FilesystemError };
 use crate::node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, ErrorResponse, NodeError, ShutdownReason, FileSystemListElement, Authority,
                   FilesystemElementProperties, };
 use crate::node::user_authority::{ Id };
+use crate::node::connection::{ Connection };
+use crate::node::client_protocol_buffer::{ SendBuffer, ZYN_FIELD_END };
 
 /*
 # Protocol definition
@@ -105,6 +106,7 @@ enum CommonErrorCodes {
     TooManyFilesOpenError = 9,
     InvalidBatchOperationError = 10,
     BatchEditOperationNotSequntialError = 11,
+    InvalidBlockSize = 12,
 }
 
 fn map_node_error_to_uint(error: ErrorResponse) -> u64 {
@@ -168,6 +170,7 @@ const DISCONNET_REASON_INTERNAL_ERROR: & str = "internal-error";
 const DISCONNET_REASON_NODE_CLOSING: & str = "node-closing";
 const DISCONNET_REASON_INACTIVITY_TIMEOUT: & str = "inactivity-timeout";
 
+static MAX_WAIT_DURATION_FOR_NODE_RESPONSE_SECONDS: i64 = 5;
 // ## Messages:
 // todo
 
@@ -191,6 +194,108 @@ Configure: Set file/folder rights:
 -> [Version]RSP:[Transaction Id][Uint: error code];[End]
 */
 
+
+macro_rules! try_and_return_set_parse_error_on_fail {
+    ($result:expr, $class:expr, $transaction_id:expr) => {{
+        match $result {
+            Ok(value) => value,
+            Err(_) => {
+                match Client::send_response_without_fields(
+                    & mut $class.connection,
+                    0,
+                    CommonErrorCodes::MalformedMessageError as u64)
+                {
+                    Ok(()) => (),
+                    Err(status) => {
+                        $class.status.set(status);
+                    },
+                }
+                return Err(());
+            }
+        }
+    }}
+}
+
+macro_rules! try_send_response_without_fields {
+    ($class:expr, $transaction_id:expr, $rsp_error_code:expr) => {{
+        match Client::send_response_without_fields(& mut $class.connection, $transaction_id, $rsp_error_code) {
+            Ok(()) => (),
+            Err(status) => {
+                $class.status.set(status);
+                return Err(())
+            }
+        }
+    }}
+}
+
+macro_rules! try_and_return_on_error {
+    ($class:expr, $operation:expr, $error_code:expr) => {{
+        let result = $operation;
+        if result.is_err() {
+            $class.status.set($error_code);
+            return (None, Some(Err(())));
+        }
+        result.unwrap()
+    }}
+}
+
+
+macro_rules! try_send_response_without_fields_and_return_on_error {
+    ($class:expr, $transaction_id:expr, $rsp_error_code:expr) => {{
+        match Client::send_response_without_fields(& mut $class.connection, $transaction_id, $rsp_error_code) {
+            Ok(()) => (),
+            Err(status) => {
+                $class.status.set(status);
+                return (None, Some(Err(())));
+            }
+        }
+    }}
+}
+
+macro_rules! try_create_buffer_and_return_on_error {
+    ($class:expr, $transaction_id:expr, $rsp_error_code:expr) => {{
+        try_and_return_on_error!(
+            $class,
+            $class.connection.create_response_buffer(
+                $transaction_id as u64,
+                $rsp_error_code as u64
+            ),
+            Status::FailedToWriteToSendBuffer
+        )
+    }}
+}
+
+macro_rules! try_and_set_error_state_on_fail {
+    ($class:expr, $operation:expr, $error_code:expr) => {{
+        let result = $operation;
+        if result.is_err() {
+            $class.status.set($error_code);
+            return Err(());
+        }
+        result.unwrap()
+    }}
+}
+
+macro_rules! try_and_set_fail_to_write_on_error {
+    ($class:expr, $operation:expr) => {{
+        let result = $operation;
+        try_and_set_error_state_on_fail!($class, result, Status::FailedToWriteToSendBuffer)
+    }}
+}
+
+macro_rules! try_send_batch_edit_response_without_fields {
+    ($class:expr, $transaction_id:expr, $rsp_error_code:expr, $operation_index:expr, $revision:expr) => {{
+        let mut buffer = try_and_set_fail_to_write_on_error!($class, $class.connection.create_response_buffer(
+            $transaction_id,
+            $rsp_error_code as u64
+        ));
+        try_and_set_fail_to_write_on_error!($class, buffer.write_unsigned($operation_index));
+        try_and_set_fail_to_write_on_error!($class, buffer.write_unsigned($revision));
+        try_and_set_fail_to_write_on_error!($class, buffer.write_end_of_message());
+        try_and_set_error_state_on_fail!($class, $class.connection.write_to_client(& mut buffer), Status::FailedToSendToClient)
+    }}
+}
+
 enum Status {
     Ok,
     AuthenticationError { trial: u8 },
@@ -204,6 +309,7 @@ enum Status {
     InternalError,
     ProtocolProcessingError,
     InactivityTimeout,
+    ConnectionError,
 }
 
 impl Display for Status {
@@ -233,6 +339,8 @@ impl Display for Status {
                 write!(f, "FailedToreceiveFromClient"),
             Status::InactivityTimeout =>
                 write!(f, "InactivityTimeout"),
+            Status::ConnectionError =>
+                write!(f, "ConnectionError"),
         }
     }
 }
@@ -282,8 +390,7 @@ struct OpenFile {
 }
 
 pub struct Client {
-    connection: TlsConnection,
-    buffer: ReceiveBuffer,
+    connection: Connection,
     node_receive: Receiver<ClientProtocol>,
     node_send: Sender<NodeProtocol>,
     open_files: Vec<OpenFile>,
@@ -303,102 +410,6 @@ impl Display for Client {
     }
 }
 
-macro_rules! try_parse {
-    ($result:expr, $class:expr, $transaction_id:expr) => {{
-        match $result {
-            Ok(value) => value,
-            Err(_) => {
-                match Client::send_response_without_fields(
-                    & mut $class.connection,
-                    0,
-                    CommonErrorCodes::MalformedMessageError as u64)
-                {
-                    Ok(()) => (),
-                    Err(status) => {
-                        $class.status.set(status);
-                    },
-                }
-                return Err(());
-            }
-        }
-    }}
-}
-
-macro_rules! try_with_set_error_state {
-    ($class:expr, $operation:expr, $error_code:expr) => {{
-        let result = $operation;
-        if result.is_err() {
-            $class.status.set($error_code);
-            return Err(());
-        }
-        result.unwrap()
-    }}
-}
-
-macro_rules! try_write_buffer {
-    ($class:expr, $operation:expr) => {{
-        let result = $operation;
-        try_with_set_error_state!($class, result, Status::FailedToWriteToSendBuffer)
-    }}
-}
-
-macro_rules! try_send_response_without_fields {
-    ($class:expr, $transaction_id:expr, $rsp_error_code:expr) => {{
-        match Client::send_response_without_fields(& mut $class.connection, $transaction_id, $rsp_error_code) {
-            Ok(()) => (),
-            Err(status) => {
-                $class.status.set(status);
-                return Err(())
-            }
-        }
-    }}
-}
-
-macro_rules! try_send_batch_edit_response_without_fields {
-    ($class:expr, $transaction_id:expr, $rsp_error_code:expr, $operation_index:expr, $revision:expr) => {{
-        let mut buffer = try_write_buffer!($class, Client::create_response_buffer($transaction_id, $rsp_error_code as u64));
-        try_write_buffer!($class, buffer.write_unsigned($operation_index));
-        try_write_buffer!($class, buffer.write_unsigned($revision));
-        try_write_buffer!($class, buffer.write_end_of_message());
-        try_with_set_error_state!($class, $class.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient)
-    }}
-}
-
-macro_rules! try_in_receive_loop {
-    ($class:expr, $operation:expr, $error_code:expr) => {{
-        let result = $operation;
-        if result.is_err() {
-            $class.status.set($error_code);
-            return (None, Some(Err(())));
-        }
-        result.unwrap()
-    }}
-}
-
-macro_rules! try_in_receive_loop_to_create_buffer {
-    ($class:expr, $transaction_id:expr, $rsp_error_code:expr) => {{
-        try_in_receive_loop!(
-            $class,
-            Client::create_response_buffer(
-                $transaction_id as u64,
-                $rsp_error_code as u64
-            ),
-            Status::FailedToWriteToSendBuffer
-        )
-    }}
-}
-
-macro_rules! try_in_receive_loop_to_send_response_without_fields {
-    ($class:expr, $transaction_id:expr, $rsp_error_code:expr) => {{
-        match Client::send_response_without_fields(& mut $class.connection, $transaction_id, $rsp_error_code) {
-            Ok(()) => (),
-            Err(status) => {
-                $class.status.set(status);
-                return (None, Some(Err(())));
-            }
-        }
-    }}
-}
 
 impl Client {
     pub fn new(
@@ -407,7 +418,7 @@ impl Client {
         node_send: Sender<NodeProtocol>,
         socket_buffer_size: usize,
         max_incativity_duration_secs: i64,
-    ) -> Client {
+    ) -> Result<Client, ()> {
 
         info!(
             "Creating new client, socket_buffer_size={}, max_incativity_duration_secs={}",
@@ -415,9 +426,10 @@ impl Client {
             max_incativity_duration_secs,
         );
 
-        Client {
+        let connection = Connection::new(connection, socket_buffer_size) ? ;
+
+        Ok(Client {
             connection: connection,
-            buffer: ReceiveBuffer::with_capacity(socket_buffer_size),
             node_receive: node_receive,
             node_send: node_send,
             open_files: Vec::with_capacity(5),
@@ -425,200 +437,17 @@ impl Client {
             status: Status::Ok,
             node_message_buffer: Vec::with_capacity(5),
             max_incativity_duration_secs: max_incativity_duration_secs,
-        }
+        })
     }
 
-    pub fn process(& mut self) {
-
-        let message_handlers: Vec<(& str, fn(& mut Client) -> Result<(), ()>, u64)> = vec![
-            ("CREATE-FILE:", handle_create_file_req, 1),
-            ("CREATE-DIRECTORY:", handle_create_directory_req, 1),
-            ("O:", handle_open_req, 1),
-            ("CLOSE:", handle_close_req, 1),
-            ("RA-BATCH-EDIT:", handle_batch_edit_req, 1),
-            ("RA-W:", handle_write_random_access_req, 1),
-            ("RA-I:", handle_random_access_insert_req, 1),
-            ("RA-D:", handle_random_access_delete_req, 1),
-            ("BLOB-W:", handle_blob_write_req, 1),
-            ("R:", handle_read_req, 1),
-            ("DELETE:", handle_delete_fs_element_req, 1),
-            ("Q-COUNTERS:", handle_query_counters_req, 1),
-            ("Q-FS-C:", handle_query_fs_children, 1),
-            ("Q-FS-P:", handle_query_fs_element_properties, 1),
-            ("Q-FS-E:", handle_query_fs_element, 1),
-            ("Q-SYSTEM:", handle_query_system, 1),
-            ("ADD-USER-GROUP:", handle_add_user_group, 1),
-            ("MOD-USER-GROUP:", handle_mod_user_group, 1),
-        ];
-
-        let mut latest_succesfull_command_timestamp: Timestamp = utc_timestamp();
-        loop {
-
-            let mut is_processing: bool = false;
-
-            if self.handle_messages_from_node()
-                .is_err() {
-                    error!("Error while processing notification from node");
-                    break ;
-                }
-
-            if self.status.is_in_error_state() {
-                break ;
-            }
-
-            if self.handle_notifications_from_open_files()
-                .and_then(| number_of_processed_notification | {
-                    if number_of_processed_notification > 0 {
-                        is_processing = true;
-                    }
-                    Ok(())
-                })
-                .is_err() {
-                    error!("Error while processing notification from files");
-                    break ;
-                }
-
-            if self.status.is_in_error_state() {
-                break ;
-            }
-
-            match self.connection.read(& mut self.buffer.get_mut_buffer()) {
-                Ok(false) => (),
-                Ok(true) => is_processing = true,
-                Err(()) => {
-                    warn!("Error receiving from socket, client={}", self);
-                    break;
-                }
-            }
-
-            if ! is_processing {
-                let duration_since_activity = utc_timestamp() - latest_succesfull_command_timestamp;
-                if duration_since_activity > self.max_incativity_duration_secs {
-                    info!("Closing connection due inactivity, client=\"{}\"", self);
-                    self.status.set(Status::InactivityTimeout);
-                    let _ = self.send_close_notification(DISCONNET_REASON_INACTIVITY_TIMEOUT);
-                    break;
-                }
-
-                sleep(Duration::from_millis(100));
-                continue ;
-            }
-            latest_succesfull_command_timestamp = utc_timestamp();
-
-            if ! self.buffer.is_complete_message() {
-                continue ;
-            }
-
-            self.buffer.debug_buffer();
-
-            let message_namespace = match self.buffer.parse_message_namespace() {
-                Ok(value) => value,
-                Err(()) => {
-                    error!("Failed to parse message namespace");
-                    match Client::send_response_without_fields(& mut self.connection, 0, CommonErrorCodes::MalformedMessageError as u64) {
-                        Ok(()) => (),
-                        Err(status) => {
-                            self.status.set(status);
-                        },
-                    }
-                    break;
-                },
-            };
-
-            if ! self.is_authenticated() {
-                if self.buffer.expect("A:").is_ok() {
-                    let _ = handle_authentication_req(self);
-                } else {
-                    self.status.set(Status::ClientNotAuthenticated);
-                    break ;
-                }
-
-            } else {
-
-                if message_handlers
-                    .iter()
-                    .find( | && (ref handler_name, _, handler_namespace) | {
-                        self.buffer.expect(handler_name).is_ok()
-                            && message_namespace == handler_namespace
-                    })
-                    .and_then( | & (_, ref handler, _) | {
-                        let _ = handler(self);
-                        Some(())
-                    })
-                    .is_none() {
-                        error!("Failed to find handler for message");
-                        self.status.set(Status::ProtocolProcessingError);
-                        break ;
-                    }
-            }
-
-            self.buffer.drop_consumed_buffer();
-
-            if self.status.is_in_error_state() {
-                break ;
-            }
-        }
-
-        for mut open_file in self.open_files.drain(..) {
-            let _ = open_file.access.close();
-        }
-
-        info!("Closing connection to client, client={}, status={}", self, self.status);
-    }
-
-    fn handle_notifications_from_open_files(& mut self) -> Result<usize, ()> {
-
-        let mut number_of_processed_notifications: usize = 0;
-        let mut remove: Option<usize> = None;
-
-        for (index, ref mut open_file) in self.open_files
-            .iter_mut()
-            .enumerate() {
-
-                loop {
-                    let mut buffer = try_write_buffer!(self, Client::create_notification_buffer());
-
-                    match open_file.access.pop_notification() {
-                        Some(Notification::FileClosing {  }) => {
-                            try_write_buffer!(self, buffer.write_notification_closed(& open_file.node_id));
-                            remove = Some(index);
-                        },
-                        Some(Notification::PartOfFileModified { revision, offset, size }) => {
-                            try_write_buffer!(self, buffer.write_notification_modified(& open_file.node_id, & revision, & offset, & size));
-                        },
-                        Some(Notification::PartOfFileInserted { revision, offset, size }) => {
-                            try_write_buffer!(self, buffer.write_notification_inserted(& open_file.node_id, & revision, & offset, & size));
-                        },
-                        Some(Notification::PartOfFileDeleted { revision, offset, size }) => {
-                            try_write_buffer!(self, buffer.write_notification_deleted(& open_file.node_id, & revision, & offset, & size));
-                        },
-                        None => break,
-                    }
-
-                    try_with_set_error_state!(self, self.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
-                    number_of_processed_notifications += 1;
-
-                    if remove.is_some() {
-                        break;
-                    }
-                }
-
-                if remove.is_some() {
-                    break ;
-                }
-            }
-
-        if let Some(ref index) = remove {
-            self.open_files.remove(*index);
-        }
-
-        Ok(number_of_processed_notifications)
+    fn is_authenticated(& self) -> bool {
+        self.user.is_some()
     }
 
     fn send_close_notification(& mut self, reason: & str) -> Result<(), ()> {
-        let mut buffer = try_write_buffer!(self, Client::create_notification_buffer());
-        try_write_buffer!(self, buffer.write_notification_disconnected(& reason));
-        try_with_set_error_state!(self, self.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+        let mut buffer = try_and_set_fail_to_write_on_error!(self, self.connection.create_notification_buffer());
+        try_and_set_fail_to_write_on_error!(self, buffer.write_notification_disconnected(& reason));
+        try_and_set_error_state_on_fail!(self, self.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
         Ok(())
     }
 
@@ -653,10 +482,6 @@ impl Client {
         Ok(())
     }
 
-    fn is_authenticated(& self) -> bool {
-        self.user.is_some()
-    }
-
     fn receive_from_node(& mut self) -> Result<Option<ClientProtocol>, ()> {
         if ! self.node_message_buffer.is_empty() {
             return Ok(Some(self.node_message_buffer.pop().unwrap()));
@@ -669,21 +494,10 @@ impl Client {
         }
     }
 
-    fn create_response_buffer(transaction_id: u64, error_code: u64) -> Result<SendBuffer, ()> {
-        let mut buffer = SendBuffer::with_capacity(1024 * 4);
-        buffer.write_message_namespace(1) ? ;
-        buffer.write_response(transaction_id, error_code) ? ;
-        Ok(buffer)
-    }
+    fn send_response_without_fields(connection: & mut Connection, transaction_id: u64, error_code: u64) -> Result<(), Status> {
 
-    fn create_notification_buffer() -> Result<SendBuffer, ()> {
-        let mut buffer = SendBuffer::with_capacity(1024);
-        buffer.write_message_namespace(1) ? ;
-        Ok(buffer)
-    }
 
-    fn send_response_without_fields(connection: & mut TlsConnection, transaction_id: u64, error_code: u64) -> Result<(), Status> {
-        let mut buffer = Client::create_response_buffer(transaction_id, error_code)
+        let mut buffer = connection.create_response_buffer(transaction_id, error_code)
             .map_err(| () | Status::FailedToWriteToSendBuffer)
             ? ;
 
@@ -691,9 +505,8 @@ impl Client {
             .map_err(| () | Status::FailedToWriteToSendBuffer)
             ? ;
 
-        connection.write_with_sleep(buffer.as_bytes())
+        connection.write_to_client(& mut buffer)
             .map_err(| () | Status::FailedToSendToClient)
-            .map(| _: usize | () )
     }
 
     fn handle_unexpected_message_from_node(& mut self, msg: ClientProtocol) {
@@ -716,91 +529,271 @@ impl Client {
         Ok(())
     }
 
-    fn fill_buffer(receive_buffer: & mut ReceiveBuffer, connection: & mut TlsConnection, mut buffer: & mut Buffer) -> Result<(), ()> {
+    fn find_open_file<'vec>(open_files: &'vec mut Vec<OpenFile>, searched_node_id: & NodeId)
+                            -> Result<&'vec mut OpenFile, ()> {
 
-        receive_buffer.take(& mut buffer);
-        if buffer.len() == buffer.capacity() {
-            return Ok(());
-        }
+        let mut searched_item_index: usize = 0;
+        open_files
+            .iter()
+            .enumerate()
+            .find(| & (ref index, ref element) | {
+                searched_item_index = index.clone();
+                element.node_id == *searched_node_id
+            })
+            .ok_or(())
+            ? ;
 
-        let mut trial = 1;
-        const MAX_NUMBER_OF_TRIALS: usize = 100;
-
-        while buffer.len() != buffer.capacity() && trial < MAX_NUMBER_OF_TRIALS {
-            match connection.read(buffer) {
-                Ok(true) => (),
-                Ok(false) => {
-                    sleep(Duration::from_millis(100));
-                    trial += 1;
-                },
-                Err(()) => return Err(()),
-            };
-            if buffer.len() == buffer.capacity() {
-                break;
-            }
-        }
-        if buffer.len() == buffer.capacity() {
-            Ok(())
-        } else {
-            Err(())
-        }
+        open_files
+            .get_mut(searched_item_index)
+            .ok_or(())
     }
 
-    fn read_message(buffer: & mut ReceiveBuffer, connection: & mut TlsConnection) -> Result<(), ()> {
+    pub fn process(& mut self) {
 
-        const MAX_NUMBER_OF_TRIALS: usize = 10;
-        let mut trial = 0;
+        debug!("Start client process loop, is_websocket={}", self.connection.is_using_websocket());
 
-        while trial < MAX_NUMBER_OF_TRIALS {
-            match connection.read(& mut buffer.get_mut_buffer()) {
-                Ok(true) => (),
-                Ok(false) => {
-                    sleep(Duration::from_millis(100));
-                    trial += 1;
+        let message_handlers: Vec<(& [u8], fn(& mut Client) -> Result<(), ()>, u64)> = vec![
+            ("CREATE-FILE:".as_bytes(), handle_create_file_req, 1),
+            ("CREATE-DIRECTORY:".as_bytes(), handle_create_directory_req, 1),
+            ("O:".as_bytes(), handle_open_req, 1),
+            ("CLOSE:".as_bytes(), handle_close_req, 1),
+            ("RA-BATCH-EDIT:".as_bytes(), handle_batch_edit_req, 1),
+            ("RA-W:".as_bytes(), handle_write_random_access_req, 1),
+            ("RA-I:".as_bytes(), handle_random_access_insert_req, 1),
+            ("RA-D:".as_bytes(), handle_random_access_delete_req, 1),
+            ("BLOB-W:".as_bytes(), handle_blob_write_req, 1),
+            ("R:".as_bytes(), handle_read_req, 1),
+            ("DELETE:".as_bytes(), handle_delete_fs_element_req, 1),
+            ("Q-COUNTERS:".as_bytes(), handle_query_counters_req, 1),
+            ("Q-FS-C:".as_bytes(), handle_query_fs_children, 1),
+            ("Q-FS-P:".as_bytes(), handle_query_fs_element_properties, 1),
+            ("Q-FS-E:".as_bytes(), handle_query_fs_element, 1),
+            ("Q-SYSTEM:".as_bytes(), handle_query_system, 1),
+            ("ADD-USER-GROUP:".as_bytes(), handle_add_user_group, 1),
+            ("MOD-USER-GROUP:".as_bytes(), handle_mod_user_group, 1),
+        ];
+
+        let mut latest_succesfull_command_timestamp: Timestamp = utc_timestamp();
+
+        loop {
+            let mut is_processing: bool = false;
+
+            if self.handle_messages_from_node()
+                .is_err() {
+                    error!("Error while processing notification from node");
+                    break ;
+                }
+
+            if self.status.is_in_error_state() {
+                break ;
+            }
+
+            if self.handle_notifications_from_open_files()
+                .and_then(| number_of_processed_notification | {
+                    if number_of_processed_notification > 0 {
+                        is_processing = true;
+                    }
+                    Ok(())
+                })
+                .is_err() {
+                    error!("Error while processing notification from files");
+                    break ;
+                }
+
+            match self.connection.process() {
+                Ok(true) => {
+                    is_processing = true;
                 },
+                Ok(false) => (),
+                Err(()) => (),
+            }
+
+            if self.connection.is_ok().is_err() {
+                error!("Connection was closed");
+                self.status.set(Status::ConnectionError);
+            }
+
+            if self.connection.get_receive_buffer().amount_of_unprocessed_data_available() > 0 &&
+                self.connection.get_receive_buffer().is_complete_message()
+            {
+                is_processing = true;
+            }
+
+            if ! is_processing {
+                let duration_since_activity = utc_timestamp() - latest_succesfull_command_timestamp;
+                if duration_since_activity > self.max_incativity_duration_secs {
+                    info!("Closing connection due inactivity, client=\"{}\"", self);
+                    self.status.set(Status::InactivityTimeout);
+                    let _ = self.send_close_notification(DISCONNET_REASON_INACTIVITY_TIMEOUT);
+                    break;
+                }
+                sleep(Duration::from_millis(100));
+                continue ;
+            }
+
+            latest_succesfull_command_timestamp = utc_timestamp();
+
+            if ! self.connection.get_receive_buffer().is_complete_message() {
+                continue ;
+            }
+
+            self.connection.get_receive_buffer().debug_buffer();
+
+            let message_namespace = match self.connection.get_receive_buffer().parse_message_namespace() {
+                Ok(value) => value,
                 Err(()) => {
-                    return Err(());
+                    error!("Failed to parse message namespace");
+                    match Client::send_response_without_fields(& mut self.connection, 0, CommonErrorCodes::MalformedMessageError as u64) {
+                        Ok(()) => (),
+                        Err(status) => {
+                            self.status.set(status);
+                        },
+                    }
+                    break;
+                },
+            };
+
+            if ! self.is_authenticated() {
+                if self.connection.get_receive_buffer().expect("A:".as_bytes()).is_ok() {
+                    let _ = handle_authentication_req(self);
+                } else {
+                    self.status.set(Status::ClientNotAuthenticated);
+                    break ;
+                }
+
+            } else {
+
+                if message_handlers
+                    .iter()
+                    .find( | && (ref handler_name, _, handler_namespace) | {
+                        self.connection.get_receive_buffer().expect(handler_name).is_ok()
+                            && message_namespace == handler_namespace
+                    })
+                    .and_then( | & (_, ref handler, _) | {
+                        let _ = handler(self);
+                        Some(())
+                    })
+                    .is_none() {
+                        error!("Failed to find handler for message");
+                        self.status.set(Status::ProtocolProcessingError);
+                        break ;
+                    }
+            }
+
+            self.connection.get_receive_buffer().drop_consumed_data();
+
+            if self.status.is_in_error_state() {
+                break ;
+            }
+        }
+
+        for mut open_file in self.open_files.drain(..) {
+            let _ = open_file.access.close();
+        }
+
+        info!("Closing connection to client, client={}, status={}", self, self.status);
+    }
+
+    fn handle_notifications_from_open_files(& mut self) -> Result<usize, ()> {
+
+        let mut number_of_processed_notifications: usize = 0;
+        let mut remove: Option<usize> = None;
+
+        for (index, ref mut open_file) in self.open_files
+            .iter_mut()
+            .enumerate() {
+
+                loop {
+                    let mut buffer = try_and_set_fail_to_write_on_error!(self, self.connection.create_notification_buffer());
+
+                    match open_file.access.pop_notification() {
+                        Some(Notification::FileClosing {  }) => {
+                            try_and_set_fail_to_write_on_error!(self, buffer.write_notification_closed(& open_file.node_id));
+                            remove = Some(index);
+                        },
+                        Some(Notification::PartOfFileModified { revision, offset, size }) => {
+                            try_and_set_fail_to_write_on_error!(self, buffer.write_notification_modified(& open_file.node_id, & revision, & offset, & size));
+                        },
+                        Some(Notification::PartOfFileInserted { revision, offset, size }) => {
+                            try_and_set_fail_to_write_on_error!(self, buffer.write_notification_inserted(& open_file.node_id, & revision, & offset, & size));
+                        },
+                        Some(Notification::PartOfFileDeleted { revision, offset, size }) => {
+                            try_and_set_fail_to_write_on_error!(self, buffer.write_notification_deleted(& open_file.node_id, & revision, & offset, & size));
+                        },
+                        None => break,
+                    }
+
+                    try_and_set_error_state_on_fail!(self, self.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
+                    number_of_processed_notifications += 1;
+
+                    if remove.is_some() {
+                        break;
+                    }
+                }
+
+                if remove.is_some() {
+                    break ;
                 }
             }
-            if buffer.is_complete_message() {
-                return Ok(());
+
+        if let Some(ref index) = remove {
+            self.open_files.remove(*index);
+        }
+
+        Ok(number_of_processed_notifications)
+    }
+
+    fn node_receive<OkType>(
+        client: & mut Client,
+        handler: & dyn Fn(ClientProtocol, & mut Client) -> (Option<ClientProtocol>, Option<Result<OkType, ()>>)
+    ) -> Result<OkType, ()> {
+
+        let sent_timestamp: Timestamp = utc_timestamp();
+        loop {
+
+            let msg = match client.node_receive.try_recv() {
+                Ok(msg) => msg,
+                Err(TryRecvError::Disconnected) => {
+                    error!("Node disconnected from client");
+                    client.status.set(Status::FailedToreceiveFromNode);
+                    return Err(())
+                },
+                Err(TryRecvError::Empty) => {
+                    sleep(Duration::from_millis(100));
+                    continue;
+                },
+            };
+
+            match handler(msg, client) {
+                (None, Some(result)) => return result,
+                (Some(msg), None) => {
+                    client.handle_unexpected_message_from_node(msg);
+                },
+                (_, _) => panic!()
+            };
+
+            let duration = utc_timestamp() - sent_timestamp;
+            if duration > MAX_WAIT_DURATION_FOR_NODE_RESPONSE_SECONDS {
+                warn!("Failed to receive response in time from node");
+                client.status.set(Status::FailedToreceiveFromNode);
+                return Err(())
             }
         }
-        Err(())
     }
-}
-
-fn find_open_file<'vec>(open_files: &'vec mut Vec<OpenFile>, searched_node_id: & NodeId)
-                        -> Result<&'vec mut OpenFile, ()> {
-
-    let mut searched_item_index: usize = 0;
-    open_files
-        .iter()
-        .enumerate()
-        .find(| & (ref index, ref element) | {
-            searched_item_index = index.clone();
-            element.node_id == *searched_node_id
-        })
-        .ok_or(())
-        ? ;
-
-    open_files
-        .get_mut(searched_item_index)
-        .ok_or(())
 }
 
 /*
 Authenticate request:
 <- [Version]A:[Transaction Id][String: username][String: password];[End]
 -> [Version]RSP:[Transaction Id][Uint: error code];[End]
-*/
+ */
 fn handle_authentication_req(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let username = try_parse!(client.buffer.parse_string(), client, transaction_id);
-    let password = try_parse!(client.buffer.parse_string(), client, transaction_id);
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let username = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_string(), client, transaction_id);
+    let password = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_string(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Authenticate, username=\"{}\"", username);
 
@@ -809,17 +802,17 @@ fn handle_authentication_req(client: & mut Client) -> Result<(), ()>
         password: password
     }) ? ;
 
-    let id = node_receive::<Id>(
+    let id = Client::node_receive::<Id>(
         client,
         & | msg, client | {
             match msg {
                 ClientProtocol::AuthenticateResponse { result: Ok(id) } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, CommonErrorCodes::NoError as u64);
                     (None, Some(Ok(id)))
                 },
 
                 ClientProtocol::AuthenticateResponse { result: Err(error) } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, map_node_error_to_uint(error));
                     if let Status::AuthenticationError { ref mut trial } = client.status {
                         *trial += 1;
                     } else {
@@ -851,13 +844,13 @@ Create file request
 */
 fn handle_create_file_req(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let parent = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
-    let name = try_parse!(client.buffer.parse_string(), client, transaction_id);
-    let type_uint = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let page_size: Option<u64> = client.buffer.parse_unsigned().ok();
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let parent = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_file_descriptor(), client, transaction_id);
+    let name = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_string(), client, transaction_id);
+    let type_uint = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+    let page_size: Option<u64> = client.connection.get_receive_buffer().parse_unsigned().ok();
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     let type_enum = match type_uint {
         FILE_TYPE_RANDOM_ACCESS => FileType::RandomAccess,
@@ -880,25 +873,25 @@ fn handle_create_file_req(client: & mut Client) -> Result<(), ()>
         page_size: page_size,
     }) ? ;
 
-    node_receive::<()>(
+    Client::node_receive::<()>(
         client,
         & | msg, client | {
             match msg {
                 ClientProtocol::CreateFileResponse {
                     result: Ok((node_id, properties)),
                 } => {
-                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
-                    try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_unsigned(properties.revision), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    let mut buffer = try_create_buffer_and_return_on_error!(client, transaction_id, CommonErrorCodes::NoError);
+                    try_and_return_on_error!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, buffer.write_unsigned(properties.revision), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
                     (None, Some(Ok(())))
                 },
 
                 ClientProtocol::CreateFileResponse {
                     result: Err(error),
                 } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, map_node_error_to_uint(error));
                     (None, Some(Err(())))
                 },
 
@@ -916,11 +909,11 @@ Create directory request
 */
 fn handle_create_directory_req(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let parent = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
-    let name = try_parse!(client.buffer.parse_string(), client, transaction_id);
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let parent = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_file_descriptor(), client, transaction_id);
+    let name = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_string(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Create directory: user={}, parent=\"{}\",  name=\"{}\"",
            client, parent, name);
@@ -932,24 +925,24 @@ fn handle_create_directory_req(client: & mut Client) -> Result<(), ()>
         user: user,
     }) ? ;
 
-    node_receive::<()>(
+    Client::node_receive::<()>(
         client,
         & | msg, client | {
             match msg {
                 ClientProtocol::CreateDirectoryResponse {
                     result: Ok(node_id),
                 } => {
-                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
-                    try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    let mut buffer = try_create_buffer_and_return_on_error!(client, transaction_id, CommonErrorCodes::NoError);
+                    try_and_return_on_error!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
                     (None, Some(Ok(())))
                 },
 
                 ClientProtocol::CreateDirectoryResponse {
                     result: Err(error),
                 } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, map_node_error_to_uint(error));
                     (None, Some(Err(())))
                 },
 
@@ -959,6 +952,17 @@ fn handle_create_directory_req(client: & mut Client) -> Result<(), ()>
             }
         })
 }
+
+
+
+
+
+
+
+// todo
+
+
+
 
 /*
 Open file file:
@@ -971,11 +975,11 @@ Open file file:
 */
 fn handle_open_req(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let fd = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
-    let mode_uint = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let fd = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_file_descriptor(), client, transaction_id);
+    let mode_uint = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     let mode = match mode_uint {
         READ => OpenMode::Read,
@@ -1000,20 +1004,20 @@ fn handle_open_req(client: & mut Client) -> Result<(), ()>
         user: user,
     }) ? ;
 
-    let (access, node_id, properties) = node_receive::<(FileAccess, NodeId, FileProperties)>(
+    let (access, node_id, properties) = Client::node_receive::<(FileAccess, NodeId, FileProperties)>(
         client,
         & | msg, client | {
             match msg {
                 ClientProtocol::OpenFileResponse {
                     result: Ok((access, node_id, properties)),
                 } => {
-                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
-                    try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_unsigned(properties.revision), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_unsigned(properties.size), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_unsigned(properties.page_size), Status::FailedToWriteToSendBuffer);
+                    let mut buffer = try_create_buffer_and_return_on_error!(client, transaction_id, CommonErrorCodes::NoError);
+                    try_and_return_on_error!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, buffer.write_unsigned(properties.revision), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, buffer.write_unsigned(properties.size), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, buffer.write_unsigned(properties.page_size), Status::FailedToWriteToSendBuffer);
 
-                    try_in_receive_loop!(
+                    try_and_return_on_error!(
                         client,
                         buffer.write_unsigned(
                             match properties.file_type {
@@ -1023,15 +1027,15 @@ fn handle_open_req(client: & mut Client) -> Result<(), ()>
                         Status::FailedToWriteToSendBuffer
                     );
 
-                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    try_and_return_on_error!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
                     (None, Some(Ok((access, node_id, properties))))
                 },
 
                 ClientProtocol::OpenFileResponse {
                     result: Err(error),
                 } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, map_node_error_to_uint(error));
                     (None, Some(Err(())))
                 },
 
@@ -1060,10 +1064,10 @@ Close file request
 */
 fn handle_close_req(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let node_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_node_id(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Close: user={}, node_id={}", client, node_id);
 
@@ -1141,17 +1145,17 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
     let mut file_offset_corrector_positive = 0;
     let mut offset_to_latest_edit = 0;
 
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
-    let mut revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let number_of_operations = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let node_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_node_id(), client, transaction_id);
+    let mut revision = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+    let number_of_operations = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Batch_edit: user={}, node_id={}, revision={}, number_of_operations={}",
            client, node_id, revision, number_of_operations);
 
-    let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
+    let ref mut open_file = match Client::find_open_file(& mut client.open_files, & node_id) {
         Err(()) => {
             try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileIsNotOpenError as u64);
             return Err(());
@@ -1186,25 +1190,36 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
 
     for i in 0 .. number_of_operations {
 
-        client.buffer.drop_consumed_buffer();
-        match Client::read_message(& mut client.buffer, & mut client.connection) {
-            Ok(()) => (),
-            Err(()) => {
-                warn!("Failed to read message from socket");
-                try_send_batch_edit_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError, i, revision);
-                return Err(());
+        client.connection.get_receive_buffer().drop_consumed_data();
+        for _ in 1..5 {
+            match client.connection.process() {
+                Ok(_) => (),
+                Err(()) => {
+                    warn!("Failed to read message from socket");
+                    try_send_batch_edit_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError, i, revision);
+                    return Err(());
+                }
+            };
+            if client.connection.get_receive_buffer().is_complete_message() {
+                break
             }
+            sleep(Duration::from_millis(100));
         }
 
-        let operation_type = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+        if ! client.connection.get_receive_buffer().is_complete_message() {
+            warn!("No valid data received from client");
+            return Err(());
+        }
+
+        let operation_type = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
         trace!("Applying batch edit operation, i={} type={}, file_offset_corrector_negative={}, file_offset_corrector_positive={}, offset_to_latest_edit={}",
                i, operation_type, file_offset_corrector_negative, file_offset_corrector_positive, offset_to_latest_edit);
 
         if operation_type == RA_BATCH_EDIT_OPERATION_DELETE {
 
-            let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-            let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-            try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+            let offset = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+            let size = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+            try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
             if offset < offset_to_latest_edit {
                 try_send_batch_edit_response_without_fields!(
@@ -1240,9 +1255,9 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
 
         } else if operation_type == RA_BATCH_EDIT_OPERATION_INSERT {
 
-            let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-            let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-            try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+            let offset = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+            let size = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+            try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
             if offset < offset_to_latest_edit {
                 try_send_batch_edit_response_without_fields!(
@@ -1259,7 +1274,7 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
             trace!("Batch edit insert, offset={}, size={}, corrected_offset={}", offset, size, corrected_offset);
 
             let mut data = Buffer::with_capacity(size as usize);
-            if Client::fill_buffer(& mut client.buffer, & mut client.connection, & mut data).is_err() {
+            if client.connection.fill_buffer_from_client(& mut data).is_err() {
                 client.status.set(Status::FailedToreceiveFromClient);
                 try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError as u64);
                 return Err(());
@@ -1279,9 +1294,9 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
 
         } else if operation_type == RA_BATCH_EDIT_OPERATION_WRITE {
 
-            let offset = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-            let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-            try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+            let offset = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+            let size = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+            try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
             if offset < offset_to_latest_edit {
                 try_send_batch_edit_response_without_fields!(
@@ -1298,7 +1313,7 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
             trace!("Batch edit write, offset={}, size={}, corrected_offset={}", offset, size, corrected_offset);
 
             let mut data = Buffer::with_capacity(size as usize);
-            if Client::fill_buffer(& mut client.buffer, & mut client.connection, & mut data).is_err() {
+            if client.connection.fill_buffer_from_client(& mut data).is_err() {
                 client.status.set(Status::FailedToreceiveFromClient);
                 try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError as u64);
                 return Err(());
@@ -1325,10 +1340,10 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
 
     trace!("All batch edit operations completed");
 
-    let mut buffer = try_write_buffer!(client, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
-    try_write_buffer!(client, buffer.write_unsigned(revision));
-    try_write_buffer!(client, buffer.write_end_of_message());
-    try_with_set_error_state!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+    let mut buffer = try_and_set_fail_to_write_on_error!(client, client.connection.create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
+    try_and_set_fail_to_write_on_error!(client, buffer.write_unsigned(revision));
+    try_and_set_fail_to_write_on_error!(client, buffer.write_end_of_message());
+    try_and_set_error_state_on_fail!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
     Ok(())
 }
 
@@ -1343,17 +1358,17 @@ Write to random access file request
 */
 fn handle_write_random_access_req(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
-    let revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let (offset, size) = try_parse!(client.buffer.parse_block(), client, transaction_id);
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let node_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_node_id(), client, transaction_id);
+    let revision = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+    let (offset, size) = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_block(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Write: user={}, node_id={}, revision={}, offset={}, size={}",
            client, node_id, revision, offset, size);
 
-    let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
+    let ref mut open_file = match Client::find_open_file(& mut client.open_files, & node_id) {
         Err(()) => {
             try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileIsNotOpenError as u64);
             return Err(());
@@ -1379,7 +1394,7 @@ fn handle_write_random_access_req(client: & mut Client) -> Result<(), ()>
     try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
 
     let mut data = Buffer::with_capacity(size as usize);
-    if Client::fill_buffer(& mut client.buffer, & mut client.connection, & mut data).is_err() {
+    if client.connection.fill_buffer_from_client(& mut data).is_err() {
         client.status.set(Status::FailedToreceiveFromClient);
         try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError as u64);
         return Err(());
@@ -1387,10 +1402,10 @@ fn handle_write_random_access_req(client: & mut Client) -> Result<(), ()>
 
     match open_file.access.write(revision, offset, data) {
         Ok(revision) => {
-            let mut buffer = try_write_buffer!(client, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
-            try_write_buffer!(client, buffer.write_unsigned(revision));
-            try_write_buffer!(client, buffer.write_end_of_message());
-            try_with_set_error_state!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+            let mut buffer = try_and_set_fail_to_write_on_error!(client, client.connection.create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
+            try_and_set_fail_to_write_on_error!(client, buffer.write_unsigned(revision));
+            try_and_set_fail_to_write_on_error!(client, buffer.write_end_of_message());
+            try_and_set_error_state_on_fail!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
             Ok(())
         },
         Err(error) => {
@@ -1411,17 +1426,17 @@ Insert to random access file
 */
 fn handle_random_access_insert_req(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
-    let revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let (offset, size) = try_parse!(client.buffer.parse_block(), client, transaction_id);
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let node_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_node_id(), client, transaction_id);
+    let revision = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+    let (offset, size) = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_block(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Insert: user={}, node_id={}, revision={}, offset={}, size={}",
            client, node_id, revision, offset, size);
 
-    let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
+    let ref mut open_file = match Client::find_open_file(& mut client.open_files, & node_id) {
         Err(()) => {
             try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileIsNotOpenError as u64);
             return Err(());
@@ -1447,7 +1462,7 @@ fn handle_random_access_insert_req(client: & mut Client) -> Result<(), ()>
     try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
 
     let mut data = Buffer::with_capacity(size as usize);
-    if Client::fill_buffer(& mut client.buffer, & mut client.connection, & mut data).is_err() {
+    if client.connection.fill_buffer_from_client(& mut data).is_err() {
         client.status.set(Status::FailedToreceiveFromClient);
         try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError as u64);
         return Err(());
@@ -1455,10 +1470,10 @@ fn handle_random_access_insert_req(client: & mut Client) -> Result<(), ()>
 
     match open_file.access.insert(revision, offset, data) {
         Ok(revision) => {
-            let mut buffer = try_write_buffer!(client, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
-            try_write_buffer!(client, buffer.write_unsigned(revision));
-            try_write_buffer!(client, buffer.write_end_of_message());
-            try_with_set_error_state!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+            let mut buffer = try_and_set_fail_to_write_on_error!(client, client.connection.create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
+            try_and_set_fail_to_write_on_error!(client, buffer.write_unsigned(revision));
+            try_and_set_fail_to_write_on_error!(client, buffer.write_end_of_message());
+            try_and_set_error_state_on_fail!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
             Ok(())
         },
         Err(error) => {
@@ -1477,17 +1492,17 @@ Delete from random access file
 */
 fn handle_random_access_delete_req(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
-    let revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let (offset, size) = try_parse!(client.buffer.parse_block(), client, transaction_id);
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let node_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_node_id(), client, transaction_id);
+    let revision = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+    let (offset, size) = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_block(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Delete: user={}, node_id={}, revision={}, offset={}, size={}",
            client, node_id, revision, offset, size);
 
-    let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
+    let ref mut open_file = match Client::find_open_file(& mut client.open_files, & node_id) {
         Err(()) => {
             try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileIsNotOpenError as u64);
             return Err(());
@@ -1512,10 +1527,10 @@ fn handle_random_access_delete_req(client: & mut Client) -> Result<(), ()>
 
     match open_file.access.delete(revision, offset, size) {
         Ok(revision) => {
-            let mut buffer = try_write_buffer!(client, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
-            try_write_buffer!(client, buffer.write_unsigned(revision));
-            try_write_buffer!(client, buffer.write_end_of_message());
-            try_with_set_error_state!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+            let mut buffer = try_and_set_fail_to_write_on_error!(client, client.connection.create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
+            try_and_set_fail_to_write_on_error!(client, buffer.write_unsigned(revision));
+            try_and_set_fail_to_write_on_error!(client, buffer.write_end_of_message());
+            try_and_set_error_state_on_fail!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
             Ok(())
         },
         Err(error) => {
@@ -1537,19 +1552,19 @@ Write to blob file
 */
 fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
-    let mut revision = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let block_size = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let node_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_node_id(), client, transaction_id);
+    let mut revision = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+    let size = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+    let block_size = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
 
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Write blob: user={}, node_id={}, revision={}, size={}, block_size={}",
            client, node_id, revision, size, block_size);
 
-    let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
+    let ref mut open_file = match Client::find_open_file(& mut client.open_files, & node_id) {
         Err(()) => {
             try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileIsNotOpenError as u64);
             return Err(());
@@ -1584,7 +1599,7 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
     } else {
         // If size of file is less than page size, block size must match
         if size != block_size {
-            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::BlockSizeIsTooLargeError as u64);
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::InvalidBlockSize as u64);
             return Err(());
         }
     }
@@ -1627,7 +1642,7 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
         };
 
         let mut buffer = Buffer::with_capacity(buffer_size as usize);
-        if Client::fill_buffer(& mut client.buffer, & mut client.connection, & mut buffer).is_err() {
+        if client.connection.fill_buffer_from_client(& mut buffer).is_err() {
             client.status.set(Status::FailedToreceiveFromClient);
             try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError as u64);
             return Err(());
@@ -1645,10 +1660,10 @@ fn handle_blob_write_req(client: & mut Client) -> Result<(), ()>
         bytes_read += buffer_size;
     }
 
-    let mut buffer = try_write_buffer!(client, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
-    try_write_buffer!(client, buffer.write_unsigned(revision));
-    try_write_buffer!(client, buffer.write_end_of_message());
-    try_with_set_error_state!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+    let mut buffer = try_and_set_fail_to_write_on_error!(client, client.connection.create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
+    try_and_set_fail_to_write_on_error!(client, buffer.write_unsigned(revision));
+    try_and_set_fail_to_write_on_error!(client, buffer.write_end_of_message());
+    try_and_set_error_state_on_fail!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
     Ok(())
 }
 
@@ -1662,15 +1677,15 @@ Read:
 */
 fn handle_read_req(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let node_id = try_parse!(client.buffer.parse_node_id(), client, transaction_id);
-    let (offset, size) = try_parse!(client.buffer.parse_block(), client, transaction_id);
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let node_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_node_id(), client, transaction_id);
+    let (offset, size) = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_block(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Read: user={}, node_id={}, offset={}, size={}", client, node_id, offset, size);
 
-    let ref mut open_file = match find_open_file(& mut client.open_files, & node_id) {
+    let ref mut open_file = match Client::find_open_file(& mut client.open_files, & node_id) {
         Err(()) => {
             try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FileIsNotOpenError as u64);
             return Err(());
@@ -1680,14 +1695,14 @@ fn handle_read_req(client: & mut Client) -> Result<(), ()>
 
     match open_file.access.read(offset, size) {
         Ok((data, revision)) => {
-            let mut buffer = try_write_buffer!(client, Client::create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
-            try_write_buffer!(client, buffer.write_unsigned(revision));
-            try_write_buffer!(client, buffer.write_block(offset, data.len()));
-            try_write_buffer!(client, buffer.write_end_of_message());
-            try_with_set_error_state!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+            let mut buffer = try_and_set_fail_to_write_on_error!(client, client.connection.create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
+            try_and_set_fail_to_write_on_error!(client, buffer.write_unsigned(revision));
+            try_and_set_fail_to_write_on_error!(client, buffer.write_block(offset, data.len()));
+            try_and_set_fail_to_write_on_error!(client, buffer.write_end_of_message());
+            try_and_set_error_state_on_fail!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
 
             if data.len() > 0 {
-                try_with_set_error_state!(client, client.connection.write_with_sleep(& data), Status::FailedToSendToClient);
+                try_and_set_error_state_on_fail!(client, client.connection.write_data_to_client(& data), Status::FailedToSendToClient);
             } else {
                 warn!("Read: No data to send");
             }
@@ -1707,10 +1722,10 @@ Delete file system element
  */
 fn handle_delete_fs_element_req(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let fd = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let fd = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_file_descriptor(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Delete: user={}, fd={}", client, fd);
 
@@ -1720,21 +1735,21 @@ fn handle_delete_fs_element_req(client: & mut Client) -> Result<(), ()>
         fd: fd,
     }) ? ;
 
-    node_receive::<()>(
+    Client::node_receive::<()>(
         client,
         & | msg, client | {
             match msg {
                 ClientProtocol::DeleteResponse {
                     result: Ok(()),
                 } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, CommonErrorCodes::NoError as u64);
                     (None, Some(Ok(())))
                 },
 
                 ClientProtocol::DeleteResponse {
                     result: Err(error),
                 } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, map_node_error_to_uint(error));
                     (None, Some(Err(())))
                 },
 
@@ -1793,9 +1808,9 @@ Query system counters
 */
 fn handle_query_counters_req(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Query counters: user={}", client);
 
@@ -1804,28 +1819,28 @@ fn handle_query_counters_req(client: & mut Client) -> Result<(), ()>
         user: user,
     }) ? ;
 
-    node_receive::<()>(
+    Client::node_receive::<()>(
         client,
         & | msg, client | {
             match msg {
                 ClientProtocol::CountersResponse {
                     result: Ok(counters),
                 } => {
-                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
-                    try_in_receive_loop!(client, buffer.write_list_start(3), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "active-connections", counters.active_connections as u64), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "number-of-files", counters.number_of_files as u64), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "number-of-open-files", counters.number_of_open_files as u64), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    let mut buffer = try_create_buffer_and_return_on_error!(client, transaction_id, CommonErrorCodes::NoError);
+                    try_and_return_on_error!(client, buffer.write_list_start(3), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "active-connections", counters.active_connections as u64), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "number-of-files", counters.number_of_files as u64), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "number-of-open-files", counters.number_of_open_files as u64), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
                     (None, Some(Ok(())))
                 },
 
                 ClientProtocol::CountersResponse {
                     result: Err(error),
                 } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, map_node_error_to_uint(error));
                     (None, Some(Err(())))
                 },
 
@@ -1850,10 +1865,10 @@ Query element children and their cached properties, i.e. state of file when last
 */
 fn handle_query_fs_children(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let fd = try_parse!(client.buffer.parse_file_descriptor(), client, 0);
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let fd = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_file_descriptor(), client, 0);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Query list: user={}, fd={}", client, fd);
 
@@ -1863,7 +1878,7 @@ fn handle_query_fs_children(client: & mut Client) -> Result<(), ()>
         fd: fd,
     }) ? ;
 
-    node_receive::<()>(
+    Client::node_receive::<()>(
         client,
         & | msg, client | {
             match msg {
@@ -1871,12 +1886,12 @@ fn handle_query_fs_children(client: & mut Client) -> Result<(), ()>
                     result: Ok(list_of_elements),
                 } => {
 
-                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
+                    let mut buffer = try_create_buffer_and_return_on_error!(client, transaction_id, CommonErrorCodes::NoError);
 
-                    try_in_receive_loop!(client, buffer.write_list_start(list_of_elements.len()), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, buffer.write_list_start(list_of_elements.len()), Status::FailedToWriteToSendBuffer);
                     for element in list_of_elements.into_iter() {
 
-                        try_in_receive_loop!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
+                        try_and_return_on_error!(client, buffer.write_list_element_start(), Status::FailedToWriteToSendBuffer);
                         match element {
                             FileSystemListElement::File {
                                 name,
@@ -1886,13 +1901,13 @@ fn handle_query_fs_children(client: & mut Client) -> Result<(), ()>
                                 size,
                                 is_open,
                             } => {
-                                try_in_receive_loop!(client, buffer.write_unsigned(FILE), Status::FailedToWriteToSendBuffer);
-                                try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
-                                try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                                try_in_receive_loop!(client, buffer.write_unsigned(revision as u64), Status::FailedToWriteToSendBuffer);
-                                try_in_receive_loop!(client, buffer.write_unsigned(file_type as u64), Status::FailedToWriteToSendBuffer);
-                                try_in_receive_loop!(client, buffer.write_unsigned(size as u64), Status::FailedToWriteToSendBuffer);
-                                try_in_receive_loop!(client, buffer.write_unsigned(is_open as u64), Status::FailedToWriteToSendBuffer);
+                                try_and_return_on_error!(client, buffer.write_unsigned(FILE), Status::FailedToWriteToSendBuffer);
+                                try_and_return_on_error!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
+                                try_and_return_on_error!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                                try_and_return_on_error!(client, buffer.write_unsigned(revision as u64), Status::FailedToWriteToSendBuffer);
+                                try_and_return_on_error!(client, buffer.write_unsigned(file_type as u64), Status::FailedToWriteToSendBuffer);
+                                try_and_return_on_error!(client, buffer.write_unsigned(size as u64), Status::FailedToWriteToSendBuffer);
+                                try_and_return_on_error!(client, buffer.write_unsigned(is_open as u64), Status::FailedToWriteToSendBuffer);
                             },
                             FileSystemListElement::Directory {
                                 name,
@@ -1900,25 +1915,25 @@ fn handle_query_fs_children(client: & mut Client) -> Result<(), ()>
                                 read,
                                 write,
                             } => {
-                                try_in_receive_loop!(client, buffer.write_unsigned(DIRECTORY), Status::FailedToWriteToSendBuffer);
-                                try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
-                                try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                                try_in_receive_loop!(client, buffer.write_authority(read), Status::FailedToWriteToSendBuffer);
-                                try_in_receive_loop!(client, buffer.write_authority(write), Status::FailedToWriteToSendBuffer);
+                                try_and_return_on_error!(client, buffer.write_unsigned(DIRECTORY), Status::FailedToWriteToSendBuffer);
+                                try_and_return_on_error!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
+                                try_and_return_on_error!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                                try_and_return_on_error!(client, buffer.write_authority(read), Status::FailedToWriteToSendBuffer);
+                                try_and_return_on_error!(client, buffer.write_authority(write), Status::FailedToWriteToSendBuffer);
                             },
                         }
-                        try_in_receive_loop!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
+                        try_and_return_on_error!(client, buffer.write_list_element_end(), Status::FailedToWriteToSendBuffer);
                     }
-                    try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    try_and_return_on_error!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
                     (None, Some(Ok(())))
                 },
 
                 ClientProtocol::QueryFsChildrenResponse {
                     result: Err(error),
                 } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, map_node_error_to_uint(error));
                     (None, Some(Err(())))
                 },
 
@@ -1945,11 +1960,11 @@ Query fileystem element properties
 */
 fn handle_query_fs_element_properties(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let fd = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
-    let fd_parent = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
-    try_parse!(client.buffer.expect(";"), client, 0);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let fd = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_file_descriptor(), client, transaction_id);
+    let fd_parent = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_file_descriptor(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, 0);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Query fs properties: user={}, fd={}", client, fd);
 
@@ -1960,7 +1975,7 @@ fn handle_query_fs_element_properties(client: & mut Client) -> Result<(), ()>
         fd_parent: fd_parent,
     }) ? ;
 
-    node_receive::<()>(
+    Client::node_receive::<()>(
         client,
         & | msg, client | {
             match msg {
@@ -1968,40 +1983,40 @@ fn handle_query_fs_element_properties(client: & mut Client) -> Result<(), ()>
                     result: Ok(desc),
                 } => {
 
-                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
+                    let mut buffer = try_create_buffer_and_return_on_error!(client, transaction_id, CommonErrorCodes::NoError);
                     match desc {
                         FilesystemElementProperties::File { name, node_id, revision, file_type, size } => {
-                            try_in_receive_loop!(client, buffer.write_unsigned(FILE as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_unsigned(revision as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_unsigned(size), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, buffer.write_unsigned(FILE as u64), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, buffer.write_unsigned(revision as u64), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, buffer.write_unsigned(size), Status::FailedToWriteToSendBuffer);
 
                             match file_type {
                                 FileType::RandomAccess => {
-                                    try_in_receive_loop!(client, buffer.write_unsigned(FILE_TYPE_RANDOM_ACCESS as u64), Status::FailedToWriteToSendBuffer);
+                                    try_and_return_on_error!(client, buffer.write_unsigned(FILE_TYPE_RANDOM_ACCESS as u64), Status::FailedToWriteToSendBuffer);
                                 },
                                 FileType::Blob => {
-                                    try_in_receive_loop!(client, buffer.write_unsigned(FILE_TYPE_BLOB as u64), Status::FailedToWriteToSendBuffer);
+                                    try_and_return_on_error!(client, buffer.write_unsigned(FILE_TYPE_BLOB as u64), Status::FailedToWriteToSendBuffer);
                                 },
                             };
                         },
                         FilesystemElementProperties::Directory { name, node_id } => {
-                            try_in_receive_loop!(client, buffer.write_unsigned(DIRECTORY as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, buffer.write_unsigned(DIRECTORY as u64), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, buffer.write_string(name), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, buffer.write_node_id(node_id), Status::FailedToWriteToSendBuffer);
                         },
                     }
 
-                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    try_and_return_on_error!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
                     (None, Some(Ok(())))
                 },
 
                 ClientProtocol::QueryFsElementPropertiesResponse {
                     result: Err(error),
                 } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, map_node_error_to_uint(error));
                     (None, Some(Err(())))
                 },
 
@@ -2023,10 +2038,10 @@ Query fileystem element
 */
 fn handle_query_fs_element(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let fd = try_parse!(client.buffer.parse_file_descriptor(), client, transaction_id);
-    try_parse!(client.buffer.expect(";"), client, 0);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let fd = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_file_descriptor(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, 0);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Query fs: user={}, fd={}", client, fd);
 
@@ -2036,7 +2051,7 @@ fn handle_query_fs_element(client: & mut Client) -> Result<(), ()>
         fd: fd,
     }) ? ;
 
-    node_receive::<()>(
+    Client::node_receive::<()>(
         client,
         & | msg, client | {
             match msg {
@@ -2044,54 +2059,54 @@ fn handle_query_fs_element(client: & mut Client) -> Result<(), ()>
                     result: Ok(desc),
                 } => {
 
-                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
+                    let mut buffer = try_create_buffer_and_return_on_error!(client, transaction_id, CommonErrorCodes::NoError);
                     match desc {
                         FilesystemElement::File { properties, created_by, modified_by, read, write, node_id } => {
-                            try_in_receive_loop!(client, buffer.write_list_start(12), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "type", FILE as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "node-id", node_id as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "created-at",  properties.created_at as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "modified-at",  properties.modified_at as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_sa(& mut buffer, "created-by",  created_by), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_sa(& mut buffer, "modified-by",  modified_by), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_sa(& mut buffer, "parent-read-authority", read), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_sa(& mut buffer, "parent-write-authority", write), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "page-size",  properties.page_size), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "revision",  properties.revision), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "size",  properties.size), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, buffer.write_list_start(12), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "type", FILE as u64), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "node-id", node_id as u64), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "created-at",  properties.created_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "modified-at",  properties.modified_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_sa(& mut buffer, "created-by",  created_by), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_sa(& mut buffer, "modified-by",  modified_by), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_sa(& mut buffer, "parent-read-authority", read), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_sa(& mut buffer, "parent-write-authority", write), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "page-size",  properties.page_size), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "revision",  properties.revision), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "size",  properties.size), Status::FailedToWriteToSendBuffer);
 
                             match properties.file_type {
                                 FileType::RandomAccess => {
-                                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "file-type",  FILE_TYPE_RANDOM_ACCESS as u64), Status::FailedToWriteToSendBuffer);
+                                    try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "file-type",  FILE_TYPE_RANDOM_ACCESS as u64), Status::FailedToWriteToSendBuffer);
                                 },
                                 FileType::Blob => {
-                                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "file-type",  FILE_TYPE_BLOB as u64), Status::FailedToWriteToSendBuffer);
+                                    try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "file-type",  FILE_TYPE_BLOB as u64), Status::FailedToWriteToSendBuffer);
                                 },
                             };
-                            try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
 
                         },
                         FilesystemElement::Directory { created_at, modified_at, read, write, node_id } => {
-                            try_in_receive_loop!(client, buffer.write_list_start(6), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "type", DIRECTORY as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "node-id", node_id as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "created-at",  created_at as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "modified-at",  modified_at as u64), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_sa(& mut buffer, "read-authority", read), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, write_le_kv_sa(& mut buffer, "write-authority", write), Status::FailedToWriteToSendBuffer);
-                            try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, buffer.write_list_start(6), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "type", DIRECTORY as u64), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "node-id", node_id as u64), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "created-at",  created_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "modified-at",  modified_at as u64), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_sa(& mut buffer, "read-authority", read), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_sa(& mut buffer, "write-authority", write), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
                         },
                     }
 
-                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    try_and_return_on_error!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
                     (None, Some(Ok(())))
                 },
 
                 ClientProtocol::QueryFsElementResponse {
                     result: Err(error),
                 } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, map_node_error_to_uint(error));
                     (None, Some(Err(())))
                 },
 
@@ -2112,9 +2127,9 @@ Query system properties
 */
 fn handle_query_system(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    try_parse!(client.buffer.expect(";"), client, 0);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, 0);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Query system: user={}", client);
 
@@ -2123,7 +2138,7 @@ fn handle_query_system(client: & mut Client) -> Result<(), ()>
         user: user,
     }) ? ;
 
-    node_receive::<()>(
+    Client::node_receive::<()>(
         client,
         & | msg, client | {
             match msg {
@@ -2131,36 +2146,36 @@ fn handle_query_system(client: & mut Client) -> Result<(), ()>
                     result: Ok(desc),
                 } => {
 
-                    let mut buffer = try_in_receive_loop_to_create_buffer!(client, transaction_id, CommonErrorCodes::NoError);
+                    let mut buffer = try_create_buffer_and_return_on_error!(client, transaction_id, CommonErrorCodes::NoError);
 
                     let mut number_of_fields = 4;
                     if desc.admin_system_information.is_some() {
                         number_of_fields += 1;
                     }
 
-                    try_in_receive_loop!(client, buffer.write_list_start(number_of_fields), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "server-id", desc.server_id), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "started-at", desc.started_at as u64), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "max-number-of-open-files-per-connection", MAX_NUMBER_OF_OPEN_FILES as u64), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, write_le_kv_su(& mut buffer, "number-of-open-files", client.open_files.len() as u64), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, buffer.write_list_start(number_of_fields), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "server-id", desc.server_id), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "started-at", desc.started_at as u64), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "max-number-of-open-files-per-connection", MAX_NUMBER_OF_OPEN_FILES as u64), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "number-of-open-files", client.open_files.len() as u64), Status::FailedToWriteToSendBuffer);
 
                     match desc.admin_system_information {
                         Some(info) => {
-                            try_in_receive_loop!(client, write_le_kv_st(& mut buffer, "certification-expiration", info.certificate_expiration), Status::FailedToWriteToSendBuffer);
+                            try_and_return_on_error!(client, write_le_kv_st(& mut buffer, "certification-expiration", info.certificate_expiration), Status::FailedToWriteToSendBuffer);
                         },
                         None => (),
                     }
 
-                    try_in_receive_loop!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
-                    try_in_receive_loop!(client, client.connection.write_with_sleep(buffer.as_bytes()), Status::FailedToSendToClient);
+                    try_and_return_on_error!(client, buffer.write_list_end(), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
                     (None, Some(Ok(())))
                 },
 
                 ClientProtocol::QuerySystemResponse {
                     result: Err(error),
                 } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, map_node_error_to_uint(error));
                     (None, Some(Err(())))
                 },
 
@@ -2183,11 +2198,11 @@ Add user/group
 */
 fn handle_add_user_group(client: & mut Client) -> Result<(), ()>
 {
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let type_of = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let name = try_parse!(client.buffer.parse_string(), client, transaction_id);
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let type_of = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+    let name = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_string(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     trace!("Create user/group, user={}, name={}, type_of={}", client, name, type_of);
 
@@ -2209,20 +2224,20 @@ fn handle_add_user_group(client: & mut Client) -> Result<(), ()>
 
     client.send_to_node(transaction_id, msg) ? ;
 
-    node_receive::<()>(
+    Client::node_receive::<()>(
         client,
         & | msg, client | {
             match msg {
                 ClientProtocol::AddUserGroupResponse {
                     result: Ok(()),
                 } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, CommonErrorCodes::NoError as u64);
                     (None, Some(Ok(())))
                 },
                 ClientProtocol::AddUserGroupResponse {
                     result: Err(error),
                 } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, map_node_error_to_uint(error));
                     (None, Some(Err(())))
                 },
                 other => {
@@ -2246,24 +2261,24 @@ fn handle_mod_user_group(client: & mut Client) -> Result<(), ()>
     let mut password: Option<String> = None;
     let mut expiration: Option<Option<Timestamp>> = None;
 
-    let transaction_id = try_parse!(client.buffer.parse_transaction_id(), client, 0);
-    let type_of = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
-    let name = try_parse!(client.buffer.parse_string(), client, transaction_id);
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    let type_of = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+    let name = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_string(), client, transaction_id);
 
-    let number_of_elements = try_parse!(client.buffer.parse_list_start(), client, transaction_id);
+    let number_of_elements = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_list_start(), client, transaction_id);
     for _ in 0..number_of_elements {
-        if client.buffer.parse_list_element_start().is_err() {
+        if client.connection.get_receive_buffer().parse_list_element_start().is_err() {
             try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::MalformedMessageError as u64);
             return Err(());
         }
 
-        try_parse!(client.buffer.parse_key_value_pair_start(), client, transaction_id);
-        let key = try_parse!(client.buffer.parse_string(), client, transaction_id);
+        try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_key_value_pair_start(), client, transaction_id);
+        let key = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_string(), client, transaction_id);
 
         if key == "password" {
-            password = Some(try_parse!(client.buffer.parse_string(), client, transaction_id));
+            password = Some(try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_string(), client, transaction_id));
         } else if key == "expiration" {
-            let value = try_parse!(client.buffer.parse_unsigned(), client, transaction_id);
+            let value = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
             if value == 0 {
                 expiration = Some(None);
             } else {
@@ -2275,13 +2290,13 @@ fn handle_mod_user_group(client: & mut Client) -> Result<(), ()>
             return Err(());
         }
 
-        try_parse!(client.buffer.parse_key_value_pair_end(), client, transaction_id);
-        try_parse!(client.buffer.parse_list_element_end(), client, transaction_id);
+        try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_key_value_pair_end(), client, transaction_id);
+        try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_list_element_end(), client, transaction_id);
     }
-    try_parse!(client.buffer.parse_list_end(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_list_end(), client, transaction_id);
 
-    try_parse!(client.buffer.expect(";"), client, transaction_id);
-    try_parse!(client.buffer.parse_end_of_message(), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
     let user = client.user.as_ref().unwrap().clone();
     let msg = match type_of {
@@ -2308,20 +2323,20 @@ fn handle_mod_user_group(client: & mut Client) -> Result<(), ()>
 
     client.send_to_node(transaction_id, msg) ? ;
 
-    node_receive::<()>(
+    Client::node_receive::<()>(
         client,
         & | msg, client | {
             match msg {
                 ClientProtocol::AddUserGroupResponse {
                     result: Ok(()),
                 } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, CommonErrorCodes::NoError as u64);
                     (None, Some(Ok(())))
                 },
                 ClientProtocol::AddUserGroupResponse {
                     result: Err(error),
                 } => {
-                    try_in_receive_loop_to_send_response_without_fields!(client, transaction_id, map_node_error_to_uint(error));
+                    try_send_response_without_fields_and_return_on_error!(client, transaction_id, map_node_error_to_uint(error));
                     (None, Some(Err(())))
                 },
                 other => {
@@ -2332,44 +2347,4 @@ fn handle_mod_user_group(client: & mut Client) -> Result<(), ()>
         ? ;
 
     Ok(())
-}
-
-static MAX_WAIT_DURATION_FOR_NODE_RESPONSE_SECONDS: i64 = 5;
-
-fn node_receive<OkType>(
-    client: & mut Client,
-    handler: & dyn Fn(ClientProtocol, & mut Client) -> (Option<ClientProtocol>, Option<Result<OkType, ()>>)
-) -> Result<OkType, ()> {
-
-    let sent_timestamp: Timestamp = utc_timestamp();
-    loop {
-
-        let msg = match client.node_receive.try_recv() {
-            Ok(msg) => msg,
-            Err(TryRecvError::Disconnected) => {
-                error!("Node disconnected from client");
-                client.status.set(Status::FailedToreceiveFromNode);
-                return Err(())
-            },
-            Err(TryRecvError::Empty) => {
-                sleep(Duration::from_millis(100));
-                continue;
-            },
-        };
-
-        match handler(msg, client) {
-            (None, Some(result)) => return result,
-            (Some(msg), None) => {
-                client.handle_unexpected_message_from_node(msg);
-            },
-            (_, _) => panic!()
-        };
-
-        let duration = utc_timestamp() - sent_timestamp;
-        if duration > MAX_WAIT_DURATION_FOR_NODE_RESPONSE_SECONDS {
-            warn!("Failed to receive response in time from node");
-            client.status.set(Status::FailedToreceiveFromNode);
-            return Err(())
-        }
-    }
 }

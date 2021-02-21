@@ -10,6 +10,7 @@ pub mod serialize;
 pub mod common;
 pub mod user_authority;
 pub mod client_protocol_buffer;
+pub mod connection;
 
 #[cfg(test)]
 mod test_filesystem;
