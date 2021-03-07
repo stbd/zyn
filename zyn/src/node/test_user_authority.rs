@@ -155,3 +155,39 @@ fn test_serialization() {
     assert!(state.auth.validate_user(& State::username(), & State::password(), State::datetime_plus(1)).is_ok());
     assert!(state.auth.is_authorized(& group_id, & user_id, State::datetime_plus(1)).is_ok());
 }
+
+#[test]
+fn test_temporary_link() {
+    let mut state = State::new();
+    let group_id = state.auth.add_group(& State::groupname(), None).unwrap();
+    let link = state.auth.generate_temporary_link_for_id(& group_id, State::datetime_plus(1)).unwrap();
+    assert!(state.auth.consume_link_to_id(& link, State::datetime_plus(1)).unwrap() == group_id);
+}
+
+#[test]
+fn test_temporary_link_multiple_links() {
+    let mut state = State::new();
+    let group_id = state.auth.add_group(& State::groupname(), None).unwrap();
+    let user_id = state.auth.add_user(& State::username(), & State::password(), None).unwrap();
+    let link_1 = state.auth.generate_temporary_link_for_id(& group_id, State::datetime_plus(1)).unwrap();
+    let link_2 = state.auth.generate_temporary_link_for_id(& user_id, State::datetime_plus(1)).unwrap();
+    assert!(state.auth.consume_link_to_id(& link_1, State::datetime_plus(1)).unwrap() == group_id);
+    assert!(state.auth.consume_link_to_id(& link_2, State::datetime_plus(1)).unwrap() == user_id);
+}
+
+#[test]
+fn test_temporary_link_is_usable_only_once() {
+    let mut state = State::new();
+    let group_id = state.auth.add_group(& State::groupname(), None).unwrap();
+    let link = state.auth.generate_temporary_link_for_id(& group_id, State::datetime_plus(1)).unwrap();
+    assert!(state.auth.consume_link_to_id(& link, State::datetime_plus(1)).unwrap() == group_id);
+    assert!(state.auth.consume_link_to_id(& link, State::datetime_plus(1)).is_err());
+}
+
+#[test]
+fn test_temporary_link_is_not_usable_after_expiration() {
+    let mut state = State::new();
+    let group_id = state.auth.add_group(& State::groupname(), None).unwrap();
+    let link = state.auth.generate_temporary_link_for_id(& group_id, State::datetime_plus(1)).unwrap();
+    assert!(state.auth.consume_link_to_id(& link, State::datetime_plus(2)).is_err());
+}

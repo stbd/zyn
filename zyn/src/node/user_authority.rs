@@ -1,4 +1,4 @@
-use std::fmt::{ Display, Formatter, Result as FmtResult} ;
+use std::fmt::{ Display, Formatter, Result as FmtResult, Write};
 use std::collections::{ HashMap, HashSet };
 use std::path::{ PathBuf };
 use std::result::{ Result };
@@ -65,9 +65,15 @@ struct User {
     password: Vec<u8>,
 }
 
+struct TemporaryLink {
+    id: Id,
+    expiration: Timestamp,
+}
+
 pub struct UserAuthority {
     groups: HashMap<u64, Group>,
     users: HashMap<u64, User>,
+    temporary_links: HashMap<String, TemporaryLink>, // These are not serialialized when server is shutdown
     next_user_id: u64,
     next_group_id: u64,
 }
@@ -77,6 +83,7 @@ impl UserAuthority {
         UserAuthority {
             groups: HashMap::new(),
             users: HashMap::new(),
+            temporary_links: HashMap::new(),
             next_user_id: 1,
             next_group_id: 1,
         }
@@ -432,5 +439,52 @@ impl UserAuthority {
 
     fn salt() -> u64 {
         random::<u64>()
+    }
+
+    fn cleanup_expired_links(& mut self, current_time: & Timestamp) {
+        self.temporary_links.retain(|_, v| {
+            v.expiration >= *current_time
+        });
+    }
+
+    pub fn generate_temporary_link_for_id(
+        & mut self,
+        id: & Id,
+        expiration: Timestamp,
+    ) -> Result<String, ()> {
+
+        let salt = UserAuthority::salt();
+        let desc = format!("{}", id);
+        let hash = self.hash(& desc, salt);
+
+        let mut text_hash = String::with_capacity(32 * 3);
+        for x in & hash {
+            write!(& mut text_hash, "{}", x)
+                .map_err(|error| error!("Failed to write hash to buffer \"{:?}\"", error), )
+                ? ;
+        }
+
+        self.temporary_links.insert(
+            text_hash.clone(),
+            TemporaryLink{
+                id: id.clone(),
+                expiration: expiration,
+            }
+        );
+
+        Ok(text_hash)
+    }
+
+    pub fn consume_link_to_id(
+        & mut self,
+        link_id: & str,
+        current_time: Timestamp,
+    ) -> Result<Id, ()> {
+
+        self.cleanup_expired_links(& current_time);
+        match self.temporary_links.remove_entry(link_id) {
+            Some((_, link)) => Ok(link.id),
+            None => Err(()),
+        }
     }
 }
