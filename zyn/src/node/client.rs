@@ -123,7 +123,8 @@ fn map_node_error_to_uint(error: ErrorResponse) -> u64 {
                 NodeError::AuthorityError => 107,
                 NodeError::InvalidPageSize => 108,
                 NodeError::FailedToResolveAuthority => 109,
-
+                NodeError::FailedToAllocateAuthenticationToken => 110,
+                NodeError::FailedToConsumeAuthenticationToken => 111,
             }
         },
         ErrorResponse::FilesystemError { error } => {
@@ -553,6 +554,7 @@ impl Client {
         debug!("Start client process loop, is_websocket={}", self.connection.is_using_websocket());
 
         let message_handlers: Vec<(& [u8], fn(& mut Client) -> Result<(), ()>, u64)> = vec![
+            ("ALLOCATE-AUTH-TOKEN:".as_bytes(), handle_allocate_authentication_token, 1),
             ("CREATE-FILE:".as_bytes(), handle_create_file_req, 1),
             ("CREATE-DIRECTORY:".as_bytes(), handle_create_directory_req, 1),
             ("O:".as_bytes(), handle_open_req, 1),
@@ -784,23 +786,49 @@ impl Client {
 
 /*
 Authenticate request:
-<- [Version]A:[Transaction Id][String: username][String: password];[End]
+<- [Version]A:[Transaction Id]L:[String: username][String: password];;[End]
+or with token
+<- [Version]A:[Transaction Id]T:[String: token];;[End]
+
 -> [Version]RSP:[Transaction Id][Uint: error code];[End]
  */
 fn handle_authentication_req(client: & mut Client) -> Result<(), ()>
 {
     let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
-    let username = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_string(), client, transaction_id);
-    let password = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_string(), client, transaction_id);
+
+    let (request, operation_description) = {
+        if client.connection.get_receive_buffer().expect("L:".as_bytes()).is_ok() {
+
+            let username = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_string(), client, transaction_id);
+            let password = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_string(), client, transaction_id);
+            trace!("Authenticate with password, username=\"{}\", transaction=", username);
+            (
+                NodeProtocol::AuthenticateWithPasswordRequest {
+                    username: username.clone(),
+                    password: password
+                },
+                format!("Login with username \"{}\"", username),
+            )
+        } else if client.connection.get_receive_buffer().expect("TOKEN:".as_bytes()).is_ok() {
+            let token = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_string(), client, transaction_id);
+            (
+                NodeProtocol::AuthenticateWithTokenRequest{
+                    token: token.clone(),
+                },
+                format!("Login with token \"{}\"", token),
+            )
+        } else {
+            try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::MalformedMessageError as u64);
+            error!("Failed to parse authetication type");
+            return Err(());
+        }
+    };
+
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
     try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
     try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
-    trace!("Authenticate, username=\"{}\"", username);
-
-    client.send_to_node(transaction_id, NodeProtocol::AuthenticateRequest {
-        username: username.clone(),
-        password: password
-    }) ? ;
+    client.send_to_node(transaction_id, request) ? ;
 
     let id = Client::node_receive::<Id>(
         client,
@@ -818,7 +846,7 @@ fn handle_authentication_req(client: & mut Client) -> Result<(), ()>
                     } else {
                         client.status.set(Status::AuthenticationError { trial: 1 });
                     }
-                    debug!("Invalid password for username={}, status={}", username, client.status);
+                    debug!("Authentication failed {}, status={}", operation_description, client.status);
                     (None, Some(Err(())))
                 },
 
@@ -829,9 +857,48 @@ fn handle_authentication_req(client: & mut Client) -> Result<(), ()>
         })
         ? ;
 
-    debug!("Authentication ok, username=\"{}\", id={}", username, id);
+    debug!("Authentication ok, {}, id={}", operation_description, id);
 
     client.user = Some(id);
+    Ok(())
+}
+
+/*
+Allocate temporary token that can used to login user without password
+<- [Version]ALLOCATE-AUTH-TOKEN:[Transaction Id];[End]
+-> [Version]RSP:[Transaction Id][Sting: token];[End]
+ */
+fn handle_allocate_authentication_token(client: & mut Client) -> Result<(), ()>
+{
+    let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().expect(ZYN_FIELD_END), client, transaction_id);
+    try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
+
+    client.send_to_node(transaction_id, NodeProtocol::AllocateAuthenticationTokenRequest {
+        user: client.user.as_ref().unwrap().clone(),
+    }) ? ;
+
+    Client::node_receive::<()>(
+        client,
+        & | msg, client | {
+            match msg {
+
+                ClientProtocol::AllocateAuthenticationTokenResponse { result: Ok(token) } => {
+                    let mut buffer = try_create_buffer_and_return_on_error!(client, transaction_id, CommonErrorCodes::NoError);
+                    try_and_return_on_error!(client, buffer.write_string(token), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, buffer.write_end_of_message(), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
+                    (None, Some(Ok(())))
+                },
+
+                other => {
+                    (Some(other), None)
+                }
+            }
+        })
+        ? ;
+
+    debug!("Allocated temporary login token to user \"{}\"", client);
     Ok(())
 }
 

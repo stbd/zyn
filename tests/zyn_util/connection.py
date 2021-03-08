@@ -133,8 +133,33 @@ class ZynConnection:
             self.field_version() \
             + 'A:' \
             + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
+            + 'L:' \
             + self.field_string(username) \
             + self.field_string(password) \
+            + ';' \
+            + ';' \
+            + self.field_end_of_message() \
+
+        return self._send_receive(req)
+
+    def authenticate_with_token(self, token, transaction_id=None):
+        req = \
+            self.field_version() \
+            + 'A:' \
+            + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
+            + 'TOKEN:' \
+            + self.field_string(token) \
+            + ';' \
+            + ';' \
+            + self.field_end_of_message() \
+
+        return self._send_receive(req)
+
+    def allocate_authentication_token(self, transaction_id=None):
+        req = \
+            self.field_version() \
+            + 'ALLOCATE-AUTH-TOKEN:' \
+            + self.field_transaction_id(transaction_id or self._consume_transaction_id()) \
             + ';' \
             + self.field_end_of_message() \
 
@@ -1187,6 +1212,14 @@ class BatchEditErrordResponse:
             _malfomed_message()
 
 
+class AllocateAuthTokenResponse:
+    def __init__(self, response):
+        self._rsp = response
+        if response.number_of_fields() != 1:
+            _malfomed_message()
+        self.token = response.field(0).as_string()
+
+
 class ReadResponse:
     def __init__(self, response):
         self._rsp = response
@@ -1444,6 +1477,9 @@ class Response(Message):
 
     def as_batch_edit_error_response(self):
         return BatchEditErrordResponse(self)
+
+    def as_allocate_auth_token_response(self):
+        return AllocateAuthTokenResponse(self)
 
 
 class Notification(Message):

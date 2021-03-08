@@ -201,6 +201,26 @@ class TestBasicServerUsage(TestBasicOperatinsCommon):
         self._validate_notification_type(msg, zyn_util.connection.Notification.TYPE_DISCONNECTED)
         self._validate_socket_is_disconnected(c)
 
+    def test_authentication_token(self):
+        c_1 = self._start_and_connect_to_node_and_handle_auth()
+        rsp_token = c_1.allocate_authentication_token().as_allocate_auth_token_response()
+        c_2 = self._connect_to_node()
+        self.assertFalse(c_2.authenticate_with_token(rsp_token.token).is_error())
+
+    def test_authentication_token_fails_after_expiration(self):
+        expiration_secs = 1
+        c_1 = self._start_and_connect_to_node_and_handle_auth(
+            authentication_token_duration_secs=expiration_secs
+        )
+        rsp_token = c_1.allocate_authentication_token().as_allocate_auth_token_response()
+        time.sleep(expiration_secs + 1)
+        c_2 = self._connect_to_node()
+        self.assertTrue(c_2.authenticate_with_token(rsp_token.token).is_error())
+
+    def _test_authentication_token_with_multiple_users(self):
+        # todo: to be added when support for multiple users is improved
+        pass
+
 
 class TestQuery(TestBasicOperatinsCommon):
     def test_query_counters(self):

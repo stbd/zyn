@@ -140,6 +140,10 @@ impl Arguments {
         "--max-inactivity-duration-seconds"
     }
 
+    pub fn authentication_token_duration_secs() -> & 'static str {
+        "--authentication-token-duration"
+    }
+
     pub fn defaults() -> Arguments {
         Arguments {
             values: vec![
@@ -198,6 +202,10 @@ impl Arguments {
                 (Arguments::max_inactivity_duration_secs(),
                  "Maximum duration allowed for inactive client connections, in seconds",
                  Argument::Uint { value: Some(60 * 60 * 5) }),
+
+                (Arguments::authentication_token_duration_secs(),
+                 "Duration of the authentication token, in seconds",
+                 Argument::Uint { value: Some(10) }),
             ],
         }
     }
@@ -381,6 +389,7 @@ fn run() -> Result<(), ()> {
     let max_page_size_random_access = args.take(Arguments::max_page_size_random_access()).take_uint() as usize;
     let max_page_size_blob = args.take(Arguments::max_page_size_blob()).take_uint() as usize;
     let max_inactivity_duration_secs = args.take(Arguments::max_inactivity_duration_secs()).take_uint() as i64;
+    let authentication_token_duration_secs = args.take(Arguments::authentication_token_duration_secs()).take_uint() as i64;
 
     if ! args.is_empty() {
         panic!("Unused arguments");
@@ -426,6 +435,7 @@ fn run() -> Result<(), ()> {
         server,
         & data_dir,
         max_inactivity_duration_secs,
+        authentication_token_duration_secs,
     )
         .map_err(| () | error!("Failed to load node"))
         ? ;

@@ -76,6 +76,7 @@ class TestZyn(unittest.TestCase):
             max_block_size_random_access=None,
             max_block_size_blob=None,
             max_inactity_duration_secs=None,
+            authentication_token_duration_secs=None,
             init=False
     ):
         params = []
@@ -129,6 +130,10 @@ class TestZyn(unittest.TestCase):
         if max_inactity_duration_secs is not None:
             params.append('--max-inactivity-duration-seconds')
             params.append(str(max_inactity_duration_secs))
+
+        if authentication_token_duration_secs is not None:
+            params.append('--authentication-token-duration')
+            params.append(str(authentication_token_duration_secs))
 
         process = self._start_server_process(params)
         time.sleep(.1)  # Give some time for the process to start up

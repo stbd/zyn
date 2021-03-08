@@ -31,6 +31,8 @@ pub enum NodeError {
     UnknownFile,
     InvalidPageSize,
     FailedToResolveAuthority,
+    FailedToAllocateAuthenticationToken,
+    FailedToConsumeAuthenticationToken,
 }
 
 pub enum ErrorResponse {
@@ -132,6 +134,7 @@ pub enum ShutdownReason {
 
 pub enum ClientProtocol {
     AuthenticateResponse { result: Result<Id, ErrorResponse> },
+    AllocateAuthenticationTokenResponse { result: Result<String, ErrorResponse> },
     CreateFileResponse { result: Result<(NodeId, FileProperties), ErrorResponse> },
     CreateDirectoryResponse { result: Result<NodeId, ErrorResponse> },
     OpenFileResponse { result: Result<(FileAccess, NodeId, FileProperties), ErrorResponse> },
@@ -147,7 +150,9 @@ pub enum ClientProtocol {
 }
 
 pub enum NodeProtocol {
-    AuthenticateRequest { username: String, password: String },
+    AuthenticateWithPasswordRequest { username: String, password: String },
+    AuthenticateWithTokenRequest { token: String },
+    AllocateAuthenticationTokenRequest { user: Id },
     CreateFileRequest { parent: FileDescriptor, type_of_file: FileType, name: String, user: Id, page_size: Option<u64> },
     CreateDirecotryRequest { parent: FileDescriptor, name: String, user: Id },
     OpenFileRequest { mode: OpenMode, file_descriptor: FileDescriptor, user: Id },
@@ -222,6 +227,7 @@ pub struct Node {
     max_page_size_blob_file: usize,
     client_socket_buffer_size: usize,
     max_inactivity_duration_secs: i64,
+    authentication_token_duration_secs: i64,
 }
 
 impl Node {
@@ -338,6 +344,7 @@ impl Node {
         server: TlsServer,
         path_workdir: & Path,
         max_inactivity_duration_secs: i64,
+        authentication_token_duration_secs: i64,
     ) -> Result<Node, ()> {
 
         info!("Loading node, path_workdir={}", path_workdir.display());
@@ -375,6 +382,7 @@ impl Node {
             started_at: utc_timestamp(),
             server_id: random::<u64>(),
             max_inactivity_duration_secs: max_inactivity_duration_secs,
+            authentication_token_duration_secs: authentication_token_duration_secs,
         })
     }
 
@@ -414,7 +422,7 @@ impl Node {
 
                             },
 
-                            NodeProtocol::AuthenticateRequest {
+                            NodeProtocol::AuthenticateWithPasswordRequest {
                                 username,
                                 password,
                             } => {
@@ -431,6 +439,40 @@ impl Node {
                                 send_failed = client.transmit.send(
                                     ClientProtocol::AuthenticateResponse {
                                         result: result,
+                                    },
+                                ).is_err();
+                            },
+
+                            NodeProtocol::AuthenticateWithTokenRequest {
+                                token,
+                            } => {
+                                trace!("Authenticate request, token=\"{}\"", token);
+                                let result = self.auth.consume_link_to_id(
+                                    & token,
+                                    utc_timestamp(),
+                                ).map_err(| () | node_error_to_rsp(NodeError::FailedToConsumeAuthenticationToken))
+                                    ;
+
+                                send_failed = client.transmit.send(
+                                    ClientProtocol::AuthenticateResponse {
+                                        result: result
+                                    },
+                                ).is_err();
+                            },
+
+                            NodeProtocol::AllocateAuthenticationTokenRequest {
+                                user,
+                            } => {
+                                trace!("Allocate authnetication token request, user={}", user);
+                                let result = self.auth.generate_temporary_link_for_id(
+                                    & user,
+                                    utc_timestamp() + self.authentication_token_duration_secs,
+                                ).map_err(| () | node_error_to_rsp(NodeError::FailedToAllocateAuthenticationToken))
+                                    ;
+
+                                send_failed = client.transmit.send(
+                                    ClientProtocol::AllocateAuthenticationTokenResponse {
+                                        result: result
                                     },
                                 ).is_err();
                             },
