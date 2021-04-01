@@ -286,7 +286,7 @@ macro_rules! try_and_set_fail_to_write_on_error {
 
 macro_rules! try_send_batch_edit_response_without_fields {
     ($class:expr, $transaction_id:expr, $rsp_error_code:expr, $operation_index:expr, $revision:expr) => {{
-        let mut buffer = try_and_set_fail_to_write_on_error!($class, $class.connection.create_response_buffer(
+        let mut buffer = try_and_set_fail_to_write_on_error!($class, $class.connection.create_response_buffer_batch_operation(
             $transaction_id,
             $rsp_error_code as u64
         ));
@@ -1255,6 +1255,8 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
 
     try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
 
+    trace!("Waiting for batch edit operations");
+
     for i in 0 .. number_of_operations {
 
         client.connection.get_receive_buffer().drop_consumed_data();
@@ -1284,8 +1286,7 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
 
         if operation_type == RA_BATCH_EDIT_OPERATION_DELETE {
 
-            let offset = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
-            let size = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+            let (offset, size) = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_block(), client, transaction_id);
             try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
             if offset < offset_to_latest_edit {
@@ -1322,8 +1323,7 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
 
         } else if operation_type == RA_BATCH_EDIT_OPERATION_INSERT {
 
-            let offset = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
-            let size = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+            let (offset, size) = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_block(), client, transaction_id);
             try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
             if offset < offset_to_latest_edit {
@@ -1343,7 +1343,7 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
             let mut data = Buffer::with_capacity(size as usize);
             if client.connection.fill_buffer_from_client(& mut data).is_err() {
                 client.status.set(Status::FailedToreceiveFromClient);
-                try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError as u64);
+                try_send_batch_edit_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError as u64, i, revision);
                 return Err(());
             }
 
@@ -1361,8 +1361,7 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
 
         } else if operation_type == RA_BATCH_EDIT_OPERATION_WRITE {
 
-            let offset = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
-            let size = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
+            let (offset, size) = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_block(), client, transaction_id);
             try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
             if offset < offset_to_latest_edit {
@@ -1382,7 +1381,7 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
             let mut data = Buffer::with_capacity(size as usize);
             if client.connection.fill_buffer_from_client(& mut data).is_err() {
                 client.status.set(Status::FailedToreceiveFromClient);
-                try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError as u64);
+                try_send_batch_edit_response_without_fields!(client, transaction_id, CommonErrorCodes::FailedToReceiveDataError as u64, i, revision);
                 return Err(());
             }
 
@@ -1402,15 +1401,10 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
             return Err(());
         }
 
-        try_send_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError as u64);
+        try_send_batch_edit_response_without_fields!(client, transaction_id, CommonErrorCodes::NoError, i, revision);
     }
 
     trace!("All batch edit operations completed");
-
-    let mut buffer = try_and_set_fail_to_write_on_error!(client, client.connection.create_response_buffer(transaction_id, CommonErrorCodes::NoError as u64));
-    try_and_set_fail_to_write_on_error!(client, buffer.write_unsigned(revision));
-    try_and_set_fail_to_write_on_error!(client, buffer.write_end_of_message());
-    try_and_set_error_state_on_fail!(client, client.connection.write_to_client(& mut buffer), Status::FailedToSendToClient);
     Ok(())
 }
 
@@ -2222,7 +2216,7 @@ fn handle_query_system(client: & mut Client) -> Result<(), ()>
 
                     try_and_return_on_error!(client, buffer.write_list_start(number_of_fields), Status::FailedToWriteToSendBuffer);
                     try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "server-id", desc.server_id), Status::FailedToWriteToSendBuffer);
-                    try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "started-at", desc.started_at as u64), Status::FailedToWriteToSendBuffer);
+                    try_and_return_on_error!(client, write_le_kv_st(& mut buffer, "started-at", desc.started_at), Status::FailedToWriteToSendBuffer);
                     try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "max-number-of-open-files-per-connection", MAX_NUMBER_OF_OPEN_FILES as u64), Status::FailedToWriteToSendBuffer);
                     try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "number-of-open-files", client.open_files.len() as u64), Status::FailedToWriteToSendBuffer);
 

@@ -350,8 +350,7 @@ class ZynConnection:
             if operation_type == BATCH_EDIT_TYPE_DELETE:
                 req = \
                     self.field_unsigned(operation_type) \
-                    + self.field_unsigned(offset) \
-                    + self.field_unsigned(param) \
+                    + self.field_block(offset, param) \
                     + self.field_end_of_message()
                 self.write(req)
 
@@ -359,8 +358,7 @@ class ZynConnection:
                 data = param
                 req = \
                     self.field_unsigned(operation_type) \
-                    + self.field_unsigned(offset) \
-                    + self.field_unsigned(len(data)) \
+                    + self.field_block(offset, len(data)) \
                     + self.field_end_of_message()
 
                 self.write(req)
@@ -370,8 +368,7 @@ class ZynConnection:
                 data = param
                 req = \
                     self.field_unsigned(operation_type) \
-                    + self.field_unsigned(offset) \
-                    + self.field_unsigned(len(data)) \
+                    + self.field_block(offset, len(data)) \
                     + self.field_end_of_message()
 
                 self.write(req)
@@ -387,8 +384,7 @@ class ZynConnection:
             else:
                 raise RuntimeError()
 
-        rsp = self.read_response(timeout=120)
-        return rsp
+        return rsp  # Return latest rsp
 
     def blob_write_stream(self, node_id, revision, stream, block_size=None, transaction_id=None):
         # If block size is not set, try to use data length as size
@@ -996,6 +992,7 @@ class InputFileStream():
 
 
 TAG_RESPONSE = 'RSP'
+TAG_BATCH_RESPONSE = 'RSP-BATCH'
 TAG_NOTIFICATION = 'NOTIFICATION'
 TAG_END_OF_MESSAGE = 'E'
 TAG_UINT = 'U'
@@ -1202,10 +1199,9 @@ class InsertResponse(WriteResponse):
 class BatchEditErrordResponse:
     def __init__(self, response):
         self._rsp = response
-        if response.number_of_fields() == 0:
-            self.is_incomplete = False
-        elif response.number_of_fields() == 2:
-            self.is_incomplete = True
+        if response.number_of_fields() == 2:
+            if response._rsp[1][0] != TAG_BATCH_RESPONSE:
+                _malfomed_message()
             self.operation_index = response.field(0).as_uint()
             self.revision = response.field(1).as_uint()
         else:
@@ -1412,7 +1408,7 @@ class QuerySystemResponse:
 
         desc = response.field(0).key_value_list_to_dict()
         if len(desc) in [4, 5]:
-            self.started_at = desc['started-at'].as_uint()
+            self.started_at = desc['started-at'].as_timestamp()
             self.server_id = desc['server-id'].as_uint()
             self.max_number_of_open_files_per_connection = (
                 desc['max-number-of-open-files-per-connection'].as_uint()
@@ -1431,7 +1427,7 @@ class Response(Message):
 
     def __init__(self, rsp):
         super(Response, self).__init__(rsp)
-        if self._rsp[1][0] != TAG_RESPONSE:
+        if self._rsp[1][0] not in [TAG_RESPONSE, TAG_BATCH_RESPONSE]:
             _malfomed_message()
         if self._rsp[-1][0] != TAG_END_OF_MESSAGE:
             _malfomed_message()
@@ -1475,7 +1471,7 @@ class Response(Message):
     def as_query_system_rsp(self):
         return QuerySystemResponse(self)
 
-    def as_batch_edit_error_response(self):
+    def as_batch_edit_response(self):
         return BatchEditErrordResponse(self)
 
     def as_allocate_auth_token_response(self):
@@ -1511,6 +1507,8 @@ class Notification(Message):
             _malfomed_message()
         if self._rsp[-1][0] != TAG_END_OF_MESSAGE:
             _malfomed_message()
+        if len(self._rsp) != 4:  # Version, message type, notification, and end
+            _malfomed_message()
 
     def notification_type(self):
         t = self._rsp[2][0]
@@ -1525,10 +1523,10 @@ class Notification(Message):
         raise NotImplementedError()
 
     def number_of_fields(self):
-        return len(self._rsp) - 4  # Ignore version, message type, notification type, and end
+        return len(self._rsp[2]) - 1  # Ignore notification type
 
     def field(self, index):
-        return Field(self._rsp[3 + index])
+        return Field(self._rsp[2][1 + index])
 
 
 class NotificationDisconnected(Notification):

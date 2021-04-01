@@ -9,7 +9,7 @@ use crate::node::tls_connection::{ TlsConnection };
 use crate::node::common::{ Buffer };
 use crate::node::client_protocol_buffer::{ ReceiveBuffer, SendBuffer };
 
-static HTTP_HEADER_END_MARKER: & [u8] = "\r\n".as_bytes();
+static HTTP_HEADER_END_MARKER: & [u8] = "\r\n\r\n".as_bytes();
 static PROTOCOL_FIRST_BYTES_ZYN: & [u8] = "V:".as_bytes();
 static PROTOCOL_FIRST_BYTES_HTTP_GET: & [u8] = "GET".as_bytes();
 const HTTP_HEADER_MAX_SIZE_BYTES: usize = 14; // According to https://github.com/ninjasource/embedded-websocket/blob/master/src/lib.rs
@@ -71,6 +71,13 @@ impl Connection {
 
     pub fn create_send_buffer(& self) -> SendBuffer {
         SendBuffer::with_capacity(self.buffer_size)
+    }
+
+    pub fn create_response_buffer_batch_operation(& self, transaction_id: u64, error_code: u64) -> Result<SendBuffer, ()> {
+        let mut buffer = self.create_send_buffer();
+        buffer.write_message_namespace(1) ? ;
+        buffer.write_response_batch_operation(transaction_id, error_code) ? ;
+        Ok(buffer)
     }
 
     pub fn create_response_buffer(& self, transaction_id: u64, error_code: u64) -> Result<SendBuffer, ()> {
@@ -356,12 +363,15 @@ impl ZynWebsocket {
                 self.state = ZynWebsocketState::Error;
                 return Err(());
             }
-            self.buffer.clear(); // todo: All data in buffer is dropped
+
+            let index = self.buffer
+                .windows(HTTP_HEADER_END_MARKER.len())
+                .position(| window | window == HTTP_HEADER_END_MARKER).unwrap();
+            self.buffer.drain( .. index + HTTP_HEADER_END_MARKER.len());
 
             info!("Websocket connection to client established");
 
         } else if self.server.state == WebSocketState::Open {
-
 
             let start_index = data_buffer.len();
             data_buffer.resize(data_buffer.capacity(), 0);

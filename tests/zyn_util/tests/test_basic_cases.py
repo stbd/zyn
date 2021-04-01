@@ -732,17 +732,16 @@ line-3
             print('Received: "{}"'.format(data))
             self.assertEqual(data, expected_data)
 
-    def _validate_rsp(self, rsp, revision):
+    def _validate_rsp(self, rsp, revision, number_of_operations):
         self.assertFalse(rsp.is_error())
-        rsp = rsp.as_write_rsp()
+        rsp = rsp.as_batch_edit_response()
         self.assertGreater(rsp.revision, revision)
+        self.assertEqual(rsp.operation_index, number_of_operations - 1)
 
     def _validate_rsp_error(self, rsp, expected_error_code, expected_operation_index=None):
         self.assertEqual(rsp.error_code(), expected_error_code)
-        rsp = rsp.as_batch_edit_error_response()
-        if expected_operation_index is not None:
-            self.assertTrue(rsp.is_incomplete)
-            self.assertEqual(rsp.operation_index, expected_operation_index)
+        rsp = rsp.as_batch_edit_response()
+        self.assertEqual(rsp.operation_index, expected_operation_index)
 
     def test_batch_edit_delete_first(self):
         c, node_id, revision = self._init_batch_edit_test()
@@ -750,7 +749,7 @@ line-3
         batch_edit.delete(7, 7)
         batch_edit.insert(14, '123456\n'.encode('utf-8'))
         batch_edit.write(21, 'line-4\n'.encode('utf-8'))
-        self._validate_rsp(batch_edit.commit(), revision)
+        self._validate_rsp(batch_edit.commit(), revision, 3)
         self._validate_data(c, node_id, 'line-1\n123456\nline-3\nline-4\n')
 
     def test_batch_edit_write_first(self):
@@ -759,7 +758,7 @@ line-3
         batch_edit.write(0, '123456\n'.encode('utf-8'))
         batch_edit.delete(7, 7)
         batch_edit.insert(14, '------\n'.encode('utf-8'))
-        self._validate_rsp(batch_edit.commit(), revision)
+        self._validate_rsp(batch_edit.commit(), revision, 3)
         self._validate_data(c, node_id, '123456\n------\nline-3\n')
 
     def test_batch_edit_insert_first(self):
@@ -768,7 +767,7 @@ line-3
         batch_edit.insert(0, '------\n'.encode('utf-8'))
         batch_edit.delete(7, 7)
         batch_edit.write(14, '123456\n'.encode('utf-8'))
-        self._validate_rsp(batch_edit.commit(), revision)
+        self._validate_rsp(batch_edit.commit(), revision, 3)
         self._validate_data(c, node_id, '------\nline-1\n123456\n')
 
     def test_batch_edit_overlapping_modification(self):

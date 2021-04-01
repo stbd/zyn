@@ -304,9 +304,19 @@ impl SendBuffer {
         write!(self.buffer, ";").map_err(| _ | ())
     }
 
-    pub fn write_response(& mut self, transaction_id: u64, error_code: u64) -> Result<(), ()> {
+    pub fn write_response_batch_operation(& mut self, transaction_id: u64, error_code: u64) -> Result<(), ()> {
+        write!(self.buffer, "RSP-BATCH:").map_err(| _ | ()) ? ;
+        self._write_response(transaction_id, error_code)
+    }
 
-        write!(self.buffer, "RSP:T:").map_err(| _ | ()) ? ;
+    pub fn write_response(& mut self, transaction_id: u64, error_code: u64) -> Result<(), ()> {
+        write!(self.buffer, "RSP:").map_err(| _ | ()) ? ;
+        self._write_response(transaction_id, error_code)
+    }
+
+    pub fn _write_response(& mut self, transaction_id: u64, error_code: u64) -> Result<(), ()> {
+
+        write!(self.buffer, "T:").map_err(| _ | ()) ? ;
         self.write_unsigned(transaction_id) ? ;
         write!(self.buffer, ";").map_err(| _ | ()) ? ;
         self.write_unsigned(error_code) ? ;
@@ -396,7 +406,7 @@ impl SendBuffer {
     pub fn write_notification_modified(& mut self, node_id: & NodeId, revision: & u64, offset: & u64, size: & u64)
                                        -> Result<(), ()> {
         self.write_notification_field() ? ;
-        write!(self.buffer, "F-MOD:;N:U:{};;U:{};BL:U:{};U:{};;", node_id, revision, offset, size)
+        write!(self.buffer, "F-MOD:N:U:{};;U:{};BL:U:{};U:{};;;", node_id, revision, offset, size)
             .map_err(| _ | ()) ? ;
         self.write_end_of_message()
     }
@@ -404,7 +414,7 @@ impl SendBuffer {
     pub fn write_notification_inserted(& mut self, node_id: & NodeId, revision: & u64, offset: & u64, size: & u64)
                                        -> Result<(), ()> {
         self.write_notification_field() ? ;
-        write!(self.buffer, "F-INS:;N:U:{};;U:{};BL:U:{};U:{};;", node_id, revision, offset, size)
+        write!(self.buffer, "F-INS:N:U:{};;U:{};BL:U:{};U:{};;;", node_id, revision, offset, size)
             .map_err(| _ | ()) ? ;
         self.write_end_of_message()
     }
@@ -412,7 +422,7 @@ impl SendBuffer {
     pub fn write_notification_deleted(& mut self, node_id: & NodeId, revision: & u64, offset: & u64, size: & u64)
                                       -> Result<(), ()> {
         self.write_notification_field() ? ;
-        write!(self.buffer, "F-DEL:;N:U:{};;U:{};BL:U:{};U:{};;", node_id, revision, offset, size)
+        write!(self.buffer, "F-DEL:N:U:{};;U:{};BL:U:{};U:{};;;", node_id, revision, offset, size)
             .map_err(| _ | ()) ? ;
         self.write_end_of_message()
     }
@@ -420,10 +430,8 @@ impl SendBuffer {
     pub fn write_notification_disconnected(& mut self, description: & str)
                                            -> Result<(), ()> {
         self.write_notification_field() ? ;
-        write!(self.buffer, "DISCONNECTED:;S:U:{};B:{};;", description.len(), description)
+        write!(self.buffer, "DISCONNECTED:S:U:{};B:{};;;", description.len(), description)
             .map_err(| _ | ()) ? ;
         self.write_end_of_message()
     }
-
-
 }
