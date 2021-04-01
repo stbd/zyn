@@ -5,6 +5,7 @@
     <link rel="stylesheet" href="{{ static_url('zyn.css') }}">
     <script src="{{ static_url('zyn.js') }}" type="text/javascript"></script>
     <script src="{{ static_url('zyn-client.js') }}" type="text/javascript"></script>
+    <script src="{{ static_url('zyn-connection.js') }}" type="text/javascript"></script>
     <script src="{{ static_url('3pp/utf8/utf8.js') }}" type="text/javascript"></script>
     <script src="{{ static_url('3pp/jsdiff/diff.min.js') }}" type="text/javascript"></script>
     <script src="{{ static_url('3pp/showdownjs/showdown.min.js') }}" type="text/javascript"></script>
@@ -13,6 +14,7 @@
 </head>
 
 <body style="height: 100%;">
+
     <script>
      function _element_height(name) {
          let e = document.getElementById(name);
@@ -39,6 +41,13 @@
      window.addEventListener('resize', function(event){
          _handle_window_resize();
      });
+
+     document.addEventListener("visibilitychange", function() {
+         if (!document.hidden){
+             client.set_focus();
+         }
+     });
+
     </script>
 
     <div id="zyn-modal-error" class="w3-modal" style="display: none;">
@@ -332,16 +341,17 @@
              }
 
              function _add_fs_row(element) {
-                 let name = element['name'];
-                 let node_id = element['node-id'];
-                 let element_type = element['element-type'];
+                 let name = element.name;
+                 let node_id = element.node_id;
+                 let element_type = null
 
                  let row = document.createElement("div");
                  row.classList.add('w3-cell-row');
                  row.classList.add('w3-button');
 
                  let field_edit = _create_fs_element_field("25%");
-                 if (element_type == ElementType.file) {
+                 if (element.is_file()) {
+                     element_type = 'file';
                      row.onclick = () => _handle_open_file_clicked(node_id, name);
                      if (client.is_editable(name)) {
                          let button = document.createElement("button");
@@ -355,8 +365,9 @@
                              _handle_open_file_edit_clicked(event, node_id, name);
                          field_edit.appendChild(button);
                      }
-                 } else if (element_type == ElementType.directory) {
+                 } else if (element.is_directory()) {
                      row.onclick = () => _handle_directory_clicked(node_id, name);
+                     element_type = 'dir';
                  }
 
                  let field_type = _create_fs_element_field("10%");
@@ -537,13 +548,7 @@
                      {
                          'Yes': () => {
                              zyn_show_modal_loading('Deleting...');
-                             client.execute_command(
-                                 'delete-element',
-                                 {
-                                     'node-id': node_id,
-                                 },
-                                 _handle_delete_rsp,
-                             );
+                             client.delete_element(node_id, _handle_delete_rsp);
                          },
                          'Cancel': () => {
                              zyn_hide_modals();
@@ -577,11 +582,6 @@
                 id="zyn-settings-system-zyn-server"
                 class="w3-table w3-centered"
             ></table>
-            <h3>Web server</h3>
-            <table
-                id="zyn-settings-system-web-server"
-                class="w3-table w3-centered"
-            ></table>
 
             <hr>
             <a href="https://github.com/showdownjs/showdown/wiki/Showdown's-Markdown-syntax">Showdown Markdown syntax</a>
@@ -590,9 +590,7 @@
 
             <script>
              function _handle_settings_refresh() {
-                 client.execute_command(
-                     'query-system',
-                     null,
+                 client.query_system_properties(
                      (rsp) => {
                          function _create_settings_cell(row, value) {
                              let c = row.insertCell();
@@ -609,13 +607,13 @@
                                  var row = element.insertRow(0);
                                  _create_settings_cell(row, name);
 
-                                 let value = settings[name];
-                                 if ('string' in value) {
-                                     _create_settings_cell(row, value['string']);
-                                 } else if ('unsigned' in value) {
-                                     _create_settings_cell(row, value['unsigned']);
-                                 } else if ('timestamp' in value) {
-                                     let d = new Date(value['timestamp'] * 1000);
+                                 let desc = settings[name];
+                                 if (desc['type'] === 'string') {
+                                     _create_settings_cell(row, desc['value']);
+                                 } else if (desc['type'] === 'unsigned') {
+                                     _create_settings_cell(row, desc['value']);
+                                 } else if (desc['type'] === 'timestamp') {
+                                     let d = new Date(desc['value'] * 1000);
                                      _create_settings_cell(row, d.toString());
                                  } else {
                                      zyn_add_notification(
@@ -626,9 +624,7 @@
                              }
                          }
 
-                         let c = rsp.content();
-                         _show_settings('zyn-settings-system-zyn-server', c['zyn-server']);
-                         _show_settings('zyn-settings-system-web-server', c['web-server']);
+                         _show_settings('zyn-settings-system-zyn-server', rsp.fields);
                      },
                  );
              }
@@ -934,7 +930,6 @@
             </div>
         </div>
     </div>
-
     <script type="text/javascript">
 
      function _handle_notitification() {
@@ -942,41 +937,60 @@
      }
 
      zyn_show_modal_loading('Initializing...');
+
+     let client = null;
      let path_parent = "{{ path_parent }}";
      let name = "{{ name }}";
+     let auth_token = "{{ authentication_token }}";
+     let server_address ="{{ server_address }}";
 
-     let client = new ZynClient(
-         "{{ zyn_user_id }}",
-         "{{ root_url }}",
-         ZynPath.from_string(path_parent),
-         _handle_notitification,
-         (rsp) => {
-             if (rsp.is_error()) {
-                 zyn_show_modal_error(ErrorLevel.error, `${rsp.error().to_string()}`);
+     let connection = new ZynConnection(server_address, (event) => {
+         connection.authenticate_with_token(auth_token, (msg) => {
+             if (msg.is_error()) {
+                 zyn_show_modal_error(ErrorLevel.error, `Authontication error`, 'Invalid temporary token');
                  return ;
              }
-             _render_directory_children();
-             _update_file_buttons();
-             client.set_content_area_text('Content', 'zyn-file-content');
-             _handle_window_resize();
-             _handle_toggle_file_header();
 
-             if (name.length != 0) {
-                 let element = client.get_child(name);
-                 if (element === null) {
-                     zyn_show_modal_error(ErrorLevel.error, `Element "${name}" not found`);
-                 } else if (element['element-type'] === ElementType.file) {
-                     _handle_open_file_clicked(element['node-id'], name);
-                 } else if (element['element-type'] === ElementType.directory) {
-                     _handle_directory_clicked(element['node-id'], name);
-                 } else {
-                     zyn_unhandled();
+             client = new ZynClient(
+                 "{{ root_url }}",
+                 _handle_notitification,
+                 connection,
+                 [
+                     {'types': ['md'], 'handler': ZynMarkdownHandler},
+                     {'types': ['pdf'], 'handler': ZynPdfHandler},
+                 ],
+             );
+
+             client.change_working_directory(ZynPath.from_string(path_parent), (rsp) => {
+                 if (rsp.is_error()) {
+                     zyn_show_modal_error(ErrorLevel.error, `Failed to query path`, 'Error code: ${rsp.error_code}');
+                     return ;
                  }
-             } else {
-                 zyn_hide_modals();
-             }
-         }
-     );
+
+                 _render_directory_children();
+                 _update_file_buttons();
+                 client.set_content_area_text('Content', 'zyn-file-content');
+                 _handle_window_resize();
+                 _handle_toggle_file_header();
+
+                 if (name.length != 0) {
+                     let element = client.get_wd_child(name);
+                     if (element === null) {
+                         zyn_show_modal_error(ErrorLevel.error, `Element "${name}" not found`);
+                     } else if (element.is_file()) {
+                         _handle_open_file_clicked(element.node_id, name);
+                     } else if (element.is_directory()) {
+                         _handle_directory_clicked(element.node_id, name);
+                     } else {
+                         zyn_unhandled();
+                     }
+                 } else {
+                     zyn_hide_modals();
+                 }
+             });
+         });
+     });
+
     </script>
 </body>
 </html>

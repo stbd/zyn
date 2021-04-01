@@ -15,44 +15,30 @@ let OpenMode = Object.freeze({
 
 class ZynClient {
     constructor(
-        user_id,
         url_root,
-        path,
         notification_callback,
-        init_callback,
+        connection,
+        file_handlers,
     ) {
-        this._user_id = user_id;
-        this._tab_id = 0;
         this._url_root = url_root;
+        this._notification_callback = notification_callback;
+        this._connection = connection;
+
         this._working_directory = null;
         this._children = [];
-        this._socket = null;
-        this._callback = null;
-        this._file_handlers = [
-            {'types': ['md'], 'handler': ZynMarkdownHandler},
-            {'types': ['pdf'], 'handler': ZynPdfHandler},
-        ];
+        this._file_handlers = file_handlers,
         this._current_file_handler = null;
         this._file_mode = OpenMode.read;
         this._target_id = 'zyn-client-target';
-        this._poll_timer = null;
-        this._notification_callback = notification_callback;
 
-        this.TIMER_INTERVAL_NORMAL = 5000;
-        this.TIMER_INTERVAL_PROMPT = 1000;
-
-        let url = zyn_websocket_server_url();
-        console.log(`Connecting to server at ${url}`);
-
-        this._socket = new WebSocket(url);
-        this._socket.onmessage = (msg) => { this.handle_socket_message(msg) };
-        this._socket.onclose = () => { this.handle_socket_close(); };
-        this._callback = (msg) => { this.handle_register_rsp(msg, path, init_callback); }
-        this._socket.onopen = () => {
-            this._socket.send(this.json_message('register', null));
-        }
+        this._connection.register_event_handlers(
+            (e) => this._handle_socket_closed(e),
+            (e) => this._handle_socket_error(e),
+            (n) => this._handle_notification(n),
+        )
     }
 
+    connection() { return this._connection; }
     root_url() { return this._url_root; }
     working_directory() { return this._working_directory.clone(); }
     children() { return this._children; }
@@ -63,120 +49,36 @@ class ZynClient {
     file_mode() { return this._file_mode; }
     is_editable(name) { return this.filetype_handler(name).is_editable(); }
 
-    handle_socket_close(error) {
-        this.stop_poll_timer();
-        zyn_show_modal_error(ErrorLevel.error, "Connection to server lost");
+    _handle_socket_closed(event) {
+        console.log('Socket closed');
     }
 
-    stop_poll_timer() {
-        if (this._poll_timer !== null) {
-            clearTimeout(this._poll_timer);
-            this._poll_timer = null;
-        }
+    _handle_socket_error(event) {
+        console.log('Socket error');
     }
 
-    set_poll_timer_interval(interval) {
-        this.stop_poll_timer();
-        this._poll_timer = setInterval(
-            () => this.handle_poll_timer_timeout(),
-            interval,
-        );
-    }
-
-    handle_poll_timer_timeout() {
-        this.send_msg(
-            'check-notifications',
-        );
-    }
-
-    get_child(name) {
-        for (let c of this._children) {
-            if (c['name'] === name) {
-                return c;
+    _handle_notification(notification) {
+        if (notification.is_disconnect()) {
+            zyn_add_notification(NotificationSource.server, notification.to_string());
+        } else if (notification.is_edit()) {
+            zyn_add_notification(NotificationSource.server, notification.to_string());
+            if (!this.has_current_file()) {
+                zyn_unhandled();
             }
-        }
-        return null;
-    }
-
-    file_content_edited() {
-        if (this.has_current_file()) {
-            this._current_file_handler.content_edited();
-        }
-    }
-
-    filetype_handler(filename) {
-        var split_name = filename.split('.');
-        if (split_name.length === 1) {
-            return ZynFileHandler;
-        }
-        let type = split_name[split_name.length - 1].toLowerCase();
-        for (let handler of this._file_handlers) {
-            if (handler.types.indexOf(type) != -1) {
-                return handler.handler;
+            let node_id = this._current_file_handler.properties()['node-id'];
+            if (node_id !== notification.node_id) {
+                zyn_unhandled();
             }
+            this._current_file_handler.handle_notification(notification, this._file_mode, this._target_id);
+
+        } else {
+            console.log('Unhandeld notification', notification);
+            zyn_unhandled();
         }
-        return ZynFileHandler;
     }
 
-    is_transaction_active() {
-        return this._callback !== null;
-    }
-
-    reset_transaction() {
-        let callback = this._callback;
-        this._callback = null;
-        return callback;
-    }
-
-    json_message(msg_type, content) {
-        var msg = {
-            'user-id': this._user_id,
-            'tab-id': this._tab_id,
-            'type': msg_type,
-        };
-        if (content != null) {
-            msg['content'] = content;
-        }
-        return JSON.stringify(msg);
-    }
-
-    send_msg(msg_type, content) {
-        this._socket.send(this.json_message(
-            msg_type,
-            content,
-        ));
-    }
-
-    handle_socket_message(websocket_msg) {
-        let msg = new ZynMessage(JSON.parse(websocket_msg.data));
-
-        if (this.handle_notification(msg)) {
-            return ;
-        }
-
-        if (!this.is_transaction_active()) {
-            console.log('Discarding unexpected message');
-            return
-        }
-
-        let callback = this.reset_transaction();
-        callback(msg);
-    }
-
-    log_on_server(message, level='debug') {
-        var supported_levels = ['debug', 'info']
-        if (supported_levels.indexOf(level) == -1) {
-            console.log('Invalid log level: ' + level);
-            return
-        }
-
-        this.send_msg(
-            'log',
-            {
-                'level': level,
-                'message': message,
-            },
-        );
+    set_focus() {
+        document.getElementById(this._target_id).focus();
     }
 
     handle_notification(msg) {
@@ -214,34 +116,16 @@ class ZynClient {
         return false;
     }
 
-    execute_command(msg_type, content, callback) {
-        this._callback = callback;
-        this.send_msg(msg_type, content);
-    }
-
-    create_ra_file(name, callback) {
-        this._callback = callback;
-        this.send_msg(
-            'create-element',
-            {
-                'name': name,
-                'path-parent': this._working_directory.to_str(),
-                'element-type': ElementType.file,
-                'file-type': ZynFileType.ra,
+    change_working_directory(path, callback) {
+        this._connection.query_element_children(path.to_str(), (rsp) => {
+            if (!rsp.is_error()) {
+                this._working_directory = path;
+                this._children = rsp.elements;
+            } else {
+                zyn_show_modal_error(ErrorLevel.error, `Failed to query elements ${path.to_str()}`);
             }
-        );
-    }
-
-    create_directory(name, callback) {
-        this._callback = callback;
-        this.send_msg(
-            'create-element',
-            {
-                'name': name,
-                'path-parent': this._working_directory.to_str(),
-                'element-type': ElementType.directory,
-            }
-        );
+            callback(rsp);
+        });
     }
 
     refresh_working_directory(callback) {
@@ -251,37 +135,49 @@ class ZynClient {
         );
     }
 
-    handle_register_rsp(msg, path, callback) {
-        this._tab_id = msg.msg()['tab-id'];
-        this.log_on_server('Client ready');
-        this.change_working_directory(path, callback);
-        this.set_poll_timer_interval(this.TIMER_INTERVAL_NORMAL);
-    }
-
-    change_working_directory(path, callback) {
-
-        this._callback = (msg) => {
-            this.handle_change_working_directory_rsp(
-                path,
-                msg,
-                callback
-            );
-        };
-        this.send_msg(
-            'list-directory-content',
-            {
-                'path': path.to_str(),
+    get_wd_child(name) {
+        for (let c of this._children) {
+            if (c['name'] === name) {
+                return c;
             }
-        );
+        }
+        return null;
     }
 
-    handle_change_working_directory_rsp(path, msg, callback) {
-        this._children = [];
-        if (!msg.is_error()) {
-            this._working_directory = path;
-            this._children = msg.content()['elements'];
+    file_content_edited() {
+        if (this.has_current_file()) {
+            this._current_file_handler.content_edited();
         }
-        callback(msg);
+    }
+
+    filetype_handler(filename) {
+        var split_name = filename.split('.');
+        if (split_name.length === 1) {
+            return ZynFileHandler;
+        }
+        let type = split_name[split_name.length - 1].toLowerCase();
+        for (let handler of this._file_handlers) {
+            if (handler.types.indexOf(type) != -1) {
+                return handler.handler;
+            }
+        }
+        return ZynFileHandler;
+    }
+
+    query_system_properties(callback) {
+        this._connection.query_system(callback);
+    }
+
+    delete_element(node_id, callback) {
+        this._connection.delete_element(node_id, callback);
+    }
+
+    create_ra_file(name, callback) {
+        this._connection.create_file_ra(name, this._working_directory.to_str(), callback);
+    }
+
+    create_directory(name, callback) {
+        this._connection.create_directory(name, this._working_directory.to_str(), callback);
     }
 
     set_content_area_text(text, target_id) {
@@ -329,11 +225,107 @@ class ZynClient {
             target.appendChild(content)
 
         } else {
-            _zyn_unhandled();
+            zyn_unhandled();
         }
 
         let height = document.getElementById(target_id).offsetHeight
         this.redraw_content(height);
+    }
+
+    open_file(node_id, name, mode, target_id, callback) {
+
+        if (this.has_current_file()) {
+            let properties = this._current_file_handler.properties();
+            if (properties['node-id'] === node_id) {
+                if (this._current_file_handler.mode() !== mode) {
+                    this.change_file_to_mode(mode, target_id, callback);
+                } else {
+                    callback();
+                }
+            } else {
+                this.close_file(() => {
+                    this.open_file(node_id, name, mode, target_id, callback);
+                });
+            }
+            return ;
+        }
+
+        this.reset_file_content(mode, target_id);
+        this._file_mode = mode;
+        let handler_type = this.filetype_handler(name);
+        this._current_file_handler = new handler_type(node_id, name, this);
+
+        this._current_file_handler.open(
+            mode,
+            () => {
+                this._current_file_handler.initial_load(
+                    () => {
+                        this._current_file_handler.render(
+                            this._file_mode,
+                            this._target_id,
+                            callback,
+                        );
+                    }
+                );
+            },
+        );
+    }
+
+    change_file_to_mode(mode, target_id, callback) {
+        let target = document.getElementById(target_id);
+        if (!this.has_current_file()) {
+            zyn_unhandled();
+            return ;
+        }
+
+        if (this._file_mode === mode) {
+            callback();
+            return ;
+        }
+
+        if (mode === OpenMode.edit) {
+            if (!this._current_file_handler.is_editable()) {
+                zyn_unhandled();
+                return ;
+            }
+        } else if (mode === OpenMode.read) {
+            if (this._current_file_handler.has_edits()) {
+                zyn_show_modal_ask(
+                    'File has changes, save or cancel changes?',
+                    {
+                        'Ok': () => { zyn_hide_modals(); },
+                    },
+                );
+                return ;
+            }
+        } else {
+            zyn_unhandled();
+        }
+
+        this.reset_file_content(mode, target_id);
+        this._current_file_handler.change_file_mode(
+            mode,
+            () => {
+                this._file_mode = mode;
+                this._current_file_handler.render(
+                    mode,
+                    this._target_id,
+                    callback,
+                )
+            }
+        );
+    }
+
+    save_file_edits(callback) {
+        if (!this.has_current_file()) {
+            zyn_unhandled();
+            return ;
+        }
+        if (!this._current_file_handler.is_editable()) {
+            zyn_unhandled();
+            return ;
+        }
+        this._current_file_handler.save(this._target_id, callback);
     }
 
     close_file(callback) {
@@ -371,107 +363,13 @@ class ZynClient {
         _close();
     }
 
-    open_file(node_id, name, mode, target_id, callback) {
-        if (this.has_current_file()) {
-            let properties = this._current_file_handler.properties();
-            if (properties['node-id'] === node_id) {
-                if (this._current_file_handler.mode() !== mode) {
-                    this.change_file_to_mode(mode, target_id, callback);
-                } else {
-                    callback();
-                }
-            } else {
-                this.close_file(() => {
-                    this.open_file(node_id, name, mode, target_id, callback);
-                });
-            }
-            return ;
-        }
-
-        this.reset_file_content(mode, target_id);
-        this._file_mode = mode;
-        let handler_type = this.filetype_handler(name);
-        this._current_file_handler = new handler_type(node_id, name, this);
-        this._current_file_handler.open(
-            mode,
-            () => {
-                this._current_file_handler.initial_load(
-                    () => {
-                        this._current_file_handler.render(
-                            this._file_mode,
-                            this._target_id,
-                            callback,
-                        );
-                    }
-                );
-            },
-        );
-    }
-
-    change_file_to_mode(mode, target_id, callback) {
-        let target = document.getElementById(target_id);
-        if (!this.has_current_file()) {
-            _zyn_unhandled();
-            return ;
-        }
-
-        if (this._file_mode === mode) {
-            callback();
-            return ;
-        }
-
-        if (mode === OpenMode.edit) {
-            if (!this._current_file_handler.is_editable()) {
-                _zyn_unhandled();
-                return ;
-            }
-        } else if (mode === OpenMode.read) {
-            if (this._current_file_handler.has_edits()) {
-                zyn_show_modal_ask(
-                    'File has changes, save or cancel changes?',
-                    {
-                        'Ok': () => { zyn_hide_modals(); },
-                    },
-                );
-                return ;
-            }
-        } else {
-            _zyn_unhandled();
-        }
-
-        this.reset_file_content(mode, target_id);
-        this._current_file_handler.change_file_mode(
-            mode,
-            () => {
-                this._file_mode = mode;
-                this._current_file_handler.render(
-                    mode,
-                    this._target_id,
-                    callback,
-                )
-            }
-        );
-    }
-
-    save_file_edits(callback) {
-        if (!this.has_current_file()) {
-            _zyn_unhandled();
-            return ;
-        }
-        if (!this._current_file_handler.is_editable()) {
-            _zyn_unhandled();
-            return ;
-        }
-        this._current_file_handler.save(this._target_id, callback);
-    }
-
     cancel_file_edits(callback) {
         if (!this.has_current_file()) {
-            _zyn_unhandled();
+            zyn_unhandled();
             return ;
         }
         if (!this._current_file_handler.is_editable()) {
-            _zyn_unhandled();
+            zyn_unhandled();
             return ;
         }
         this._current_file_handler.render(

@@ -1,31 +1,22 @@
-function zyn_websocket_server_url() {
-    var url = new URL(window.location.href)
-    var protocol = "ws";
-    if (location.protocol === 'https:') {
-        protocol = "wss";
-    }
-    return protocol + '://' + url.hostname + ":" + url.port + "/websocket";
-}
-
 function zyn_sort_filesystem_elements(elements, name_filter) {
     let dirs = [];
     let files = [];
 
     function _sort_by_name(a, b) {
-        let name_a = a['name'].toLowerCase()
-        let name_b = b['name'].toLowerCase()
+        let name_a = a.name.toLowerCase()
+        let name_b = b.name.toLowerCase()
         if (name_a < name_b) {return -1;}
         if (name_a > name_b) {return 1;}
         return 0;
     }
 
     for (let e of elements) {
-        if (name_filter !== null && e['name'].indexOf(name_filter) === -1) {
+        if (name_filter !== null && e.name.indexOf(name_filter) === -1) {
             continue ;
         }
-        if (e['element-type'] == ElementType.file) {
+        if (e.is_file()) {
             files.push(e);
-        } else if (e['element-type'] == ElementType.directory) {
+        } else if (e.is_directory()) {
             dirs.push(e);
         } else {
             zyn_unhandled();
@@ -37,67 +28,253 @@ function zyn_sort_filesystem_elements(elements, name_filter) {
     return files.concat(dirs);
 }
 
-class ZynError {
-    constructor(client=null, web_server=null, zyn_server=null) {
-        this.client = client;
-        this.web_server = web_server;
-        this.zyn_server = zyn_server;
-        this._validate();
+class Message {
+    constructor() {}
+
+    is_notification() { return false; }
+}
+
+class Notification extends Message {
+    constructor() {
+        super();
     }
 
-    _validate() {
-        if (
-            this.client === null
-            && this.web_server === null
-            && this.zyn_server === null
-        ) {
-            throw "No error defined";
-        }
+    is_notification() { return true; }
+    is_disconnect() { return false; }
+    is_edit() { return false; }
+}
+
+class DisconnectNotification extends Notification {
+    constructor(description) {
+        super();
+        this.description = description;
     }
 
-    to_string() {
-        if (this.client !== null) {
-            return `Client: ${this.client}`;
-        } else if (this.web_server !== null) {
-            return `Web server: ${this.web_server}`;
-        } else if (this.zyn_server !== null) {
-            return `Zyn server: ${this.zyn_server}`;
+    to_string() { return `Server disconeccted: ${this.description}`; }
+    is_disconnect() { return true; }
+}
+
+class EditNotification extends Notification {
+    constructor(type_of, node_id, revision, offset, size) {
+        super();
+        this.type_of_edit = type_of;
+        this.node_id = node_id;
+        this.revision = revision;
+        this.offset = offset;
+        this.size = size;
+    }
+    is_edit() { return true; }
+    to_string() { return `Edit modification: ${this.type_of_edit}(revision=${this.revision}, offset=${this.offset}, size=${this.size})`; }
+}
+
+class MessageRsp extends Message {
+    constructor(namespace, transaction_id, error_code) {
+        super();
+        this.namespace = namespace;
+        this.transaction_id = transaction_id;
+        this.error_code = error_code;
+    }
+
+    is_error() { return this.error_code != 0; }
+    is_data_message() { return false; }
+}
+
+class FilesystemElement {
+    constructor() {
+    }
+
+    is_file() { throw 'not implemented'; }
+    is_directory() { throw 'not implemented'; }
+}
+
+class FilesystemElementFile extends FilesystemElement {
+    constructor(name, node_id, revision, file_type, size, is_open) {
+        super();
+        this.name = name;
+        this.node_id = node_id;
+        this.revision = revision;
+        this.file_type = file_type;
+        this.size = size;
+        this.is_open = is_open;
+    }
+
+    is_file() { return true; }
+    is_directory() { return false; }
+}
+
+class FilesystemElementDirectory extends FilesystemElement {
+    constructor(name, node_id, authtority_read, authority_write) {
+        super();
+        this.name = name;
+        this.node_id = node_id;
+        this.authtority_read = authtority_read;
+        this.authority_write = authority_write;
+    }
+
+    is_file() { return false; }
+    is_directory() { return true; }
+}
+
+class ListChildrenRsp extends MessageRsp {
+    constructor(namespace, transaction_id, error_code) {
+        super(namespace, transaction_id, error_code);
+        this.elements = []
+    }
+
+    add_element(element) {
+        this.elements.push(element);
+    }
+}
+
+class OpenRsp extends MessageRsp {
+    constructor(namespace, transaction_id, error_code, node_id, revision, size, page_size, file_type) {
+        super(namespace, transaction_id, error_code);
+        this.node_id = node_id;
+        this.revision = revision;
+        this.size = size;
+        this.page_size = page_size;
+        if (file_type == ELEMENT_FILE_TYPE_RANDOM_ACCESS) {
+            this.file_type = ZynFileType.ra;
+        } else if (file_type == ELEMENT_FILE_TYPE_BLOB) {
+            this.file_type = ZynFileType.blob;
+        } else {
+            zyn_unhandled();
         }
     }
 }
 
-class ZynMessage {
-    constructor(msg) {
-        this._msg = msg;
+class CreateFileRsp extends MessageRsp {
+   constructor(namespace, transaction_id, error_code, node_id, revision) {
+        super(namespace, transaction_id, error_code);
+        this.node_id = node_id;
+        this.revision = revision;
+   }
+}
+
+class CreateDirectoryRsp extends MessageRsp {
+   constructor(namespace, transaction_id, error_code, node_id) {
+        super(namespace, transaction_id, error_code);
+        this.node_id = node_id;
+   }
+}
+
+class ReadRsp extends MessageRsp {
+    constructor(namespace, transaction_id, error_code, revision, offset, size) {
+        super(namespace, transaction_id, error_code);
+        this.revision = revision;
+        this.offset = offset;
+        this._data = new ZynByteBuffer(size);
     }
 
-    msg() {
-        return this._msg;
+    data() {
+        return this._data.data();
     }
 
-    is_error() {
-        return 'error' in this._msg;
+    is_data_message() { return true; }
+
+    is_complete() {
+        return this._data.is_complete();
     }
 
-    error() {
-        console.log(this._msg)
-        return new ZynError(
-            null,
-            this._msg['error']['web-server-error'],
-            this._msg['error']['zyn-server-error'],
-        );
+    add_data(data) {
+        this._data.add(data);
+    }
+}
+
+class EditRsp extends MessageRsp {
+    constructor(namespace, transaction_id, error_code, revision) {
+        super(namespace, transaction_id, error_code);
+        this.revision = revision;
+    }
+}
+
+class BatchEditRsp extends MessageRsp {
+    constructor(namespace, transaction_id, error_code, revision, operation_index) {
+        super(namespace, transaction_id, error_code);
+        this.revision = revision;
+        this.operation_index = operation_index;
+    }
+}
+
+class QueryRsp extends MessageRsp {
+    constructor(namespace, transaction_id, error_code) {
+        super(namespace, transaction_id, error_code);
+        this.fields = {}
     }
 
-    is_notification() {
-        return 'notification' in this._msg;
+    add_field(name, type_of, value) {
+        this.fields[name] = {
+            'type': type_of,
+            'value': value,
+        };
+    }
+}
+
+class ExpectRsp {
+    constructor() {
+        this.callback = null;
+        this.expecte_rsp_type = null;
     }
 
-    notification() {
-        return new ZynNotification(this);
+    is_set() {
+        return this.callback !== null;
     }
 
-    content() {
-        return this._msg['content'];
+    reset() {
+        let c = this.callback;
+        this.callback = null;
+        this.expecte_rsp_type = null;
+        return c;
+    }
+
+    set_callback_for_rsp(rsp_type, callback) {
+        this.callback = callback;
+        this.expecte_rsp_type = rsp_type;
+    }
+
+}
+
+class Authority {
+    constructor(type_of, name) {
+        this._type_of = type_of;
+        this.name = name;
+    }
+}
+
+class ZynByteBuffer {
+    constructor(size) {
+        this._data = new Uint8Array(size);
+        this._current_size = 0;
+    }
+
+    complete_size() {
+        return this._data.length;
+    }
+
+    current_size() {
+        return this._current_size;
+    }
+
+    data() {
+        return this._data;
+    }
+
+    is_complete() {
+        return this._current_size === this._data.length;
+    }
+
+    add(data) {
+        let size_after = this._current_size + data.length;
+        if (size_after > this._data.length) {
+            zyn_show_modal_error(
+                ErrorLevel.error,
+                'Buffer handling error',
+                `Trying to add data of ${data.length} which would exceed buffer size ${this._data.length}`
+            );
+            throw '';
+        }
+        this._data.set(data, this._current_size);
+        this._current_size = size_after;
     }
 }
 
@@ -161,66 +338,6 @@ class ZynPath {
     }
 }
 
-class ZynNotification {
-    constructor(msg) {
-        this._notification = msg.msg()['notification'];
-    }
-
-    type() {
-        return this._notification['type']
-    }
-
-    source() {
-        return this._notification['source']
-    }
-
-    content() {
-        return this._notification['content']
-    }
-
-    is_disconnect() {
-        return this.type() === 'disconnected';
-    }
-
-    is_file_edit_modified() {
-        return this.type() === 'random-access-modification';
-    }
-
-    is_file_edit_insert() {
-        return this.type() === 'random-access-insert';
-    }
-
-    is_file_edit_delete() {
-        return this.type() === 'random-access-delete';
-    }
-
-    is_progress_update() {
-        return this.type() === 'progress-update';
-    }
-
-    is_file_edit() {
-        return this.is_file_edit_modified() ||
-               this.is_file_edit_insert() ||
-               this.is_file_edit_delete();
-    }
-
-    to_string() {
-        if (this.is_disconnect()) {
-            return `Server stopped: ${this.content()['reason']}`;
-        } else if (this.is_progress_update()) {
-            let c = this.content();
-            return `Update notification from server: ${c['description']}`;
-        } else if (this.is_file_edit()) {
-            let c = this.content();
-            return `File ${c['node-id']} updated to revision ${c['revision']}, type: ${this.type()}`;
-        } else if (this.type() === 'reconnect') {
-            return `Reconnecting, trial: ${this.content()['trial']}`;
-        } else {
-            return `Unhandled notification: ${this.type()}`;
-        }
-    }
-}
-
 class ZynFileHandler {
     constructor(node_id, filename, client) {
         this._client = client;
@@ -231,8 +348,8 @@ class ZynFileHandler {
         this._size = null;
         this._file_type = null;
         this._mode = null;
-        this.content = null;
     }
+
     static is_editable() { return false; }
     is_editable() { return false; }
     mode() { return this._mode; }
@@ -248,34 +365,21 @@ class ZynFileHandler {
     }
 
     open(mode, callback) {
-        this._client.execute_command(
-            'open-file',
-            {
-                'node-id': this._node_id,
-                'mode': mode,
-            },
-            (msg) => {
+        this._client.connection().open_file(this._node_id, mode, (rsp) => {
+
+            if (!rsp.is_error()) {
+                this._revision =  rsp.revision;
+                this._size =  rsp.size;
+                this._block_size =  rsp.page_size;
+                this._file_type = rsp.file_type;
                 this._mode = mode;
-                this.handle_open_rsp(msg, callback);
-            },
-        );
+            }
+            callback();
+        });
     }
 
     close(callback) {
-        this._client.execute_command(
-            'close-file',
-            {
-                'node-id': this._node_id,
-            },
-            (msg) => this.handle_open_rsp(msg, callback),
-        );
-    }
-
-    initial_load(callback) {
-        this.read_full_file((content) => {
-            this._content = content;
-            callback();
-        });
+        this._client.connection().close_file(this._node_id, callback);
     }
 
     change_file_mode(mode, callback) {
@@ -293,26 +397,12 @@ class ZynFileHandler {
         this.close(() => this.open(mode, callback));
     }
 
-    handle_open_rsp(msg, callback) {
-        let content = msg.content();
-        this._revision = content['revision'];
-        this._size = content['size'];
-        this._block_size = content['block-size'];
-        this._file_type = content['file-type'];
-        callback();
+    read(offset, size, callback) {
+        this._client.connection().read_file(this._node_id, offset, size, callback);
     }
 
-    read(offset, size, callback) {
-
-        this._client.execute_command(
-            'read-file',
-            {
-                'node-id': this._node_id,
-                'offset': offset,
-                'size': size,
-            },
-            callback,
-        );
+    initial_load(callback) {
+        this.read_full_file(callback);
     }
 
     read_full_file(callback) {
@@ -320,11 +410,12 @@ class ZynFileHandler {
             constructor(file, callback) {
                 this._file = file;
                 this._callback = callback;
-                this._buffer = '';
+                this._buffer = new ZynByteBuffer(this._file._size);
+
                 if (this._file._size > 0) {
                     this._read_block();
                 } else {
-                    callback(this._buffer)
+                    callback(this._buffer);
                 }
             }
 
@@ -332,8 +423,9 @@ class ZynFileHandler {
                 if (zyn_is_modal_loading_vissible()) {
                     let number_of_blocks = Math.floor(this._file._size / this._file._block_size) + 1;
                     let current_block = 1;
-                    if (this._buffer.length > 0) {
-                        current_block = (this._buffer.length / this._file._block_size) + 1;
+
+                    if (this._buffer.current_size() > 0) {
+                        current_block = (this._buffer.current_size() / this._file._block_size) + 1;
                     }
                     zyn_show_modal_loading(`Loading file ${current_block} / ${number_of_blocks}`);
                 }
@@ -341,12 +433,13 @@ class ZynFileHandler {
 
             _read_block() {
                 this.set_loading_modal();
-                this._file.read(this._buffer.length, this._file._block_size, (msg) => { this.handle_rsp(msg); });
+                this._file.read(this._buffer.current_size(), this._file._block_size, (msg) => { this.handle_rsp(msg); });
             }
 
             handle_rsp(msg) {
-                this._buffer += atob(msg.content()['bytes']);
-                if (this._buffer.length == this._file._size) {
+                this._buffer.add(msg.data());
+
+                if (this._buffer.is_complete()) {
                     this._callback(this._buffer);
                 } else {
                     this._read_block();
@@ -374,32 +467,18 @@ class ZynFileHandler {
     }
 }
 
-class ZynPdfHandler {
+class ZynPdfHandler extends ZynFileHandler {
     constructor(node_id, filename, client) {
-        this._base = new ZynFileHandler(node_id, filename, client);
+        super(node_id, filename, client);
         this._content = null;
     }
 
     static is_editable() { return false; }
     is_editable() { return false; }
-    properties() { return this._base.properties(); }
-    mode() { return this._base.mode(); }
-    close(callback) { this._base.close(callback); }
-
-    open(mode, callback) {
-        this._base.open(
-            mode,
-            callback,
-        );
-    }
 
     initial_load(callback) {
-        this.load_full_file(callback);
-    }
-
-    load_full_file(callback) {
-        this._base.read_full_file((content) => {
-            this._content = content;
+        super.initial_load((content) => {
+            this._content = content.data();
             callback();
         });
     }
@@ -407,7 +486,7 @@ class ZynPdfHandler {
     render(mode, target_id, callback=null) {
         let element = document.getElementById(target_id);
         if (mode !== OpenMode.read) {
-            _zyn_unhandled();
+            zyn_unhandled();
             return ;
         }
 
@@ -444,20 +523,16 @@ class ZynPdfHandler {
     }
 }
 
-class ZynMarkdownHandler {
+class ZynMarkdownHandler extends ZynFileHandler {
     constructor(node_id, filename, client) {
-        this._base = new ZynFileHandler(node_id, filename, client);
+        super(node_id, filename, client);
         this._is_edited = false;
         this._content =  null;
     }
 
     static is_editable() { return true; }
     is_editable() { return true; }
-    properties() { return this._base.properties(); }
     has_edits() { return this._is_edited; }
-    mode() { return this._base.mode(); }
-    change_file_mode(mode, callback) { this._base.change_file_mode(mode, callback); }
-    close(callback) { this._base.close(callback); }
     content_edited() { this._is_edited = true; }
 
     update_content(content, revision) {
@@ -467,22 +542,12 @@ class ZynMarkdownHandler {
         this._content = content;
     }
 
-    open(mode, callback) {
-        this._base.open(
-            mode,
-            callback,
-        );
-    }
-
     initial_load(callback) {
-        this.load_full_file(callback);
-    }
-
-    load_full_file(callback) {
-        this._base.read_full_file((content) => {
-            this._content = utf8.decode(content);
+        super.initial_load((content) => {
+            let decoder = new TextDecoder();
+            this._content = utf8.decode(decoder.decode(content.data()));
             callback();
-        })
+        });
     }
 
     render(mode, target_id, callback=null) {
@@ -490,7 +555,7 @@ class ZynMarkdownHandler {
         if (mode === OpenMode.read) {
             let content = this._content;
             if (content.length === 0) {
-                this._base.render_empty_file(target_id);
+                this.render_empty_file(target_id);
             } else {
                 var converter = new showdown.Converter({
                     'simplifiedAutoLink': true,
@@ -510,7 +575,7 @@ class ZynMarkdownHandler {
                 document.execCommand("insertHTML", false, text);
             });
         } else {
-            _zyn_unhandled();
+            zyn_unhandled();
         }
 
         this._is_edited = false;
@@ -525,16 +590,16 @@ class ZynMarkdownHandler {
         let modifications = []
         let offset = 0
         var diff = JsDiff.diffChars(this._content, modified_content);
+        let encoder = new TextEncoder();
 
         for (let d of diff) {
-            let bytes = utf8.encode(d.value);
+            let bytes = encoder.encode(utf8.encode(d.value));
             if (d.added) {
                 modifications.push({
                     'type': 'add',
                     'offset': offset,
-                    'bytes': btoa(bytes),
+                    'bytes': bytes,
                 });
-                offset += bytes.length;
             } else if (d.removed) {
                 modifications.push({
                     'type': 'delete',
@@ -550,51 +615,69 @@ class ZynMarkdownHandler {
             return ;
         }
 
-        this._base._client.execute_command(
-            'modify-file',
-            {
-                'node-id': this._base._node_id,
-                'revision': this._base._revision,
-                'modifications': modifications,
-            },
-            (msg) => {
-                this.update_content(
-                    modified_content,
-                    msg.content()['revision'],
-                );
-                callback();
+        this._client.connection().apply_modifications(this._node_id, this._revision, modifications, (rsp) => {
+            if (!rsp.is_error()) {
+                this._revision = rsp.revision;
+                this._content = modified_content;
+                this._is_edited = false;
             }
-        );
+            callback(rsp);
+        });
     }
 
-    handle_notification(notification, mode, target_id, callback) {
-        let offset = notification.content()['offset'];
-        let bytes = utf8.encode(this._content);
+    handle_notification(notification, mode, target_id) {
 
-        if (notification.is_file_edit_delete()) {
+        let decoder = new TextDecoder();
+        let encoder = new TextEncoder();
 
-            let size = notification.content()['size'];
-            bytes = bytes.slice(0, offset)
-                  + bytes.slice(offset + size, bytes.length);
+        let _show_error = (error_code) => {
+            zyn_show_modal_error(ErrorLevel.error, "There was an applying remote updates, please refresh...", `Error code: ${error_code}`);
+        };
 
-        } else if (notification.is_file_edit_insert()) {
+        if (notification.type_of_edit == 'insert') {
 
-            let edited = atob(notification.content()['bytes']);
-            bytes = bytes.slice(0, offset)
-                  + edited
-                  + bytes.slice(offset, bytes.length);
+            this.read(notification.offset, notification.size, (rsp) => {
+                if (rsp.is_error()) {
+                    _show_error(rsp.error_code);
+                    return ;
+                }
 
-        } else if (notification.is_file_edit_modified()) {
+                let bytes = encoder.encode(utf8.encode(this._content));
+                let buffer = new ZynByteBuffer(bytes.length + notification.size);
+                buffer.add(bytes.slice(0, notification.offset));
+                buffer.add(rsp.data());
+                buffer.add(bytes.slice(notification.offset, bytes.length));
+                this._content = utf8.decode(decoder.decode(buffer.data()));
+                this.render(mode, target_id);
+            });
 
-            let edited = atob(notification.content()['bytes']);
-            bytes = bytes.slice(0, offset)
-                  + edited
-                  + bytes.slice(offset + edited.length, bytes.length);
+        } else if (notification.type_of_edit == 'modify') {
+
+            this.read(notification.offset, notification.size, (rsp) => {
+                if (rsp.is_error()) {
+                    _show_error(rsp.error_code);
+                    return ;
+                }
+                let bytes = encoder.encode(utf8.encode(this._content));
+                let buffer = new ZynByteBuffer(bytes.length + notification.size);
+                buffer.add(bytes.slice(0, notification.offset));
+                buffer.add(rsp.data());
+                buffer.add(bytes.slice(notification.offset + notification.size, bytes.length));
+                this._content = utf8.decode(decoder.decode(buffer.data()));
+                this.render(mode, target_id);
+            });
+
+        } else if (notification.type_of_edit == 'delete') {
+
+            let bytes = encoder.encode(utf8.encode(this._content));
+            let buffer = new ZynByteBuffer(bytes.length - notification.size);
+            buffer.add(bytes.slice(0, notification.offset));
+            buffer.add(bytes.slice(notification.offset + notification.size, bytes.length));
+            this._content = utf8.decode(decoder.decode(buffer.data()));
+            this.render(mode, target_id);
 
         } else {
             zyn_unhandled();
         }
-        this._base._revision = notification.content()['revision'];
-        this._content = utf8.decode(bytes);
     }
 }

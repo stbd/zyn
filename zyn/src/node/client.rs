@@ -1281,8 +1281,8 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
         }
 
         let operation_type = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
-        trace!("Applying batch edit operation, i={} type={}, file_offset_corrector_negative={}, file_offset_corrector_positive={}, offset_to_latest_edit={}",
-               i, operation_type, file_offset_corrector_negative, file_offset_corrector_positive, offset_to_latest_edit);
+        trace!("Applying batch edit operation, i={} type={}, file_offset_corrector_negative={}, file_offset_corrector_positive={}, offset_to_latest_edit={}, revision={}",
+               i, operation_type, file_offset_corrector_negative, file_offset_corrector_positive, offset_to_latest_edit, revision);
 
         if operation_type == RA_BATCH_EDIT_OPERATION_DELETE {
 
