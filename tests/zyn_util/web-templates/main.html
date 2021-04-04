@@ -16,6 +16,8 @@
 <body style="height: 100%;">
 
     <script>
+     const PATH_PDFJS_WORKER = "{{ static_url('3pp/pdfjs/pdf.worker.js') }}";
+
      function _element_height(name) {
          let e = document.getElementById(name);
          let style = document.defaultView.getComputedStyle(e);

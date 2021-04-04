@@ -7,7 +7,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 path_user_home=$1
-url=https://nodejs.org/dist/v10.15.3/node-v10.15.3-linux-x64.tar.xz
+url=https://nodejs.org/dist/v15.9.0/node-v15.9.0-linux-x64.tar.xz
 path_target=/opt/node
 tag=ZYN-NODE-SETTINGS
 
@@ -48,7 +48,7 @@ if [ "$yarn_installed" -eq 0 ]; then
 
     curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
     echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list
-    sudo apt-get update && sudo apt-get install yarn
+    sudo apt-get update && sudo apt-get install yarn -y
 
 else
     echo "Yarn already installed"

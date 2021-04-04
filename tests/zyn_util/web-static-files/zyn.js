@@ -491,13 +491,15 @@ class ZynPdfHandler extends ZynFileHandler {
         }
 
         var root = document.createElement('div');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = PATH_PDFJS_WORKER;
+
         var loadingTask = pdfjsLib.getDocument({data: this._content});
         loadingTask.promise.then(function(pdf) {
             var pageNumber = 1;
             for (var pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
                 pdf.getPage(pageNumber).then(function(page) {
                     var scale = 1.5;
-                    var viewport = page.getViewport(scale);
+                    var viewport = page.getViewport({scale: scale});
                     var canvas = document.createElement('canvas');
 
                     root.appendChild(canvas);
@@ -509,7 +511,7 @@ class ZynPdfHandler extends ZynFileHandler {
                         viewport: viewport
                     };
                     var renderTask = page.render(renderContext);
-                    renderTask.then(function () {});
+                    renderTask.promise.then(function () {});
                 });
             }
         }, function (reason) {
