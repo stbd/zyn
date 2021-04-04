@@ -570,6 +570,7 @@ class ZynMarkdownHandler extends ZynFileHandler {
             let content = this._content;
             element.classList.add('w3-pale-green');
             element.style.margin = "0px 5px 0px 5px";
+            element.style.paddingLeft = "1px";
             element.innerText = content;
             element.addEventListener("paste", function(e) {
                 e.preventDefault();

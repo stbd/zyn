@@ -50,11 +50,12 @@ class ZynClient {
     is_editable(name) { return this.filetype_handler(name).is_editable(); }
 
     _handle_socket_closed(event) {
-        console.log('Socket closed');
+        console.lo(event);
+        zyn_show_modal_error(ErrorLevel.error, `Connection to server lost`);
     }
 
     _handle_socket_error(event) {
-        console.log('Socket error');
+        console.lo(event);
     }
 
     _handle_notification(notification) {
