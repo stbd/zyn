@@ -547,7 +547,7 @@ class ZynMarkdownHandler extends ZynFileHandler {
     initial_load(callback) {
         super.initial_load((content) => {
             let decoder = new TextDecoder();
-            this._content = utf8.decode(decoder.decode(content.data()));
+            this._content = decoder.decode(content.data());
             callback();
         });
     }
@@ -596,7 +596,7 @@ class ZynMarkdownHandler extends ZynFileHandler {
         let encoder = new TextEncoder();
 
         for (let d of diff) {
-            let bytes = encoder.encode(utf8.encode(d.value));
+            let bytes = encoder.encode(d.value);
             if (d.added) {
                 modifications.push({
                     'type': 'add',
@@ -645,12 +645,12 @@ class ZynMarkdownHandler extends ZynFileHandler {
                     return ;
                 }
 
-                let bytes = encoder.encode(utf8.encode(this._content));
+                let bytes = encoder.encode(this._content);
                 let buffer = new ZynByteBuffer(bytes.length + notification.size);
                 buffer.add(bytes.slice(0, notification.offset));
                 buffer.add(rsp.data());
                 buffer.add(bytes.slice(notification.offset, bytes.length));
-                this._content = utf8.decode(decoder.decode(buffer.data()));
+                this._content = decoder.decode(buffer.data());
                 this.render(mode, target_id);
             });
 
@@ -661,22 +661,22 @@ class ZynMarkdownHandler extends ZynFileHandler {
                     _show_error(rsp.error_code);
                     return ;
                 }
-                let bytes = encoder.encode(utf8.encode(this._content));
+                let bytes = encoder.encode(this._content);
                 let buffer = new ZynByteBuffer(bytes.length + notification.size);
                 buffer.add(bytes.slice(0, notification.offset));
                 buffer.add(rsp.data());
                 buffer.add(bytes.slice(notification.offset + notification.size, bytes.length));
-                this._content = utf8.decode(decoder.decode(buffer.data()));
+                this._content = decoder.decode(buffer.data());
                 this.render(mode, target_id);
             });
 
         } else if (notification.type_of_edit == 'delete') {
 
-            let bytes = encoder.encode(utf8.encode(this._content));
+            let bytes = encoder.encode(this._content);
             let buffer = new ZynByteBuffer(bytes.length - notification.size);
             buffer.add(bytes.slice(0, notification.offset));
             buffer.add(bytes.slice(notification.offset + notification.size, bytes.length));
-            this._content = utf8.decode(decoder.decode(buffer.data()));
+            this._content = decoder.decode(buffer.data());
             this.render(mode, target_id);
 
         } else {
