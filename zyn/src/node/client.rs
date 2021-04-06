@@ -1208,8 +1208,6 @@ const RA_BATCH_EDIT_OPERATION_INSERT: u64 = 2;
 const RA_BATCH_EDIT_OPERATION_WRITE: u64 = 3;
 fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
 
-    let mut file_offset_corrector_negative = 0;
-    let mut file_offset_corrector_positive = 0;
     let mut offset_to_latest_edit = 0;
 
     let transaction_id = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_transaction_id(), client, 0);
@@ -1281,14 +1279,15 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
         }
 
         let operation_type = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_unsigned(), client, transaction_id);
-        trace!("Applying batch edit operation, i={} type={}, file_offset_corrector_negative={}, file_offset_corrector_positive={}, offset_to_latest_edit={}, revision={}",
-               i, operation_type, file_offset_corrector_negative, file_offset_corrector_positive, offset_to_latest_edit, revision);
+        trace!("Applying batch edit operation, i={} type={}, offset_to_latest_edit={}, revision={}",
+               i, operation_type, offset_to_latest_edit, revision);
 
         if operation_type == RA_BATCH_EDIT_OPERATION_DELETE {
 
             let (offset, size) = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_block(), client, transaction_id);
             try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
+            trace!("Batch edit delete, offset={}, size={}", offset, size);
             if offset < offset_to_latest_edit {
                 try_send_batch_edit_response_without_fields!(
                     client,
@@ -1300,20 +1299,10 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
                 return Err(());
             }
 
-            let corrected_offset = offset - file_offset_corrector_negative + file_offset_corrector_positive;
-            trace!("Batch edit delete, offset={}, size={}, corrected_offset={}", offset, size, corrected_offset);
-            if ! is_random_access_edit_allowed(lock_container.locked_file.page_size, offset, size) {
-                warn!("Invalid edit, edited block not in fist page, page_size={}, offset={}, size={}",
-                      lock_container.locked_file.page_size, offset, size);
-                try_send_batch_edit_response_without_fields!(client, transaction_id, CommonErrorCodes::InvalidEditError as u64, i, revision);
-                return Err(());
-            }
-
-            match lock_container.locked_file.access.delete(revision, corrected_offset, size) {
+            match lock_container.locked_file.access.delete(revision, offset, size) {
                 Ok(revision_after_edit) => {
                     revision = revision_after_edit;
-                    file_offset_corrector_negative += size;
-                    offset_to_latest_edit = offset + size;
+                    offset_to_latest_edit = offset;
                 },
                 Err(error) => {
                     try_send_batch_edit_response_without_fields!(client, transaction_id, map_file_error_to_uint(error), i, revision);
@@ -1326,6 +1315,7 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
             let (offset, size) = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_block(), client, transaction_id);
             try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
+            trace!("Batch edit insert, offset={}, size={}", offset, size);
             if offset < offset_to_latest_edit {
                 try_send_batch_edit_response_without_fields!(
                     client,
@@ -1337,9 +1327,6 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
                 return Err(());
             }
 
-            let corrected_offset = offset - file_offset_corrector_negative + file_offset_corrector_positive;
-            trace!("Batch edit insert, offset={}, size={}, corrected_offset={}", offset, size, corrected_offset);
-
             let mut data = Buffer::with_capacity(size as usize);
             if client.connection.fill_buffer_from_client(& mut data).is_err() {
                 client.status.set(Status::FailedToreceiveFromClient);
@@ -1347,10 +1334,9 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
                 return Err(());
             }
 
-            match lock_container.locked_file.access.insert(revision, corrected_offset, data) {
+            match lock_container.locked_file.access.insert(revision, offset, data) {
                 Ok(revision_after_edit) => {
                     revision = revision_after_edit;
-                    file_offset_corrector_positive += size;
                     offset_to_latest_edit = offset + size;
                 },
                 Err(error) => {
@@ -1364,6 +1350,7 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
             let (offset, size) = try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_block(), client, transaction_id);
             try_and_return_set_parse_error_on_fail!(client.connection.get_receive_buffer().parse_end_of_message(), client, transaction_id);
 
+            trace!("Batch edit write, offset={}, size={}", offset, size);
             if offset < offset_to_latest_edit {
                 try_send_batch_edit_response_without_fields!(
                     client,
@@ -1375,9 +1362,6 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
                 return Err(());
             }
 
-            let corrected_offset = offset - file_offset_corrector_negative + file_offset_corrector_positive;
-            trace!("Batch edit write, offset={}, size={}, corrected_offset={}", offset, size, corrected_offset);
-
             let mut data = Buffer::with_capacity(size as usize);
             if client.connection.fill_buffer_from_client(& mut data).is_err() {
                 client.status.set(Status::FailedToreceiveFromClient);
@@ -1385,7 +1369,7 @@ fn handle_batch_edit_req(client: & mut Client) -> Result<(), ()> {
                 return Err(());
             }
 
-            match lock_container.locked_file.access.write(revision, corrected_offset, data) {
+            match lock_container.locked_file.access.write(revision, offset, data) {
                 Ok(revision_after_edit) => {
                     revision = revision_after_edit;
                     offset_to_latest_edit = offset + size;
