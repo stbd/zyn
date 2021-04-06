@@ -868,7 +868,11 @@
 
                      function _handle_file_save_clicked() {
                          zyn_show_modal_loading('Saving...')
-                         client.save_file_edits(_handle_properties_changed);
+                         client.save_file_edits(_handle_properties_changed, (rsp) => {
+                             if (rsp.is_error()) {
+                                 zyn_show_modal_error(ErrorLevel.error, `There was an error saving changes`, `Error code: ${rsp.error_code}`);
+                             }
+                         });
                      }
 
                      function _set_file_button(name, enabled, shown, text=null) {

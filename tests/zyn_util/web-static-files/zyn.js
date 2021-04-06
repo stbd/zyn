@@ -603,6 +603,7 @@ class ZynMarkdownHandler extends ZynFileHandler {
                     'offset': offset,
                     'bytes': bytes,
                 });
+                offset += bytes.length;
             } else if (d.removed) {
                 modifications.push({
                     'type': 'delete',
@@ -610,11 +611,11 @@ class ZynMarkdownHandler extends ZynFileHandler {
                     'size': bytes.length,
                 });
             } else {
-                offset += bytes.length
+                offset += bytes.length;
             }
         }
         if (modifications.length == 0) {
-            callback();
+            zyn_show_modal_error(ErrorLevel.error, `No modification found`);
             return ;
         }
 

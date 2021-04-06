@@ -32,8 +32,8 @@ class ZynClient {
         this._target_id = 'zyn-client-target';
 
         this._connection.register_event_handlers(
-            (e) => this._handle_socket_closed(e),
             (e) => this._handle_socket_error(e),
+            (e) => this._handle_socket_closed(e),
             (n) => this._handle_notification(n),
         )
     }
@@ -50,12 +50,12 @@ class ZynClient {
     is_editable(name) { return this.filetype_handler(name).is_editable(); }
 
     _handle_socket_closed(event) {
-        console.lo(event);
+        console.log(event);
         zyn_show_modal_error(ErrorLevel.error, `Connection to server lost`);
     }
 
     _handle_socket_error(event) {
-        console.lo(event);
+        console.log(event);
     }
 
     _handle_notification(notification) {
