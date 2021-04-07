@@ -15,6 +15,15 @@
     100% { transform: rotate(360deg); }
 }
 
+.zyn-save-indication {
+    animation: successfulSaveAnimation 0.5s linear;
+}
+
+@keyframes successfulSaveAnimation {
+    0% { background-color: springgreen; }
+    100% { background-color: transparent; }
+}
+
 html, body{
     height: 100%;
     width: 100%;

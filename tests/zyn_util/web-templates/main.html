@@ -29,7 +29,9 @@
      function _handle_window_resize() {
          // todo: this should be reimplemented by someone who understands
          // frontend
-         client.redraw_content(0);
+         if (client) {
+             client.redraw_content(0);
+         }
          let file_area_height = document.getElementById('zyn-file').offsetHeight;
          let available_height = file_area_height;
          available_height -= _element_height('zyn-file-header');
@@ -44,7 +46,7 @@
      });
 
      document.addEventListener("visibilitychange", function() {
-         if (!document.hidden){
+         if (document.visibilityState == "visible"){
              client.set_focus();
          }
      });
@@ -841,7 +843,7 @@
                          _update_file_buttons();
                      }
 
-                     function _handle_properties_changed() {
+                     function _handle_properties_changed(rsp) {
                          zyn_hide_modals();
                          _update_file_properties();
                      }
@@ -868,9 +870,14 @@
 
                      function _handle_file_save_clicked() {
                          zyn_show_modal_loading('Saving...')
-                         client.save_file_edits(_handle_properties_changed, (rsp) => {
+                         client.save_file_edits((rsp) => {
                              if (rsp.is_error()) {
                                  zyn_show_modal_error(ErrorLevel.error, `There was an error saving changes`, `Error code: ${rsp.error_code}`);
+                             } else {
+                                 _handle_properties_changed();
+                                 let button = document.getElementById('zyn-file-save');
+                                 button.classList.add('zyn-save-indication');
+                                 setTimeout(function(){ button.classList.remove('zyn-save-indication'); }, 1000);
                              }
                          });
                      }
