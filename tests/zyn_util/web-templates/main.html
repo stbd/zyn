@@ -29,9 +29,10 @@
      function _handle_window_resize() {
          // todo: this should be reimplemented by someone who understands
          // frontend
-         if (client) {
-             client.redraw_content(0);
+         if (client === null) {
+             return
          }
+         client.redraw_content(0);
          let file_area_height = document.getElementById('zyn-file').offsetHeight;
          let available_height = file_area_height;
          available_height -= _element_height('zyn-file-header');
