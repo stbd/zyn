@@ -504,13 +504,17 @@
                  );
              }
 
-             function _file_opened() {
-                 let name = client.current_file_handler().properties()['name'];
-                 _set_browser_url(name);
+             function _show_file_content_area() {
                  _hide_sidebar();
                  _update_file_buttons();
                  _update_file_properties();
                  zyn_hide_modals();
+             }
+
+             function _file_opened() {
+                 let name = client.current_file_handler().properties()['name'];
+                 _set_browser_url(name);
+                 _show_file_content_area();
              }
 
              function _handle_open_file_edit_clicked(event, node_id, name) {

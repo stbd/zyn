@@ -47,7 +47,15 @@ class ZynClient {
     is_in_edit_mode() { return this._file_mode == OpenMode.edit; }
     is_in_read_mode() { return this._file_mode == OpenMode.read; }
     file_mode() { return this._file_mode; }
-    is_editable(name) { return this.filetype_handler(name).is_editable(); }
+
+    is_editable(name) {
+        let handler = this.filetype_handler(name);
+        if (handler === null) {
+            return false;
+        } else {
+            return handler.is_editable();
+        }
+    }
 
     _handle_socket_closed(event) {
         console.log(event);
@@ -154,7 +162,7 @@ class ZynClient {
     filetype_handler(filename) {
         var split_name = filename.split('.');
         if (split_name.length === 1) {
-            return ZynFileHandler;
+            return null;
         }
         let type = split_name[split_name.length - 1].toLowerCase();
         for (let handler of this._file_handlers) {
@@ -162,7 +170,7 @@ class ZynClient {
                 return handler.handler;
             }
         }
-        return ZynFileHandler;
+        return null;
     }
 
     query_system_properties(callback) {
@@ -254,6 +262,12 @@ class ZynClient {
         this.reset_file_content(mode, target_id);
         this._file_mode = mode;
         let handler_type = this.filetype_handler(name);
+        if (handler_type === null) {
+            this.set_content_area_text('Unsupported file type', this._target_id);
+            _show_file_content_area();
+            return ;
+        }
+
         this._current_file_handler = new handler_type(node_id, name, this);
 
         this._current_file_handler.open(
