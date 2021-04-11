@@ -160,13 +160,12 @@ class ZynClient {
     }
 
     filetype_handler(filename) {
-        var split_name = filename.split('.');
-        if (split_name.length === 1) {
+        let extension = zyn_get_filename_extension(filename);
+        if (extension === null) {
             return null;
         }
-        let type = split_name[split_name.length - 1].toLowerCase();
         for (let handler of this._file_handlers) {
-            if (handler.types.indexOf(type) != -1) {
+            if (handler.types.indexOf(extension) != -1) {
                 return handler.handler;
             }
         }

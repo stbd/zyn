@@ -28,6 +28,22 @@ function zyn_sort_filesystem_elements(elements, name_filter) {
     return files.concat(dirs);
 }
 
+function zyn_get_filename_extension(filename) {
+    let split_name = filename.split('.');
+    if (split_name.length === 1) {
+        return null
+    }
+    return split_name[split_name.length - 1].toLowerCase();
+}
+
+function zyn_showdown_image_extension_convert_path_to_link(path) {
+    if (path.startsWith('./') || path.startsWith('..')) {
+        let url = `${window.location.protocol}//${window.location.hostname}:${window.location.port}/raw/${path}`
+        return url;
+    }
+    return null;
+}
+
 class Message {
     constructor() {}
 
@@ -331,6 +347,10 @@ class ZynPath {
         this._path.push(name);
     }
 
+    append_path(other) {
+        this._path = [...this._path, ...other._path];
+    }
+
     clone() {
         var copy = new ZynPath();
         copy._path = this._path.slice();
@@ -525,6 +545,53 @@ class ZynPdfHandler extends ZynFileHandler {
     }
 }
 
+class ZynImageHandler extends ZynFileHandler {
+    constructor(node_id, filename, client) {
+        super(node_id, filename, client);
+        this._content = null;
+        this._mimetype = null;
+        switch (zyn_get_filename_extension(filename)) {
+            case 'jpg':
+                this._mimetype = 'image/jpeg';
+                break;
+            default:
+                break;
+        };
+    }
+
+    static is_editable() { return false; }
+    is_editable() { return false; }
+
+    initial_load(callback) {
+        super.initial_load((content) => {
+            this._content = content.data();
+            callback();
+        });
+    }
+
+    render(mode, target_id, callback=null) {
+        if (this._mimetype === null) {
+            client.set_content_area_text('Unsupported image type', target_id);
+            callback();
+            return ;
+        }
+
+        let element = document.getElementById(target_id);
+        if (mode !== OpenMode.read) {
+            zyn_unhandled();
+            return ;
+        }
+
+        let b64 = btoa(String.fromCharCode.apply(null, this._content));
+        var img = document.createElement('img');
+        img.src = `data:${this._mimetype};base64,${b64}`;
+
+        element.appendChild(img);
+
+        callback();
+    }
+}
+
 class ZynMarkdownHandler extends ZynFileHandler {
     constructor(node_id, filename, client) {
         super(node_id, filename, client);
@@ -552,6 +619,33 @@ class ZynMarkdownHandler extends ZynFileHandler {
         });
     }
 
+    _showdown_image_extension() {
+        return {
+            type: 'lang',
+            filter: function (text, converter, options) {
+                for (let m of text.matchAll(/!\[.*\]\((.*)\)/g)) {
+                    let image_parameters = m[1].split(' ');
+                    let image_path = image_parameters[0];
+                    let url = zyn_showdown_image_extension_convert_path_to_link(image_path);
+                    if (url) {
+                        let match = m[0].replace(image_path, `${url}`);
+                        text = text.replace(m[0], match);
+                    }
+                }
+
+                for (let m of text.matchAll(/\[.*\]:\s([\S]+)\s/g)) {
+                    let image_path = m[1];
+                    let url = zyn_showdown_image_extension_convert_path_to_link(image_path);
+                    if (url) {
+                        let match = m[0].replace(image_path, `${url}`);
+                        text = text.replace(m[0], match);
+                    }
+                }
+                return text;
+            }
+        };
+    }
+
     render(mode, target_id, callback=null) {
         let element = document.getElementById(target_id);
         if (mode === OpenMode.read) {
@@ -562,6 +656,9 @@ class ZynMarkdownHandler extends ZynFileHandler {
                 var converter = new showdown.Converter({
                     'simplifiedAutoLink': true,
                     'tables': true,
+                    'extensions': [
+                        [this._showdown_image_extension()]
+                    ],
                 });
                 let html = converter.makeHtml(content);
                 element.innerHTML = html;
@@ -614,6 +711,7 @@ class ZynMarkdownHandler extends ZynFileHandler {
                 offset += bytes.length;
             }
         }
+
         if (modifications.length == 0) {
             zyn_show_modal_error(ErrorLevel.error, `No modification found`);
             return ;
