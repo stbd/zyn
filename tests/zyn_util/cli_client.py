@@ -140,7 +140,7 @@ class ZynCliClient(cmd.Cmd):
 
     def _parser_add(self):
         parser = argparse.ArgumentParser(prog='add')
-        parser.add_argument('path', type=str)
+        parser.add_argument('paths', type=str, nargs='+')
         group = parser.add_mutually_exclusive_group(required=False)
         group.add_argument('-ra', '--random-access', action='store_true')
         group.add_argument('-b', '--blob', action='store_true')
@@ -152,16 +152,19 @@ class ZynCliClient(cmd.Cmd):
     def do_add(self, args):
         parser = self._parser_add()
         args = vars(parser.parse_args(self._parse_args(args)))
-        path = args['path']
-        path_remote = self._to_absolute_remote_path(path)
-        file_type = None
 
+        file_type = None
         if args['random_access']:
             file_type = zyn_util.connection.FILE_TYPE_RANDOM_ACCESS
         elif args['blob']:
             file_type = zyn_util.connection.FILE_TYPE_BLOB
 
-        elements = self._client.add(path_remote, file_type)
+        paths = args['paths']
+        elements = []
+        for path in paths:
+            path_remote = self._to_absolute_remote_path(path)
+            elements += self._client.add(path_remote, file_type)
+
         print('Added elements:')
         self._local_elements_header()
         for e in elements:
