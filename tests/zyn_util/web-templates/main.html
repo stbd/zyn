@@ -44,6 +44,7 @@
          file_area_height -= _element_height('zyn-file-horizontal-break');
          file_area_height -= _element_height('zyn-file-footer');
          document.getElementById('zyn-file-content').style.height = `${file_area_height}px`;
+         document.getElementById('zyn-file-content').style.minHeight = `10em`;
          document.getElementById('zyn-file-content').style.width = `${window.innerWidth}px`;
      }
 
@@ -658,7 +659,7 @@
     <div
         id="zyn-tab-fs"
         class="zyn-tabs"
-        style="display: block;"
+        style="display: block; overflow-y: auto;"
     >
         <div
             id="zyn-file"
@@ -943,9 +944,7 @@
                 style="display: block; overflow: auto;"
             ></div>
 
-            <div id="zyn-file-footer" style="display: block;">
-                <hr>
-            </div>
+            <hr id="zyn-file-footer">
         </div>
     </div>
 
