@@ -203,11 +203,6 @@ class ZynClient {
         content.appendChild(text_content);
     }
 
-    redraw_content(height=null) {
-        let content = document.getElementById(this._target_id);
-        content.style.height = `${height}px`;
-    }
-
     reset_file_content(mode, target_id) {
         let target = document.getElementById(target_id);
         while (target.childElementCount > 0) {
@@ -219,7 +214,6 @@ class ZynClient {
             let content = document.createElement('pre');
             content.id = this._target_id;
             content.contentEditable  = 'true';
-            content.style.overflow = 'auto';
             content.onkeyup = () => { this.file_content_edited(); };
             target.appendChild(content)
 
@@ -228,16 +222,11 @@ class ZynClient {
             let content = document.createElement('div');
             content.id = this._target_id;
             content.style.display = 'inline-block';
-            content.style.overflow = 'auto';
-            content.style.width = '100%';
             target.appendChild(content)
 
         } else {
             zyn_unhandled();
         }
-
-        let height = document.getElementById(target_id).offsetHeight
-        this.redraw_content(height);
     }
 
     open_file(node_id, name, mode, target_id, callback) {

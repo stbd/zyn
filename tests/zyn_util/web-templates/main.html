@@ -15,6 +15,8 @@
 <body style="height: 100%;">
 
     <script>
+     // todo: this should be reimplemented by someone who understands frontend
+
      const PATH_PDFJS_WORKER = "{{ static_url('3pp/pdfjs/pdf.worker.js') }}";
 
      function _element_height(name) {
@@ -27,19 +29,22 @@
      }
 
      function _handle_window_resize() {
-         // todo: this should be reimplemented by someone who understands
-         // frontend
          if (client === null) {
              return
          }
-         client.redraw_content(0);
-         let file_area_height = document.getElementById('zyn-file').offsetHeight;
-         let available_height = file_area_height;
-         available_height -= _element_height('zyn-file-header');
-         available_height -= _element_height('zyn-file-footer');
-         available_height -= _element_height('zyn-file-buttons');
-         available_height -= (0.1 * window.innerHeight);
-         client.redraw_content(available_height);
+
+         let fs_tab_height = window.innerHeight;
+         fs_tab_height -= _element_height('zyn-tab-bar');
+         document.getElementById('zyn-tab-fs').style.height = `${fs_tab_height}px`;
+
+         let file_area_height = fs_tab_height;
+         file_area_height -= _element_height('zyn-file-butttons-display');
+         file_area_height -= _element_height('zyn-file-header-container');
+         file_area_height -= _element_height('zyn-file-buttons-edit');
+         file_area_height -= _element_height('zyn-file-horizontal-break');
+         file_area_height -= _element_height('zyn-file-footer');
+         document.getElementById('zyn-file-content').style.height = `${file_area_height}px`;
+         document.getElementById('zyn-file-content').style.width = `${window.innerWidth}px`;
      }
 
      window.addEventListener('resize', function(event){
@@ -194,20 +199,20 @@
     </script>
 
     <script>
-     function _set_vissible_tab(tab_name) {
-         var tabs = document.getElementsByClassName("zyn-tabs");
-         for(let tab of tabs) {
-             tab.style.display = "none";
-         }
-         document.getElementById(tab_name).style.display = "table-row";
+     function _show_sidebar() {
+         document.getElementById("zyn-fs-sidebar").style.display = 'table';
+     }
+
+     function _hide_sidebar() {
+         document.getElementById("zyn-fs-sidebar").style.display = 'none';
      }
     </script>
 
     <div id="zyn-fs-sidebar"
-         class="w3-sidebar w3-border"
-         style="display: table; width: 25%; min-width: 500px; height: 100%; overflow-y: scroll;"
+         class="w3-sidebar w3-border w3-bar-block"
+         style="min-width: 500px; height: 100%;"
     >
-        <div style="height: 100%; overflow-y: scroll;">
+        <div style="height: 100%; overflow-y: auto;">
 
             <button href="#"
                     class="w3-button w3-border w3-blue-grey"
@@ -226,13 +231,13 @@
                     disabled
                     style="width: 70%; display: inline; vertical-aling: middle"></input>
 
-                <button id="zyn-fs-working_directory-button"
+                <button id="zyn-fs-working-directory-button"
                         href="#"
                         class="w3-button w3-border"
                         onclick="_handle_parent_directory_clicked()"
                         style="display: inline; vertical-align: middle"
                 >Up</button>
-                <button id="zyn-fs-working_directory-button"
+                <button id="zyn-fs-working-directory-button"
                         href="#"
                         class="w3-button w3-border"
                         onclick="_handle_refresh_directory_clicked()"
@@ -570,15 +575,25 @@
         </div>
     </div>
 
-    <div class="w3-container w3-bar w3-black" style="display: table-row;">
+    <script>
+     function _set_vissible_tab(tab_name) {
+         var tabs = document.getElementsByClassName("zyn-tabs");
+         for(let tab of tabs) {
+             tab.style.display = "none";
+         }
+         document.getElementById(tab_name).style.display = "block";
+     }
+    </script>
+
+    <div id="zyn-tab-bar" class="w3-bar w3-black" style="display: block;">
         <button class="w3-bar-item w3-button" onclick="_set_vissible_tab('zyn-tab-fs')">Filesystem</button>
         <button class="w3-bar-item w3-button" onclick="_set_vissible_tab('zyn-tab-settings')">Settings</button>
     </div>
 
-    <div id="zyn-tab-settings" class="zyn-tabs" style="height: 100%; width: 100%; display: none">
+    <div id="zyn-tab-settings" class="zyn-tabs" style="display: none">
         <div
             class="w3-container w3-center"
-            style="width: 100%; height: 100%; display: block;"
+            style=""
         >
             <button
                 class="w3-button w3-border"
@@ -643,13 +658,14 @@
     <div
         id="zyn-tab-fs"
         class="zyn-tabs"
-        style="display: table-row; height: 100%; width: 100%"
+        style="display: block;"
     >
         <div
-            style="display: table; height: 100%; width: 100%"
+            id="zyn-file"
+            class="w3-container"
+            style="box-sizing: border-box; display: block; height: 100%;"
         >
-
-            <div style="display: table-row" class="w3-sand">
+            <div id="zyn-file-butttons-display" style="display: block" class="w3-sand">
                 <button type="button"
                         class="w3-button w3-border w3-blue-grey"
                         style="font-size: large; width: 20%"
@@ -664,289 +680,275 @@
                 ></button>
             </div>
 
+            <div
+                id="zyn-file-header-container"
+                class="w3-container w3-sand"
+                style="display: block;"
+            >
+                <div
+                    id="zyn-file-header"
+                    style="display: block; height: 100%; overflow-y: scroll;"
+                >
+                    <div
+                        id="zyn-file-header-info"
+                        style="width: 30%; display: inline-block; vertical-align: top;"
+                    >
+                        <div class="w3-margin">
+                            File
+                            <ul class="zyn-current-file" style="padding: 0px 0px;">
+                                <li><span>Filename:</span><span class="w3-right" id="zyn-file-name"></span></li>
+                                <li><span>Node Id:</span><span class="w3-right" id="zyn-file-node-id"></span></li>
+                                <li><span>Revision:</span><span class="w3-right" id="zyn-file-revision"></span></li>
+                                <li><span>File type:</span><span class="w3-right" id="zyn-file-type"></span></li>
+                                <li><span>Block size:</span><span class="w3-right" id="zyn-file-block-size"></span></li>
+                            </ul>
+                        </div>
+                        <script>
+                         function _set_file_properties(
+                             name,
+                             node_id,
+                             revision,
+                             file_type,
+                             block_size,
+                         ) {
+                             document.getElementById("zyn-file-name").innerText = name;
+                             document.getElementById("zyn-file-node-id").innerText = node_id;
+                             document.getElementById("zyn-file-revision").innerText = revision;
+                             document.getElementById("zyn-file-type").innerText = file_type;
+                             document.getElementById("zyn-file-block-size").innerText = block_size;
+                         }
+
+                         function _clear_file_properties() {
+                             _set_file_properties('-', '-', '-', '-', '-');
+                         }
+
+                         function _update_file_properties() {
+                             if (client.has_current_file()) {
+                                 let handler = client.current_file_handler();
+                                 let properties = handler.properties();
+                                 _set_file_properties(
+                                     properties['name'],
+                                     properties['node-id'],
+                                     properties['revision'],
+                                     properties['file-type'],
+                                     properties['block-size'],
+                                 )
+                             }
+                         }
+
+                         _clear_file_properties();
+                        </script>
+
+                    </div><!-- zyn-file-header-info --><div
+                                                           id="zyn-file-header-notifications"
+                                                           style="width: 70%; display: inline-block; vertical-align: top;"
+                                                       >
+                        <div class="w3-margin">
+                            Notifications
+                            <table
+                                id="zyn-notifications"
+                                style="width: 100%; height: 100%;"
+                            >
+                                <tr>
+                                    <th class="zyn-notification-source w3-border-bottom">Source</th>
+                                    <th class="w3-border-bottom">Description</th>
+                                </tr>
+                            </table>
+                        </div>
+                    </div><!-- zyn-file-header-notifications -->
+
+                    <script>
+                     let MAX_NUMBER_OF_NOTIFICATIONS = 50;
+                     let NotificationSource = Object.freeze({
+                         'client': 'Client',
+                         'server': 'Server',
+                     });
+                     let NotificationType = Object.freeze({
+                         'info': 10,
+                         'warn': 20,
+                         'error': 30,
+                     });
+
+                     function zyn_add_notification(source, description, type=NotificationType.info)
+                     {
+                         var notifications = document.getElementById("zyn-notifications");
+                         var size = notifications.rows.length;
+                         if (size > MAX_NUMBER_OF_NOTIFICATIONS) {
+                             notifications.deleteRow(size - 1);
+                         }
+                         var row = notifications.insertRow(1);
+
+                         field_source = row.insertCell();
+                         field_source.innerText = source;
+                         field_source.classList.add('zyn-notification-source');
+                         field_source.classList.add('w3-border-right');
+                         field_source.classList.add('w3-border-bottom');
+
+                         field_desc = row.insertCell();
+                         field_desc.innerText = description;
+                         field_desc.classList.add('w3-border-bottom');
+                     }
+
+                    </script>
+                </div>
+            </div><!-- zyn-file-header-container -->
+
             <script>
-             function _show_sidebar() {
-                 document.getElementById("zyn-fs-sidebar").style.display = 'table';
+             function _handle_toggle_file_header() {
+                 let file = document.getElementById("zyn-file");
+                 let header = document.getElementById("zyn-file-header-container");
+                 let button = document.getElementById("zyn-toogle-file-header");
+                 let is_minimized = button.dataset.isMinimized == 'true';
+
+                 if (is_minimized) {
+                     // header.style.minHeight = file.offsetHeight * 0.20 + 'px'
+                     //header.style.height = '20%';
+                     header.style.height = '15em';
+                     button.innerText = 'Hide Properties'
+                 } else {
+                     // header.style.minHeight = file.offsetHeight * 0.05 + 'px'
+                     // header.style.height = '5%';
+                     header.style.height = '3em';
+                     button.innerText = 'Show Properties'
+                 }
+                 button.dataset.isMinimized = (!is_minimized).toString();
+                 _handle_window_resize();
+             }
+            </script>
+            <div
+                id="zyn-file-buttons-edit"
+                class="w3-container"
+                style="display: block; width: 100%"
+            >
+                <button
+                    id="zyn-file-edit"
+                    class="w3-button"
+                    onclick="_handle_file_edit_clicked()"
+                ></button>
+
+                <button
+                    id="zyn-file-done"
+                    class="w3-button"
+                    onclick="_handle_file_done_clicked()"
+                ></button>
+
+                <button
+                    id="zyn-file-cancel"
+                    class="w3-button"
+                    onclick="_handle_file_cancel_clicked()"
+                ></button>
+
+                <button
+                    id="zyn-file-save"
+                    class="w3-button"
+                    onclick="_handle_file_save_clicked()"
+                ></button>
+
+            </div><!-- zyn-file-buttons-edit -->
+
+            <script>
+             function _handle_client_updated() {
+                 _update_file_buttons();
              }
 
-             function _hide_sidebar() {
-                 document.getElementById("zyn-fs-sidebar").style.display = 'none';
+             function _handle_properties_changed(rsp) {
+                 zyn_hide_modals();
+                 _update_file_properties();
+             }
+
+             function _handle_file_edit_clicked() {
+                 client.change_file_to_mode(
+                     OpenMode.edit,
+                     'zyn-file-content',
+                     _handle_client_updated
+                 );
+             }
+
+             function _handle_file_done_clicked() {
+                 client.change_file_to_mode(
+                     OpenMode.read,
+                     'zyn-file-content',
+                     _handle_client_updated
+                 );
+             }
+
+             function _handle_file_cancel_clicked() {
+                 client.cancel_file_edits(_handle_client_updated);
+             }
+
+             function _handle_file_save_clicked() {
+                 zyn_show_modal_loading('Saving...')
+                 client.save_file_edits((rsp) => {
+                     if (rsp.is_error()) {
+                         zyn_show_modal_error(ErrorLevel.error, `There was an error saving changes`, `Error code: ${rsp.error_code}`);
+                     } else {
+                         _handle_properties_changed();
+                         let button = document.getElementById('zyn-file-save');
+                         button.classList.add('zyn-save-indication');
+                         setTimeout(function(){ button.classList.remove('zyn-save-indication'); }, 1000);
+                     }
+                 });
+             }
+
+             function _set_file_button(name, enabled, shown, text=null) {
+                 let button = document.getElementById(name)
+                 button.disabled = !enabled;
+                 if (shown) {
+                     button.style.display = 'inline-block';
+                 } else {
+                     button.style.display = 'none';
+                 }
+                 if (text !== null) {
+                     button.innerText = text;
+                 }
+             }
+
+             function _reset_file_buttons() {
+                 _set_file_button('zyn-file-edit', false, true, 'Edit');
+                 _set_file_button('zyn-file-done', false, false, 'Done');
+                 _set_file_button('zyn-file-cancel', false, true, 'Cancel');
+                 _set_file_button('zyn-file-save', false, true, 'Save');
+             }
+
+             function _update_file_buttons() {
+                 if (!client.has_current_file()) {
+                     _reset_file_buttons();
+                     return ;
+                 }
+
+                 let handler = client.current_file_handler();
+                 if (!handler.is_editable()) {
+                     _reset_file_buttons();
+                     return ;
+                 }
+
+                 if (client.is_in_edit_mode()) {
+                     _set_file_button('zyn-file-edit', false, false);
+                     _set_file_button('zyn-file-done', true, true);
+                     _set_file_button('zyn-file-cancel', true, true);
+                     _set_file_button('zyn-file-save', true, true);
+                 } else if (client.is_in_read_mode()) {
+                     _set_file_button('zyn-file-edit', true, true);
+                     _set_file_button('zyn-file-done', false, false);
+                     _set_file_button('zyn-file-cancel', false, true);
+                     _set_file_button('zyn-file-save', false, true);
+                 }
              }
             </script>
 
+            <hr id="zyn-file-horizontal-break">
+
             <div
-                class="w3-container"
-                style="width: 100%; height: 100%; box-sizing: border-box; display: table-row;"
-            >
-                <div
-                    id="zyn-file"
-                    style="display: table; width: 100%; height: 100%;"
-                >
-                    <div
-                        id="zyn-file-header-container"
-                        class="w3-container w3-sand"
-                        style="display: table-row; width: 100%;"
-                    >
-                        <div
-                            id="zyn-file-header"
-                            style="display: block; width: 100%; height: 100%; overflow-y: scroll; min-height: 200px;"
-                        >
-                            <div
-                                id="zyn-file-header-info"
-                                style="width: 30%; display: inline-block; vertical-align: top;"
-                            >
-                                <div class="w3-margin">
-                                    File
-                                    <ul class="zyn-current-file" style="padding: 0px 0px;">
-                                        <li><span>Filename:</span><span class="w3-right" id="zyn-file-name"></span></li>
-                                        <li><span>Node Id:</span><span class="w3-right" id="zyn-file-node-id"></span></li>
-                                        <li><span>Revision:</span><span class="w3-right" id="zyn-file-revision"></span></li>
-                                        <li><span>File type:</span><span class="w3-right" id="zyn-file-type"></span></li>
-                                        <li><span>Block size:</span><span class="w3-right" id="zyn-file-block-size"></span></li>
-                                    </ul>
-                                </div>
-                                <script>
-                                 function _set_file_properties(
-                                     name,
-                                     node_id,
-                                     revision,
-                                     file_type,
-                                     block_size,
-                                 ) {
-                                     document.getElementById("zyn-file-name").innerText = name;
-                                     document.getElementById("zyn-file-node-id").innerText = node_id;
-                                     document.getElementById("zyn-file-revision").innerText = revision;
-                                     document.getElementById("zyn-file-type").innerText = file_type;
-                                     document.getElementById("zyn-file-block-size").innerText = block_size;
-                                 }
+                id="zyn-file-content"
+                style="display: block; overflow: auto;"
+            ></div>
 
-                                 function _clear_file_properties() {
-                                     _set_file_properties('-', '-', '-', '-', '-');
-                                 }
-
-                                 function _update_file_properties() {
-                                     if (client.has_current_file()) {
-                                         let handler = client.current_file_handler();
-                                         let properties = handler.properties();
-                                         _set_file_properties(
-                                             properties['name'],
-                                             properties['node-id'],
-                                             properties['revision'],
-                                             properties['file-type'],
-                                             properties['block-size'],
-                                         )
-                                     }
-                                 }
-
-                                 _clear_file_properties();
-                                </script>
-
-                            </div><!-- zyn-file-header-info --><div
-                                                                   id="zyn-file-header-notifications"
-                                                                   style="width: 70%; display: inline-block; vertical-align: top;"
-                                                               >
-                                <div class="w3-margin">
-                                    Notifications
-                                    <table
-                                        id="zyn-notifications"
-                                        style="width: 100%; height: 100%;"
-                                    >
-                                        <tr>
-                                            <th class="zyn-notification-source w3-border-bottom">Source</th>
-                                            <th class="w3-border-bottom">Description</th>
-                                        </tr>
-                                    </table>
-                                </div>
-                            </div><!-- zyn-file-header-notifications -->
-
-                            <script>
-                             let MAX_NUMBER_OF_NOTIFICATIONS = 50;
-                             let NotificationSource = Object.freeze({
-                                 'client': 'Client',
-                                 'server': 'Server',
-                             });
-                             let NotificationType = Object.freeze({
-                                 'info': 10,
-                                 'warn': 20,
-                                 'error': 30,
-                             });
-
-                             function zyn_add_notification(source, description, type=NotificationType.info)
-                             {
-                                 var notifications = document.getElementById("zyn-notifications");
-                                 var size = notifications.rows.length;
-                                 if (size > MAX_NUMBER_OF_NOTIFICATIONS) {
-                                     notifications.deleteRow(size - 1);
-                                 }
-                                 var row = notifications.insertRow(1);
-
-                                 field_source = row.insertCell();
-                                 field_source.innerText = source;
-                                 field_source.classList.add('zyn-notification-source');
-                                 field_source.classList.add('w3-border-right');
-                                 field_source.classList.add('w3-border-bottom');
-
-                                 field_desc = row.insertCell();
-                                 field_desc.innerText = description;
-                                 field_desc.classList.add('w3-border-bottom');
-                             }
-
-                            </script>
-                        </div>
-                    </div><!-- zyn-file-header-container -->
-
-                    <script>
-                     function _handle_toggle_file_header() {
-                         let file = document.getElementById("zyn-file");
-                         let header = document.getElementById("zyn-file-header");
-                         let button = document.getElementById("zyn-toogle-file-header");
-                         let is_minimized = button.dataset.isMinimized == 'true';
-
-                         if (is_minimized) {
-                             header.style.minHeight = file.offsetHeight * 0.25 + 'px'
-                             button.innerText = 'Hide Properties'
-                         } else {
-                             header.style.minHeight = file.offsetHeight * 0.05 + 'px'
-                             button.innerText = 'Show Properties'
-                         }
-                         button.dataset.isMinimized = (!is_minimized).toString();
-                         _handle_window_resize();
-                     }
-                    </script>
-                    <div
-                        id="zyn-file-buttons"
-                        class="w3-container"
-                        style="display: table-row; width: 100%;"
-                    >
-                        <button
-                            id="zyn-file-edit"
-                            class="w3-button"
-                            onclick="_handle_file_edit_clicked()"
-                        ></button>
-
-                        <button
-                            id="zyn-file-done"
-                            class="w3-button"
-                            onclick="_handle_file_done_clicked()"
-                        ></button>
-
-                        <button
-                            id="zyn-file-cancel"
-                            class="w3-button"
-                            onclick="_handle_file_cancel_clicked()"
-                        ></button>
-
-                        <button
-                            id="zyn-file-save"
-                            class="w3-button"
-                            onclick="_handle_file_save_clicked()"
-                        ></button>
-                    </div><!-- zyn-file-buttons -->
-
-                    <script>
-                     function _handle_client_updated() {
-                         _update_file_buttons();
-                     }
-
-                     function _handle_properties_changed(rsp) {
-                         zyn_hide_modals();
-                         _update_file_properties();
-                     }
-
-                     function _handle_file_edit_clicked() {
-                         client.change_file_to_mode(
-                             OpenMode.edit,
-                             'zyn-file-content',
-                             _handle_client_updated
-                         );
-                     }
-
-                     function _handle_file_done_clicked() {
-                         client.change_file_to_mode(
-                             OpenMode.read,
-                             'zyn-file-content',
-                             _handle_client_updated
-                         );
-                     }
-
-                     function _handle_file_cancel_clicked() {
-                         client.cancel_file_edits(_handle_client_updated);
-                     }
-
-                     function _handle_file_save_clicked() {
-                         zyn_show_modal_loading('Saving...')
-                         client.save_file_edits((rsp) => {
-                             if (rsp.is_error()) {
-                                 zyn_show_modal_error(ErrorLevel.error, `There was an error saving changes`, `Error code: ${rsp.error_code}`);
-                             } else {
-                                 _handle_properties_changed();
-                                 let button = document.getElementById('zyn-file-save');
-                                 button.classList.add('zyn-save-indication');
-                                 setTimeout(function(){ button.classList.remove('zyn-save-indication'); }, 1000);
-                             }
-                         });
-                     }
-
-                     function _set_file_button(name, enabled, shown, text=null) {
-                         let button = document.getElementById(name)
-                         button.disabled = !enabled;
-                         if (shown) {
-                             button.style.display = 'inline-block';
-                         } else {
-                             button.style.display = 'none';
-                         }
-                         if (text !== null) {
-                             button.innerText = text;
-                         }
-                     }
-
-                     function _reset_file_buttons() {
-                         _set_file_button('zyn-file-edit', false, true, 'Edit');
-                         _set_file_button('zyn-file-done', false, false, 'Done');
-                         _set_file_button('zyn-file-cancel', false, true, 'Cancel');
-                         _set_file_button('zyn-file-save', false, true, 'Save');
-                     }
-
-                     function _update_file_buttons() {
-                         if (!client.has_current_file()) {
-                             _reset_file_buttons();
-                             return ;
-                         }
-
-                         let handler = client.current_file_handler();
-                         if (!handler.is_editable()) {
-                             _reset_file_buttons();
-                             return ;
-                         }
-
-                         if (client.is_in_edit_mode()) {
-                             _set_file_button('zyn-file-edit', false, false);
-                             _set_file_button('zyn-file-done', true, true);
-                             _set_file_button('zyn-file-cancel', true, true);
-                             _set_file_button('zyn-file-save', true, true);
-                         } else if (client.is_in_read_mode()) {
-                             _set_file_button('zyn-file-edit', true, true);
-                             _set_file_button('zyn-file-done', false, false);
-                             _set_file_button('zyn-file-cancel', false, true);
-                             _set_file_button('zyn-file-save', false, true);
-                         }
-                     }
-                    </script>
-
-                    <hr>
-
-                    <div
-                        id="zyn-file-content"
-                        style="height: 100%; width: 100%; display: table-row;"
-                    ></div>
-
-                    <div id="zyn-file-footer">
-                        <hr>
-                    </div>
-                </div>
+            <div id="zyn-file-footer" style="display: block;">
+                <hr>
             </div>
         </div>
     </div>
+
     <script type="text/javascript">
 
      function _handle_notitification() {
@@ -988,7 +990,6 @@
                  _render_directory_children();
                  _update_file_buttons();
                  client.set_content_area_text('Content', 'zyn-file-content');
-                 _handle_window_resize();
                  _handle_toggle_file_header();
 
                  if (name.length != 0) {
@@ -1008,7 +1009,7 @@
              });
          });
      });
-
     </script>
+
 </body>
 </html>
