@@ -10,7 +10,7 @@ setup(
     install_requires=[
         'nose==1.3.7',
         'flake8==3.8.4',
-        'tornado==4.5.2',
+        'tornado==6.3.3',
         'certifi',
         'websocket-client==0.57.0',
     ],
