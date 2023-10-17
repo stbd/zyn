@@ -5,9 +5,9 @@ use std::time::{ Duration };
 
 use embedded_websocket::{ WebSocketServer, WebSocketState };
 
-use crate::node::tls_connection::{ TlsConnection };
+use crate::node::socket::{ Socket };
 use crate::node::common::{ Buffer };
-use crate::node::client_protocol_buffer::{ ReceiveBuffer, SendBuffer };
+use crate::node::protocol_buffer::{ ReceiveBuffer, SendBuffer };
 
 static HTTP_HEADER_END_MARKER: & [u8] = "\r\n\r\n".as_bytes();
 static PROTOCOL_FIRST_BYTES_ZYN: & [u8] = "V:".as_bytes();
@@ -15,7 +15,7 @@ static PROTOCOL_FIRST_BYTES_HTTP_GET: & [u8] = "GET".as_bytes();
 const HTTP_HEADER_MAX_SIZE_BYTES: usize = 14; // According to https://github.com/ninjasource/embedded-websocket/blob/master/src/lib.rs
 
 pub struct Connection {
-    connection: TlsConnection,
+    socket: Socket,
     receive_buffer: ReceiveBuffer,
     websocket: Option<ZynWebsocket>,
     buffer_size: usize,
@@ -23,7 +23,7 @@ pub struct Connection {
 
 impl Connection {
 
-    pub fn new(tls_connection: TlsConnection, socket_buffer_size: usize) -> Result<Connection, ()> {
+    pub fn new(mut socket: Socket, socket_buffer_size: usize) -> Result<Connection, ()> {
 
         let min_bytes_to_read = 4;
 
@@ -31,7 +31,7 @@ impl Connection {
         let mut websocket: Option<ZynWebsocket> = Option::None;
 
         for _ in 0..5 {
-            match tls_connection.read(& mut receive_buffer.get_mut_buffer()) {
+            match socket.read(& mut receive_buffer.get_mut_buffer()) {
                 Err(()) => return Err(()),
                 Ok(false) => (),
                 Ok(true) => {
@@ -55,7 +55,7 @@ impl Connection {
 
         Ok(Connection {
             receive_buffer: receive_buffer,
-            connection: tls_connection,
+            socket: socket,
             websocket: websocket,
             buffer_size: socket_buffer_size,
         })
@@ -110,7 +110,7 @@ impl Connection {
 
     fn read_from_client(
         websocket: & mut Option<ZynWebsocket>,
-        connection: & mut TlsConnection,
+        socket: & mut Socket,
         buffer: & mut Buffer,
     ) -> Result<bool, () > {
 
@@ -118,21 +118,21 @@ impl Connection {
 
         match websocket {
             Some(ref mut websocket) => {
-                match connection.read(& mut websocket.buffer) {
+                match socket.read(& mut websocket.buffer) {
                     Ok(true) => {
                         is_processing = true
                     },
                     Ok(false) => (),
                     Err(()) => return Err(()),
                 };
-                match websocket.process(connection, buffer) {
+                match websocket.process(socket, buffer) {
                     Ok(true) => is_processing = true,
                     Ok(false) => (),
                     Err(()) => (),
                 };
             },
             None => {
-                match connection.read(buffer) {
+                match socket.read(buffer) {
                     Ok(true) => {
                         is_processing = true
                     },
@@ -147,7 +147,7 @@ impl Connection {
     pub fn process(& mut self) -> Result<bool, () > {
         Connection::read_from_client(
             & mut self.websocket,
-            & mut self.connection,
+            & mut self.socket,
             self.receive_buffer.get_mut_buffer(),
         )
     }
@@ -166,11 +166,11 @@ impl Connection {
 
         while buffer.len() != buffer.capacity() && trial < MAX_NUMBER_OF_TRIALS {
 
-            // info!("fill_buffer_from_client: {} {}", buffer.len(), buffer.capacity());
+            info!("fill_buffer_from_client: {} {}", buffer.len(), buffer.capacity());
 
             let result = Connection::read_from_client(
                 & mut self.websocket,
-                & mut self.connection,
+                & mut self.socket,
                 buffer,
             );
 
@@ -200,11 +200,11 @@ impl Connection {
         let mut websocket = self.websocket.take();
         let result = match websocket {
             Some(ref mut s) => {
-                s.write_to_client(buffer, & mut self.connection, None)
+                s.write_to_client(buffer, & mut self.socket, None)
             },
             None => {
                 let size = buffer.len();
-                if self.connection.write_with_sleep(buffer) ? == size {
+                if self.socket.write_with_sleep(buffer) ? == size {
                     Ok(())
                 } else {
                     Err(())
@@ -248,7 +248,7 @@ impl ZynWebsocket {
     fn write_to_client(
         & mut self,
         buffer: & Buffer,
-        connection: & mut TlsConnection,
+        socket: & mut Socket,
         message_type: Option<embedded_websocket::WebSocketSendMessageType>,
     ) -> Result<(), ()> {
 
@@ -282,7 +282,7 @@ impl ZynWebsocket {
                 ? ;
 
             output_buffer.resize(message_size, 0);
-            if connection.write_with_sleep(& output_buffer) ? != message_size {
+            if socket.write_with_sleep(& output_buffer) ? != message_size {
                 error!("Failed to write websocket message to socket");
                 self.state = ZynWebsocketState::Error;
                 return Err(());
@@ -293,7 +293,7 @@ impl ZynWebsocket {
 
     fn write_close_message_to_client(
         & mut self,
-        connection: & mut TlsConnection,
+        socket: & mut Socket,
         status: embedded_websocket::WebSocketCloseStatusCode,
         description: Option<&str>,
     ) -> Result<(), ()> {
@@ -310,7 +310,7 @@ impl ZynWebsocket {
             ? ;
 
         output_buffer.resize(message_size, 0);
-        if connection.write_with_sleep(& output_buffer) ? != message_size {
+        if socket.write_with_sleep(& output_buffer) ? != message_size {
             error!("Failed to write websocket close emssage to socket");
             self.state = ZynWebsocketState::Error;
             return Err(());
@@ -318,7 +318,7 @@ impl ZynWebsocket {
         Ok(())
     }
 
-    fn process(& mut self, connection: & mut TlsConnection, data_buffer: & mut Buffer) -> Result<bool, ()> {
+    fn process(& mut self, socket: & mut Socket, data_buffer: & mut Buffer) -> Result<bool, ()> {
         if self.buffer.is_empty() {
             return Ok(false);
         }
@@ -358,7 +358,7 @@ impl ZynWebsocket {
                 ? ;
 
             buffer.resize(rsp_size, 0);
-            if connection.write_with_sleep(& buffer) ? != rsp_size {
+            if socket.write_with_sleep(& buffer) ? != rsp_size {
                 error!("Failed to write websocket message to socket");
                 self.state = ZynWebsocketState::Error;
                 return Err(());
@@ -369,7 +369,7 @@ impl ZynWebsocket {
                 .position(| window | window == HTTP_HEADER_END_MARKER).unwrap();
             self.buffer.drain( .. index + HTTP_HEADER_END_MARKER.len());
 
-            info!("Websocket connection to client established");
+            info!("Websocket to client established");
 
         } else if self.server.state == WebSocketState::Open {
 
@@ -396,7 +396,7 @@ impl ZynWebsocket {
                     error!("Received text websocket message, discarding");
 
                     self.write_close_message_to_client(
-                        connection,
+                        socket,
                         embedded_websocket::WebSocketCloseStatusCode::InvalidMessageType,
                         None,
                         //Some("Only binary message are supported"),
@@ -417,7 +417,7 @@ impl ZynWebsocket {
                     // If message did not fit into buffer, let's just reject it
                     if ! result.end_of_message {
                         self.write_close_message_to_client(
-                            connection,
+                            socket,
                             embedded_websocket::WebSocketCloseStatusCode::MessageTooBig,
                             None,
                         )
@@ -426,7 +426,7 @@ impl ZynWebsocket {
                     } else {
                         self.write_to_client(
                             data_buffer,
-                            connection,
+                            socket,
                             Some(embedded_websocket::WebSocketSendMessageType::CloseReply ),
                         )
                             .map_err(|()| self.state = ZynWebsocketState::Error)
@@ -442,7 +442,7 @@ impl ZynWebsocket {
                     // If message did not fit into buffer, let's just reject it
                     if ! result.end_of_message {
                         self.write_close_message_to_client(
-                            connection,
+                            socket,
                             embedded_websocket::WebSocketCloseStatusCode::MessageTooBig,
                             None,
                         )
@@ -452,7 +452,7 @@ impl ZynWebsocket {
 
                         self.write_to_client(
                             data_buffer,
-                            connection,
+                            socket,
                             Some(embedded_websocket::WebSocketSendMessageType::Pong),
                         )
                             .map_err(|()| self.state = ZynWebsocketState::Error)
@@ -463,7 +463,7 @@ impl ZynWebsocket {
 
                     // Zyn server should never send ping and thus never receive pong
                     self.write_close_message_to_client(
-                        connection,
+                        socket,
                         embedded_websocket::WebSocketCloseStatusCode::InvalidMessageType,
                         None,
                     )

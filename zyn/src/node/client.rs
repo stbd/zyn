@@ -7,14 +7,14 @@ use std::vec::{ Vec };
 use std::{ str };
 
 use crate::node::common::{ NodeId, Buffer, OpenMode, FileType, Timestamp, utc_timestamp };
-use crate::node::tls_connection::{ TlsConnection };
+use crate::node::socket::{ Socket };
 use crate::node::file_handle::{ FileAccess, FileError, Notification, FileLock, FileProperties };
 use crate::node::filesystem::{ FilesystemError };
 use crate::node::node::{ ClientProtocol, NodeProtocol, FilesystemElement, ErrorResponse, NodeError, ShutdownReason, FileSystemListElement, Authority,
                   FilesystemElementProperties, };
 use crate::node::user_authority::{ Id };
 use crate::node::connection::{ Connection };
-use crate::node::client_protocol_buffer::{ SendBuffer, ZYN_FIELD_END };
+use crate::node::protocol_buffer::{ SendBuffer, ZYN_FIELD_END };
 
 /*
 # Protocol definition
@@ -414,7 +414,7 @@ impl Display for Client {
 
 impl Client {
     pub fn new(
-        connection: TlsConnection,
+        socket: Socket,
         node_receive: Receiver<ClientProtocol>,
         node_send: Sender<NodeProtocol>,
         socket_buffer_size: usize,
@@ -427,7 +427,7 @@ impl Client {
             max_incativity_duration_secs,
         );
 
-        let connection = Connection::new(connection, socket_buffer_size) ? ;
+        let connection = Connection::new(socket, socket_buffer_size) ? ;
 
         Ok(Client {
             connection: connection,
@@ -1748,6 +1748,7 @@ fn handle_read_req(client: & mut Client) -> Result<(), ()>
 
             if data.len() > 0 {
                 try_and_set_error_state_on_fail!(client, client.connection.write_data_to_client(& data), Status::FailedToSendToClient);
+                info!("Send completed");
             } else {
                 warn!("Read: No data to send");
             }

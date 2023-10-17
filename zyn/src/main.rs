@@ -16,7 +16,6 @@ extern crate serde_json;
 #[macro_use]
 pub mod tests;
 pub mod node;
-pub mod libressl;
 
 use std::env::{ args };
 use std::path::{ PathBuf };
@@ -27,7 +26,7 @@ use std::vec::{ Vec };
 
 use crate::node::node::{ Node, NodeSettings };
 use crate::node::common::{ ADMIN_GROUP, ADMIN_GROUP_NAME, utc_timestamp };
-use crate::node::tls_connection::{ TlsServer };
+use crate::node::socket::{ SocketServer };
 use crate::node::crypto::{ Crypto };
 use crate::node::user_authority::{ UserAuthority };
 
@@ -88,14 +87,6 @@ impl Arguments {
         "--gpg-fingerprint"
     }
 
-    fn name_path_cert() -> & 'static str {
-        "--path-cert"
-    }
-
-    fn name_path_key() -> & 'static str {
-        "--path-key"
-    }
-
     fn name_local_address() -> & 'static str {
         "--local-address"
     }
@@ -150,14 +141,6 @@ impl Arguments {
                 (Arguments::name_gpg_fingerprint(),
                  "Fingerprint of a GPG key used to encrypt/decrypt data on disk",
                  Argument::String { value: None }),
-
-                (Arguments::name_path_cert(),
-                 "Path to certicate used TLS communication",
-                 Argument::Path { value: None }),
-
-                (Arguments::name_path_key(),
-                 "Path to key used in TLS communicaiton",
-                 Argument::Path { value: None }),
 
                 (Arguments::name_local_address(),
                  "Local IP to which server socket is bind",
@@ -226,7 +209,7 @@ impl Arguments {
         if let Some(i) = index {
             return self.values.swap_remove(i).2;
         }
-        panic!(format!("{} not found", name));
+        panic!("{} not found", name);
     }
 
     fn validate(& self) {
@@ -370,12 +353,10 @@ fn run() -> Result<(), ()> {
 
     let data_dir = args.take(Arguments::name_data_dir()).take_path();
 
-    let server = TlsServer::new(
+    let server = SocketServer::new(
         & args.take(Arguments::name_local_address()).take_string(),
         args.take(Arguments::name_local_port()).take_uint() as u16,
-        & args.take(Arguments::name_path_key()).take_path(),
-        & args.take(Arguments::name_path_cert()).take_path())
-        .map_err(| () | error!("Failed to init TCP server"))
+    ).map_err(| () | error!("Failed to init TCP server"))
         ? ;
 
 

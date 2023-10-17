@@ -54,10 +54,6 @@ pub fn create_crypto_context() -> Context {
     c.create_context().unwrap()
 }
 
-pub fn certificate_paths() -> (PathBuf, PathBuf) {
-    (PathBuf::from("/etc/ssl/certs/zyn-test.pem"), PathBuf::from("/etc/ssl/private/zyn-test.key"))
-}
-
 pub fn create_file_of_random_1024_blocks(number_of_blocks: usize) -> PathBuf{
 
     let size = 1024 * number_of_blocks;

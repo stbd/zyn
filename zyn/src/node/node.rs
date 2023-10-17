@@ -12,7 +12,7 @@ use rand::{ random };
 
 use crate::node::client::{ Client };
 use crate::node::common::{ NodeId, FileDescriptor, OpenMode, ADMIN_GROUP, Timestamp, FileType, FileRevision, log_crypto_context_error, utc_timestamp };
-use crate::node::tls_connection::{ TlsServer };
+use crate::node::socket::{ SocketServer };
 use crate::node::crypto::{ Crypto };
 use crate::node::file_handle::{ FileAccess, FileProperties };
 use crate::node::filesystem::{ Filesystem, FilesystemError, Node as FsNode };
@@ -172,7 +172,8 @@ pub enum NodeProtocol {
 fn start_signal_listener() -> Result<Receiver<()>, ()> {
 
     let (sender, receiver) = channel::<()>();
-    let mut signal_set: [size_t; 32] = unsafe { MaybeUninit::uninit().assume_init() };
+    let mut signal_set = MaybeUninit::<[size_t; 32]>::uninit();
+
     if unsafe { sigemptyset(signal_set.as_mut_ptr() as _) } != 0 {
         return Err(())
     }
@@ -186,6 +187,7 @@ fn start_signal_listener() -> Result<Receiver<()>, ()> {
         return Err(());
     }
 
+    let signal_set = unsafe { signal_set.assume_init() };
     spawn(move || {
         let mut sig: c_int = 0;
         unsafe { sigwait(signal_set.as_ptr() as _, & mut sig) };
@@ -215,7 +217,7 @@ pub struct NodeSettings {
 }
 
 pub struct Node {
-    server: TlsServer,
+    server: SocketServer,
     clients: Vec<ClientInfo>,
     filesystem: Filesystem,
     auth: UserAuthority,
@@ -341,7 +343,7 @@ impl Node {
 
     pub fn load(
         crypto: Crypto,
-        server: TlsServer,
+        server: SocketServer,
         path_workdir: & Path,
         max_inactivity_duration_secs: i64,
         authentication_token_duration_secs: i64,
@@ -783,7 +785,7 @@ impl Node {
 
             match self.server.accept() {
                 Ok(None) => (),
-                Ok(Some(connection)) => {
+                Ok(Some(socket)) => {
                     is_processing = true;
 
                     let (tx_node, rx_node) = channel::<ClientProtocol>();
@@ -793,7 +795,7 @@ impl Node {
 
                     let handle = spawn( move || {
                         match Client::new(
-                            connection,
+                            socket,
                             rx_node,
                             tx_client,
                             buffer_size,
@@ -815,7 +817,7 @@ impl Node {
                     });
                 },
                 Err(()) => {
-                    error!("Failed to accept new connection, closing");
+                    error!("Failed to accept new socket, closing");
                     break
                 },
             };
@@ -995,7 +997,7 @@ impl Node {
 
     fn handle_query_system_request(
         auth: & mut UserAuthority,
-        server: & TlsServer,
+        server: & SocketServer,
         started_at: Timestamp,
         server_id: u64,
         user: Id,
