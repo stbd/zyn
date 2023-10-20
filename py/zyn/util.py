@@ -3,16 +3,19 @@ import difflib
 import logging
 import posixpath
 
-import zyn_util.errors
-import zyn_util.exception
+import zyn.errors
+import zyn.exception
 
 
 def timestamp_to_datetime(timestamp):
     return datetime.datetime.utcfromtimestamp(timestamp)
 
 
-def verbose_count_to_log_level(verbose_count):
-    logger = logging.getLogger()
+def get_logger(name, verbose_count):
+    logger = logging.getLogger(name)
+    logging.basicConfig(
+        format='ZynClient %(asctime)-15s %(filename)s:%(lineno)s %(levelname)s: %(message)s',
+    )
     level = logging.WARNING
     if verbose_count == 1:
         level = logging.INFO
@@ -21,12 +24,13 @@ def verbose_count_to_log_level(verbose_count):
     elif verbose_count > 2:
         logger.warn('Maximum number of verbose flags is 2, greater value is ignored')
     logger.setLevel(level)
+    return logger
 
 
 def check_server_response(rsp):
     if rsp.is_error():
-        desc = zyn_util.errors.error_to_string(rsp.error_code())
-        raise zyn_util.exception.ZynServerException(rsp.error_code(), desc)
+        desc = zyn.errors.error_to_string(rsp.error_code())
+        raise zyn.exception.ZynServerException(rsp.error_code(), desc)
 
 
 def normalized_remote_path(path):

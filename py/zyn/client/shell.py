@@ -7,10 +7,11 @@ import os.path
 import sys
 import traceback
 
-import zyn_util.client
-import zyn_util.connection
-import zyn_util.exception
-import zyn_util.util
+import zyn.client.client
+import zyn.client.data
+import zyn.connection
+import zyn.exception
+import zyn.util
 
 
 PATH_TO_DEFAULT_STATE_FILE = os.path.expanduser("~/.zyn-cli-client")
@@ -20,15 +21,15 @@ def _command_completed():
     print('Command completed successfully')
 
 
-class ZynCliClient(cmd.Cmd):
+class ZynShell(cmd.Cmd):
     intro = 'Zyn CLI client, type "help" for help'
     prompt = ' '
 
-    def __init__(self, client, pwd='/', remote_description=None):
-        super(ZynCliClient, self).__init__()
+    def __init__(self, client, log, pwd='/', remote_description=None):
+        super(ZynShell, self).__init__()
         self._pwd = pwd
         self._client = client
-        self._log = logging.getLogger(__name__)
+        self._log = log
         self._remote_description = remote_description
         self._set_prompt(self._pwd)
 
@@ -48,10 +49,10 @@ class ZynCliClient(cmd.Cmd):
         self.prompt = '{} {}$ '.format(self._remote_description, current_folder)
 
     def _to_absolute_remote_path(self, path):
-        path = zyn_util.util.normalized_remote_path(path)
+        path = zyn.util.normalized_remote_path(path)
         if os.path.isabs(path):
             return path
-        return zyn_util.util.join_remote_paths([self._pwd, path])
+        return zyn.util.join_remote_paths([self._pwd, path])
 
     def emptyline(self):
         # Do nothing
@@ -81,7 +82,7 @@ class ZynCliClient(cmd.Cmd):
         else:
             element = self._client.query_element(path_remote)
             if not element.is_directory():
-                raise zyn_util.client.ZynClientException(
+                raise zyn.client.data.ZynClientException(
                     'Target is not a folder, path="{}"'.format(path_remote)
                 )
 
@@ -103,7 +104,7 @@ class ZynCliClient(cmd.Cmd):
         if self._client.connection().check_for_notifications():
             notification = self._client.connection().pop_notification()
             if notification.notification_type() == \
-               zyn_util.connection.Notification.TYPE_DISCONNECTED:
+               zyn.connection.Notification.TYPE_DISCONNECTED:
                 print('Connection to Zyn server lost, reason: "{}"'.format(notification.reason))
             else:
                 raise NotImplementedError()
@@ -128,11 +129,11 @@ class ZynCliClient(cmd.Cmd):
 
         path = self._to_absolute_remote_path(args['path'])
         if args['random_access']:
-            file_type = zyn_util.connection.FILE_TYPE_RANDOM_ACCESS
+            file_type = zyn.connection.FILE_TYPE_RANDOM_ACCESS
         elif args['blob']:
-            file_type = zyn_util.connection.FILE_TYPE_BLOB
+            file_type = zyn.connection.FILE_TYPE_BLOB
         else:
-            zyn_util.util.unhandled()
+            zyn.util.unhandled()
 
         print('Creating file, path="{}", file_type={}'.format(path, file_type))
         rsp = self._client.create_file(path, file_type)
@@ -155,9 +156,9 @@ class ZynCliClient(cmd.Cmd):
 
         file_type = None
         if args['random_access']:
-            file_type = zyn_util.connection.FILE_TYPE_RANDOM_ACCESS
+            file_type = zyn.connection.FILE_TYPE_RANDOM_ACCESS
         elif args['blob']:
-            file_type = zyn_util.connection.FILE_TYPE_BLOB
+            file_type = zyn.connection.FILE_TYPE_BLOB
 
         paths = args['paths']
         elements = []
@@ -289,11 +290,11 @@ class ZynCliClient(cmd.Cmd):
             elif element.is_blob():
                 type_of_file = 'Blob'
             else:
-                zyn_util.util.unhandled()
+                zyn.util.unhandled()
         elif element.is_directory():
             name += '/'
         else:
-            zyn_util.util.unhandled()
+            zyn.util.unhandled()
 
         print('{:<6} {:<10} {:<8} {:<9} {}'.format(
             type_of,
@@ -328,11 +329,11 @@ class ZynCliClient(cmd.Cmd):
             elif element.is_blob():
                 type_of_file = 'Blob'
             else:
-                zyn_util.util.unhandled()
+                zyn.util.unhandled()
         elif element.is_directory():
             name += '/'
         else:
-            zyn_util.util.unhandled()
+            zyn.util.unhandled()
 
         print('{:<6} {:<10} {:<8} {:<14} {:<9} {}'.format(
             type_of,
@@ -411,7 +412,7 @@ class ZynCliClient(cmd.Cmd):
             ).timestamp())
 
         if disable_expiration:
-            expiration = zyn_util.connection.EXPIRATION_NEVER_EXPIRE
+            expiration = zyn.connection.EXPIRATION_NEVER_EXPIRE
 
         if args['password']:
             password = getpass.getpass('Password: ')
@@ -421,7 +422,7 @@ class ZynCliClient(cmd.Cmd):
             expiration=expiration,
             password=password
         )
-        zyn_util.util.check_server_response(rsp)
+        zyn.util.check_server_response(rsp)
         _command_completed()
 
     def _parser_open(self):
@@ -476,12 +477,13 @@ def main():
     parser.add_argument('--debug-protocol', help='', action='store_true')
     parser.add_argument('--verbose', '-v', action='count', default=0)
     parser.add_argument('--remote-hostname', default=None)
+    parser.add_argument('--no-tls', action='store_true')
 
     args = vars(parser.parse_args())
     logging.basicConfig(
         format='ZynClient %(asctime)-15s %(filename)s:%(lineno)s %(levelname)s: %(message)s',
     )
-    zyn_util.util.verbose_count_to_log_level(args['verbose'])
+    zyn.util.util.verbose_count_to_log_level(args['verbose'])
 
     path_state_file = args['path_to_client_file']
     init = args['init']
@@ -506,7 +508,7 @@ def main():
             print('Data location "{}" does not exist, aborting'.format(path_local_data))
             return
 
-        zyn_util.client.ZynFilesystemClient.init(
+        zyn.util.client.ZynFilesystemClient.init(
             path_state_file,
             path_local_data,
             username,
@@ -520,7 +522,7 @@ def main():
         ))
         return
 
-    client = zyn_util.client.ZynFilesystemClient.init_from_saved_state(path_state_file)
+    client = zyn.util.client.ZynFilesystemClient.init_from_saved_state(path_state_file)
     password = args['password']
     if password is None:
         password = getpass.getpass('Password: ')
@@ -530,9 +532,10 @@ def main():
             password,
             args['remote_hostname'],
             args['path_to_cert'],
+            not args['no_tls'],
             args['debug_protocol'],
         )
-    except zyn_util.client.ZynClientException as e:
+    except zyn.util.client.ZynClientException as e:
         print(e)
         sys.exit(1)
 
@@ -546,7 +549,7 @@ def main():
             print('It looks like the server you are connected is not the same server as before')
             print('Server has Id of {} and was started at {}'.format(
                 server_info.server_id,
-                zyn_util.util.timestamp_to_datetime(server_info.server_started_at),
+                zyn.util.util.timestamp_to_datetime(server_info.server_started_at),
             ))
             print('Are you sure this is safe')
             answer = input('yes/no? ')
@@ -581,11 +584,11 @@ def main():
                     print('Local filesystem cleared')
 
     remote_description = '{}:{}'.format(server_info.address, server_info.port)
-    cli = ZynCliClient(client, remote_description=remote_description)
+    cli = ZynShell(client, remote_description=remote_description)
     while True:
         try:
             cli.cmdloop()
-        except zyn_util.exception.ZynException:
+        except zyn.util.exception.ZynException:
             print('Exception while processing command')
             traceback.print_exc()
         except KeyboardInterrupt:

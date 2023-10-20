@@ -3,22 +3,22 @@ import os.path
 import traceback
 import logging
 
-import zyn_util.exception
-import zyn_util.util
-import zyn_util.connection
+import zyn.exception
+import zyn.util
+import zyn.connection
 
 
 _REMOTE_PATH_ROOT = '/'
 
 
-class ZynClientException(zyn_util.exception.ZynException):
+class ZynClientException(zyn.exception.ZynException):
     def __init__(self, description):
         super(ZynClientException, self).__init__(description)
 
 
 class LocalFileSystemElement:
     def __init__(self, path_remote, fs, node_id=None, node_id_parent=None):
-        self._path_remote = zyn_util.util.normalized_remote_path(path_remote)
+        self._path_remote = zyn.util.normalized_remote_path(path_remote)
         self._fs = fs
         self._node_id = node_id
         self._node_id_parent = node_id_parent
@@ -62,10 +62,10 @@ class LocalFileSystemElement:
             return os.path.isdir(path)
         elif self.is_file():
             return os.path.isfile(path)
-        zyn_util.util.unhandled()
+        zyn.util.unhandled()
 
     def split_to_parent_filename(self):
-        return zyn_util.util.split_remote_path(self._path_remote)
+        return zyn.util.split_remote_path(self._path_remote)
 
     def path_parent(self):
         return self.split_to_parent_filename()[0]
@@ -80,7 +80,7 @@ class LocalFileSystemElement:
 
     def remove_remote(self, connection):
         rsp = connection.delete(self._node_id)
-        zyn_util.util.check_server_response(rsp)
+        zyn.util.check_server_response(rsp)
 
     def is_attached_to_local_filesystem(self):
         return self._fs.is_tracked(path_remote=self._path_remote)
@@ -152,17 +152,17 @@ class LocalDirectory(LocalFileSystemElement):
     def children_local_untracked(self):
         elements = []
         for c in os.listdir(self.path_local()):
-            path_remote = zyn_util.util.join_remote_paths([self._path_remote, c])
+            path_remote = zyn.util.join_remote_paths([self._path_remote, c])
             if self._fs.is_tracked(path_remote=path_remote):
                 continue
 
-            path_local = zyn_util.util.join_remote_paths([self.path_local(), c])
+            path_local = zyn.util.join_remote_paths([self.path_local(), c])
             if os.path.isfile(path_local):
                 elements.append(LocalFile(path_remote, None, self._fs))
             elif os.path.isdir(path_local):
                 elements.append(LocalDirectory(path_remote, self._fs))
             else:
-                zyn_util.util.unhandled()
+                zyn.util.unhandled()
         return elements
 
     def local_children(self):
@@ -176,7 +176,7 @@ class LocalDirectory(LocalFileSystemElement):
             self.name(),
             parent_node_id=parent.node_id(),
         )
-        zyn_util.util.check_server_response(rsp)
+        zyn.util.check_server_response(rsp)
         rsp = rsp.as_create_rsp()
         self._node_id = rsp.node_id
         self._fs._log.debug('Directory "{}" created to remote with node id: {}'.format(
@@ -247,7 +247,7 @@ class LocalDirectory(LocalFileSystemElement):
             elif c.is_directory():
                 synchronized_elements += element.sync(connection, child_filter)
             else:
-                zyn_util.util.unhandled()
+                zyn.util.unhandled()
 
         for c in self._node_id_children:
             # todo: this needs more implementation when move is added to server
@@ -323,10 +323,10 @@ class LocalFile(LocalFileSystemElement):
         return self._file_type
 
     def is_random_access(self):
-        return self._file_type == zyn_util.connection.FILE_TYPE_RANDOM_ACCESS
+        return self._file_type == zyn.connection.FILE_TYPE_RANDOM_ACCESS
 
     def is_blob(self):
-        return self._file_type == zyn_util.connection.FILE_TYPE_BLOB
+        return self._file_type == zyn.connection.FILE_TYPE_BLOB
 
     def revision(self):
         return self._revision
@@ -380,7 +380,7 @@ class LocalFile(LocalFileSystemElement):
             self._file_type,
             parent_node_id=parent.node_id(),
         )
-        zyn_util.util.check_server_response(rsp)
+        zyn.util.check_server_response(rsp)
         rsp = rsp.as_create_rsp()
         self._node_id = rsp.node_id
         self._revision = 0  # todo: create rsp should contain this
@@ -403,7 +403,7 @@ class LocalFile(LocalFileSystemElement):
                 pass
             else:
                 if self.is_blob():
-                    stream = zyn_util.connection.FileStream(self.path_local())
+                    stream = zyn.connection.FileStream(self.path_local())
                     rsp = connection.blob_write_stream(
                         self.node_id(),
                         self._revision,
@@ -419,7 +419,7 @@ class LocalFile(LocalFileSystemElement):
                             len(data),
                             rsp_open.size - len(data),
                         )
-                        zyn_util.util.check_server_response(rsp)
+                        zyn.util.check_server_response(rsp)
                         self._revision = rsp.as_delete_rsp().revision
 
                     rsp = connection.ra_write(
@@ -429,9 +429,9 @@ class LocalFile(LocalFileSystemElement):
                         data,
                     )
                 else:
-                    zyn_util.util.unhandled()
+                    zyn.util.unhandled()
 
-                zyn_util.util.check_server_response(rsp)
+                zyn.util.check_server_response(rsp)
                 rsp = rsp.as_write_rsp()
                 self._revision = rsp.revision
 
@@ -450,7 +450,7 @@ class LocalFile(LocalFileSystemElement):
         open_rsp = self._fs.open_read(self._path_remote, connection)
         try:
             with open(self.path_local(), 'wb') as fp:
-                stream = zyn_util.connection.InputFileStream(fp)
+                stream = zyn.connection.InputFileStream(fp)
                 connection.read_file_stream(
                     open_rsp.node_id,
                     0,
@@ -459,7 +459,7 @@ class LocalFile(LocalFileSystemElement):
                     stream,
                 )
                 if stream.is_error():
-                    zyn_util.util.check_server_response(stream.error_rsp())
+                    zyn.util.check_server_response(stream.error_rsp())
 
             self._node_id = open_rsp.node_id
             self._revision = open_rsp.revision
@@ -476,7 +476,7 @@ class LocalFile(LocalFileSystemElement):
             n.notification_type(), self.node_id()
         ))
 
-        if n.notification_type() == zyn_util.connection.Notification.TYPE_MODIFIED:
+        if n.notification_type() == zyn.connection.Notification.TYPE_MODIFIED:
             rsp, new_bytes = connection.read_file(
                 self.node_id(),
                 n.block_offset,
@@ -487,7 +487,7 @@ class LocalFile(LocalFileSystemElement):
                 + new_bytes \
                 + byte_buffer[n.block_offset + n.block_size:]
 
-        elif n.notification_type() == zyn_util.connection.Notification.TYPE_INSERTED:
+        elif n.notification_type() == zyn.connection.Notification.TYPE_INSERTED:
             rsp, new_bytes = connection.read_file(
                 self.node_id(),
                 n.block_offset,
@@ -498,7 +498,7 @@ class LocalFile(LocalFileSystemElement):
                 + new_bytes \
                 + byte_buffer[n.block_offset:]
 
-        elif n.notification_type() == zyn_util.connection.Notification.TYPE_DELETED:
+        elif n.notification_type() == zyn.connection.Notification.TYPE_DELETED:
             byte_buffer = \
                 byte_buffer[0:n.block_offset] \
                 + byte_buffer[n.block_offset + n.block_size:]
@@ -516,7 +516,7 @@ class LocalFile(LocalFileSystemElement):
             return remote_data
 
         local_data = open(self.path_local(), 'rb').read()
-        self._revision = zyn_util.util.edit_random_access_file(
+        self._revision = zyn.util.edit_random_access_file(
             connection,
             self._node_id,
             self._revision,
@@ -562,14 +562,14 @@ class LocalFile(LocalFileSystemElement):
             try:
                 rsp_open = self._fs.open_write(self, connection)
                 if self.is_blob():
-                    stream = zyn_util.connection.FileStream(self.path_local())
+                    stream = zyn.connection.FileStream(self.path_local())
                     rsp = connection.blob_write_stream(
                         self.node_id(),
                         self._revision,
                         stream,
                         rsp_open.block_size,
                     )
-                    zyn_util.util.check_server_response(rsp)
+                    zyn.util.check_server_response(rsp)
                     self._revision = rsp.as_write_rsp().revision
                 elif self.is_random_access():
                     remote_data = bytearray()
@@ -579,11 +579,11 @@ class LocalFile(LocalFileSystemElement):
                             0,
                             rsp_open.size
                         )
-                        zyn_util.util.check_server_response(rsp)
+                        zyn.util.check_server_response(rsp)
 
                     self.push_random_access_changes(connection, remote_data)
                 else:
-                    zyn_util.util.unhandled()
+                    zyn.util.unhandled()
 
                 self._local_file_metadata.update()
             finally:
@@ -668,7 +668,7 @@ class OpenLocalFile():
 
 
 class LocalFilesystemManager:
-    def to_json(self):
+    def to_dict(self):
         elements = []
         for e in self._elements.values():
             if e.is_file():
@@ -680,15 +680,15 @@ class LocalFilesystemManager:
                     'directory': e.to_json()
                 })
             else:
-                zyn_util.util.unhandled()
+                zyn.util.unhandled()
 
         return {
             'local-data-root': self._path_root,
             'elements': elements,
         }
 
-    def from_json(data):
-        fs = LocalFilesystemManager(data['local-data-root'])
+    def from_dict(data, log):
+        fs = LocalFilesystemManager(data['local-data-root'], log)
         for e in data['elements']:
             f = e.get('file', None)
             d = e.get('directory', None)
@@ -698,15 +698,15 @@ class LocalFilesystemManager:
             elif d is not None:
                 element = LocalDirectory.from_json(d, fs)
             else:
-                zyn_util.util.unhandled()
+                zyn.util.unhandled()
 
             fs._elements[element.node_id()] = element
             fs._path_to_node_id[element.path_remote()] = element.node_id()
         return fs
 
-    def __init__(self, path_local_root):
+    def __init__(self, path_local_root, log):
         self._path_root = path_local_root
-        self._log = logging.getLogger(__name__)
+        self._log = log
         self.reset_data()
         self._log.debug('Initialized, root="{}"'.format(self._path_root))
 
@@ -728,20 +728,20 @@ class LocalFilesystemManager:
 
     def local_path(self, element):
         if isinstance(element, str):
-            return zyn_util.util.join_remote_paths([self._path_root, element])
+            return zyn.util.join_remote_paths([self._path_root, element])
         elif isinstance(element, LocalFileSystemElement):
-            return zyn_util.util.join_remote_paths([
+            return zyn.util.join_remote_paths([
                 self._path_root,
                 element.path_remote(),
             ])
-        zyn_util.util.unhandled()
+        zyn.util.unhandled()
 
     def query_element(self, element, connection):
         if isinstance(element, str):
             rsp = connection.query_fs_element(path=element)
         if isinstance(element, LocalFileSystemElement):
             rsp = connection.query_fs_element(node_id=element.node_id())
-        zyn_util.util.check_server_response(rsp)
+        zyn.util.check_server_response(rsp)
         return rsp.as_query_fs_element_rsp()
 
     def query_fs_children(self, element, connection):
@@ -749,7 +749,7 @@ class LocalFilesystemManager:
             rsp = connection.query_fs_children(path=element)
         elif isinstance(element, LocalFileSystemElement):
             rsp = connection.query_fs_children(node_id=element.node_id())
-        zyn_util.util.check_server_response(rsp)
+        zyn.util.check_server_response(rsp)
         return rsp.as_query_fs_children_rsp()
 
     def open_read(self, element, connection):
@@ -757,7 +757,7 @@ class LocalFilesystemManager:
             rsp = connection.open_file_read(path=element)
         elif isinstance(element, LocalFileSystemElement):
             rsp = connection.open_file_read(node_id=element.node_id())
-        zyn_util.util.check_server_response(rsp)
+        zyn.util.check_server_response(rsp)
         return rsp.as_open_rsp()
 
     def open_write(self, element, connection):
@@ -765,7 +765,7 @@ class LocalFilesystemManager:
             rsp = connection.open_file_write(path=element)
         if isinstance(element, LocalFileSystemElement):
             rsp = connection.open_file_write(node_id=element.node_id())
-        zyn_util.util.check_server_response(rsp)
+        zyn.util.check_server_response(rsp)
         return rsp.as_open_rsp()
 
     def close(self, element, connection):
@@ -773,7 +773,7 @@ class LocalFilesystemManager:
             rsp = connection.close_file(element)
         elif isinstance(element, LocalFileSystemElement):
             rsp = connection.close_file(element.node_id())
-        zyn_util.util.check_server_response(rsp)
+        zyn.util.check_server_response(rsp)
         return rsp
 
     def size(self):
@@ -812,12 +812,12 @@ class LocalFilesystemManager:
             return element in self._path_to_node_id
         elif isinstance(element, LocalFileSystemElement):
             return element.path_remote() in self._path_to_node_id
-        zyn_util.util.unhandled()
+        zyn.util.unhandled()
 
     def local_element_from_remote_path(self, path_remote):
         node_id = self._path_to_node_id.get(path_remote, None)
         if node_id is None:
-            raise zyn_util.client_data.ZynClientException(
+            raise zyn.client_data.ZynClientException(
                 'Element is not known for client, path="{}"'.format(
                     path_remote
                 ))
@@ -834,7 +834,7 @@ class LocalFilesystemManager:
         elif node_id is not None:
             return node_id in self._elements
         else:
-            raise zyn_util.client_data.ZynClientException(
+            raise zyn.client_data.ZynClientException(
                 'Must pass either Node Id or path'
             )
 
@@ -842,7 +842,7 @@ class LocalFilesystemManager:
         if path_remote == _REMOTE_PATH_ROOT:
             return Element.root_element(self._elements[0])
 
-        path_parent, name = zyn_util.util.split_remote_path(path_remote)
+        path_parent, name = zyn.util.split_remote_path(path_remote)
         children = self.query_fs_children(path_parent, connection)
         element = None
 
@@ -856,7 +856,7 @@ class LocalFilesystemManager:
             return Element(c, local)
 
         if element is None:
-            raise zyn_util.client_data.ZynClientException(
+            raise zyn.client_data.ZynClientException(
                 'Element "{}" does not exist on remote'.format(path_remote)
             )
         return element
@@ -865,7 +865,7 @@ class LocalFilesystemManager:
         if path_remote == _REMOTE_PATH_ROOT:
             return self.create_local_directory_element(path_remote)
 
-        path_parent, name = zyn_util.util.split_remote_path(path_remote)
+        path_parent, name = zyn.util.split_remote_path(path_remote)
         children = self.query_fs_children(path_parent, connection)
         element = None
 
@@ -878,10 +878,10 @@ class LocalFilesystemManager:
             elif c.is_directory():
                 element = self.create_local_directory_element(path_remote)
             else:
-                zyn_util.util.unhandled()
+                zyn.util.unhandled()
 
         if element is None:
-            raise zyn_util.client_data.ZynClientException(
+            raise zyn.client_data.ZynClientException(
                 'Element "{}" does not exist on remote'.format(path_remote)
             )
         return element
@@ -908,13 +908,13 @@ class LocalFilesystemManager:
         parent = self._elements[self._path_to_node_id[path_parent]]
         try:
             element.create_on_remote(parent, connection)
-        except zyn_util.exception.ZynServerException as create_error:
+        except zyn.exception.ZynServerException as create_error:
             self._log.warn('Creating element on remote failed "{}", trying to cleanup'.format(
                 create_error
             ))
             try:
                 element.delete_on_remote(connection)
-            except zyn_util.exception.ZynServerException as delete_error:
+            except zyn.exception.ZynServerException as delete_error:
                 self._log.warn('Cleanup failed, error="{}"'.format(delete_error))
             raise create_error
 
@@ -934,7 +934,7 @@ class LocalFilesystemManager:
             element.fetch(connection, overwrite)
             self._add_element_to_filesystem(element, parent)
             return element
-        except zyn_util.exception.ZynServerException as fetch_error:
+        except zyn.exception.ZynServerException as fetch_error:
             self._log.warn('Fetch failed, element={}'.format(
                 element.name()
             ))
@@ -949,13 +949,13 @@ class LocalFilesystemManager:
         for e in rsp.elements:
 
             if e.node_id not in self._elements:
-                path_remote = zyn_util.util.join_remote_paths([parent.path_remote(), e.name])
+                path_remote = zyn.util.join_remote_paths([parent.path_remote(), e.name])
                 if e.is_file():
                     element = LocalFile.create_empty(path_remote, e.file_type, self)
                 elif e.is_directory():
                     element = LocalDirectory.create_empty(path_remote, self)
                 else:
-                    zyn_util.util.unhandled()
+                    zyn.util.unhandled()
                 try:
                     self._log.debug('Fetching: {}'.format(element.path_remote()))
                     element = self.fetch_element_and_add_to_tracked(
@@ -1020,7 +1020,7 @@ class LocalFilesystemManager:
                     files_pushed += p
                     files_assumed_to_already_exists += e
                 else:
-                    zyn_util.util.unhandled()
+                    zyn.util.unhandled()
             else:
                 remote_element = remote_elements[c.name()]
                 if c.is_file():
@@ -1054,7 +1054,7 @@ class LocalFilesystemManager:
                     files_pushed += p
                     files_assumed_to_already_exists += e
                 else:
-                    zyn_util.util.unhandled()
+                    zyn.util.unhandled()
         return files_pushed, files_assumed_to_already_exists
 
     def initial_synchronization(self, connection):

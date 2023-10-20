@@ -4,9 +4,7 @@ import ssl
 import time
 import os
 
-import certifi
-
-import zyn_util.exception
+import zyn.exception
 
 
 FILESYSTEM_ELEMENT_FILE = 0
@@ -43,48 +41,6 @@ class RandomAccessBatchEdit:
 
     def commit(self):
         return self.connection._commit_ra_batch(self)
-
-
-class ZynSocket:
-    def __init__(self, context, socket, ssl_socket):
-        self._context = context
-        self._socket_ = socket
-        self._socket = ssl_socket
-
-    def _create(context, remote_address, remote_port, remote_hostname=None):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((remote_address, remote_port))
-        ssl = context.wrap_socket(
-            s,
-            server_hostname=remote_hostname or remote_address,
-        )
-        return ZynSocket(context, socket, ssl)
-
-    def create_with_custom_cert(remote_address, remote_port, path_cert, remote_hostname=None):
-        context = ssl.create_default_context()
-        context.load_verify_locations(path_cert)
-        return ZynSocket._create(context, remote_address, remote_port, remote_hostname)
-
-    def create(remote_address, remote_port):
-        context = ssl.create_default_context()
-        context.load_verify_locations(certifi.where())
-        return ZynSocket._create(context, remote_address, remote_port)
-
-    def settimeout(self, timeout):
-        return self._socket.settimeout(timeout)
-
-    def recv(self, size=None):
-        if size is None:
-            return self._socket.recv()
-        else:
-            return self._socket.recv(size)
-
-    def sendall(self, data):
-        return self._socket.sendall(data)
-
-    def close(self):
-        self._socket.shutdown(socket.SHUT_WR)
-        self._socket.close()
 
 
 class ZynConnection:
@@ -705,18 +661,20 @@ class ZynConnection:
                 d = None
             except socket.timeout:
                 d = None
+            except BlockingIOError:
+                d = None
 
             if d is None:
                 return None
 
             if len(d) == 0:
-                raise zyn_util.exception.ZynConnectionLost()
+                raise zyn.exception.ZynConnectionLost()
 
             self._input_buffer += d
             i = self._input_buffer.find(eom)
             if i != -1:
                 message = self._input_buffer[:i + len(eom)].decode('utf-8')
-                self._input_buffer = self._input_buffer[i + len(eom) + 1:]
+                self._input_buffer = self._input_buffer[i + len(eom):]
                 break
 
         if self._debug_messages:

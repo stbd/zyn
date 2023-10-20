@@ -165,9 +165,10 @@ class TestClient(zyn_util.tests.common.TestCommon):
         )
         state.client.connect_and_authenticate(
             self._password,
-            zyn_util.tests.common.DEFAULT_TLS_REMOTE_HOSTNAME,
-            zyn_util.tests.common.PATH_CERT,
-            True,
+            None,
+            None,
+            use_tls=False,
+            debug_protocol=True,
         )
         return state
 
@@ -175,9 +176,10 @@ class TestClient(zyn_util.tests.common.TestCommon):
         state.restart_client()
         state.client.connect_and_authenticate(
             self._password,
-            zyn_util.tests.common.DEFAULT_TLS_REMOTE_HOSTNAME,
-            zyn_util.tests.common.PATH_CERT,
-            True,
+            None,
+            None,
+            use_tls=False,
+            debug_protocol=True,
         )
 
     def _server_workdir(self, server_workdir_id):

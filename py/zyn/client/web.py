@@ -7,22 +7,31 @@ import os.path
 import ssl
 import uuid
 import subprocess
+import sys
 
 import tornado.log
 import tornado.web
 import tornado.websocket
 
-import zyn_util.connection
-import zyn_util.errors
-import zyn_util.util
+import zyn.connection
+import zyn.errors
+import zyn.util
 
 
-PATH_STATIC_FILES = os.path.dirname(os.path.abspath(__file__)) + '/web-static-files'
-PATH_TEMPLATES = os.path.dirname(os.path.abspath(__file__)) + '/web-templates'
+
+PATH_STATIC_FILES = sys.prefix + '/zyn-web-static'
+PATH_TEMPLATES = sys.prefix + '/zyn-web-templates'
+
+if not os.path.isdir(PATH_STATIC_FILES) or not os.path.isdir(PATH_TEMPLATES):
+    print('Asumming development install for web server paths')
+    PATH_STATIC_FILES = os.path.dirname(os.path.abspath(__file__)) + '/zyn-web-static'
+    PATH_TEMPLATES = os.path.dirname(os.path.abspath(__file__)) + '/zyn-web-templates'
+
 COOKIE_NAME = 'zyn-cookie'
 FILE_TYPE_RANDOM_ACCESS = 'random-access'
 FILE_TYPE_BLOB = 'blob'
 COOKIE_DURATION_DAYS = 30
+create_zyn_connection = None
 
 
 class UserSessionWebSocket:
@@ -32,64 +41,45 @@ class UserSessionWebSocket:
 
 
 class UserSession:
-    INITIAL_CONNECTION = -1
-
     def __init__(self, username, password, initial_connection):
         self._username = username
         self._password = password
-        self._websockets = {}
-        self._ids = 0
-        self._latest_successful_login = datetime.datetime.now()
-        if initial_connection is not None:
-            self._websockets = {UserSession.INITIAL_CONNECTION: initial_connection}
+        self._connection = initial_connection
 
-    def latest_login_duration(self):
-        return datetime.datetime.now() - self._latest_successful_login
-
-    def username(self):
-        return self._username
-
-    def size(self):
-        return len(self._websockets)
-
-    def add_websocket(self, socket):
-        connection = None
-        if UserSession.INITIAL_CONNECTION in self._websockets:
-            connection = self._websockets[UserSession.INITIAL_CONNECTION]
-            del self._websockets[UserSession.INITIAL_CONNECTION]
-        else:
-            connection = self.create_connection()
-
-        self._ids += 1
-        id_ = self._ids
-        self._websockets[id_] = UserSessionWebSocket(socket, connection)
-        return id_
-
-    def remove_websocket(self, id_):
-        try:
-            del self._websockets[id_]
-        except KeyError:
-            pass
-
-    def sockets(self, id_):
-        return self._websockets[id_]
-
-    def create_connection(self):
-        global connection_factory
-        connection = connection_factory.create_connection_and_connect()
-        rsp = connection.authenticate(self._username, self._password)
+    def _renew_connection(self):
+        global create_zyn_connection
+        self._connection = create_zyn_connection()
+        rsp = self._connection.authenticate(self._username, self._password)
         if rsp.is_error():
-            raise ValueError(
-                'Failed to login using credentials from session for user "{}"'.format(
-                    self._username,
-                )
-            )
-        self._latest_successful_login = datetime.datetime.now()
-        return connection
+            raise RuntimeError('Failed to authenticate for user')
 
-    def reconnect(self, id_):
-        sockets = self._websockets[id_]
-        sockets.connection = self.create_connection()
+    def get_connection(self):
+        if self._connection is None:
+            self._renew_connection()
+
+        return self._connection
+
+    def allocate_auth_token(self):
+        log = logging.getLogger(__name__)
+
+        if self._connection is None:
+            self._renew_connection()
+
+        rsp = self._connection.allocate_authentication_token()
+        self._connection.disconnect()
+        self._connection = None
+
+        if rsp.is_error():
+            log.error('Failed to allocate login token for user "{}", code: {}'.format(
+                self._username(),
+                rsp.error_code(),
+            ))
+            raise RuntimeError()
+
+        log.info('Authentication token allocated, username="{}"'.format(
+            self._username
+        ))
+        return rsp.as_allocate_auth_token_response().token
 
 
 class UserSessions:
@@ -120,6 +110,8 @@ class MainHandler(tornado.web.RequestHandler):
 
     def post(self, path_file):
         global connection_factory
+        global create_zyn_connection
+
         username = self.get_body_argument("username")
         password = self.get_body_argument("password")
 
@@ -129,7 +121,7 @@ class MainHandler(tornado.web.RequestHandler):
         log = logging.getLogger(__name__)
         log.info('Login, username="{}", path_file="{}"'.format(username, path_file))
 
-        connection = connection_factory.create_connection_and_connect()
+        connection = create_zyn_connection()
         rsp = connection.authenticate(username, password)
 
         if not rsp.is_error():
@@ -143,8 +135,9 @@ class MainHandler(tornado.web.RequestHandler):
 
     def get(self, path):
         global user_sessions
-        global connection_factory
         global server_address
+        global create_zyn_connection
+
         log = logging.getLogger(__name__)
         cookie_user_id = None
         session = None
@@ -163,25 +156,12 @@ class MainHandler(tornado.web.RequestHandler):
             session = user_sessions.find_session(cookie_user_id)
 
         if session is not None:
-            connection = session.create_connection()
-            rsp = connection.allocate_authentication_token()
-            connection.disconnect()
 
-            if rsp.is_error():
-                log.error('Failed to allocate login token for user "{}", code: {}'.format(
-                    session.username(),
-                    rsp.error_code(),
-                ))
-                raise RuntimeError()
-
-            auth_token = rsp.as_allocate_auth_token_response().token
-            log.info('Existing session found authentication token allocated, username="{}"'.format(
-                session.username()
-            ))
+            token = session.allocate_auth_token()
 
             if len(path) > 1:
-                path = zyn_util.util.normalized_remote_path('/' + path)
-                path_parent, name = zyn_util.util.split_remote_path(path)
+                path = zyn.util.normalized_remote_path('/' + path)
+                path_parent, name = zyn.util.split_remote_path(path)
             else:
                 path_parent, name = ('/', '')
 
@@ -195,7 +175,7 @@ class MainHandler(tornado.web.RequestHandler):
                 root_url=self.HANDLER_URL,
                 path_parent=path_parent,
                 name=name,
-                authentication_token=auth_token,
+                authentication_token=token,
                 server_address=server_address,
             )
         else:
@@ -223,8 +203,8 @@ class RawHandler(tornado.web.RequestHandler):
             self.set_status(403)
             return
 
-        path = zyn_util.util.normalized_remote_path('/' + path)
-        _, filename = zyn_util.util.split_remote_path(path)
+        path = zyn.util.normalized_remote_path('/' + path)
+        _, filename = zyn.util.split_remote_path(path)
         session = user_sessions.find_session(cookie_user_id)
         socket_id = None
         open_rsp = None
@@ -234,21 +214,20 @@ class RawHandler(tornado.web.RequestHandler):
         ))
 
         try:
-            socket_id = session.add_websocket(None)
-            connection = session.sockets(socket_id).connection
+            connection = session.get_connection()
             rsp = connection.open_file_read(path=path)
             if rsp.is_error():
                 self.set_status(400)
-                raise RuntimeError(zyn_util.errors.error_to_string(rsp.error_code()))
+                raise RuntimeError(zyn.errors.error_to_string(rsp.error_code()))
 
             open_rsp = rsp.as_open_rsp()
-            if open_rsp.type_of_file == zyn_util.connection.FILE_TYPE_RANDOM_ACCESS:
+            if open_rsp.type_of_file == zyn.connection.FILE_TYPE_RANDOM_ACCESS:
                 rsp, data = connection.read_file(open_rsp.node_id, 0, open_rsp.size)
                 if rsp.is_error():
                     self.set_status(500)
-                    raise RuntimeError(zyn_util.errors.error_to_string(rsp.error_code()))
+                    raise RuntimeError(zyn.errors.error_to_string(rsp.error_code()))
                 self.write(data)
-            elif open_rsp.type_of_file == zyn_util.connection.FILE_TYPE_BLOB:
+            elif open_rsp.type_of_file == zyn.connection.FILE_TYPE_BLOB:
                 if open_rsp.size > open_rsp.block_size:
                     # For large files, server should sent the content is blocks
                     self.set_status(500)
@@ -257,7 +236,7 @@ class RawHandler(tornado.web.RequestHandler):
                 rsp, data = connection.read_file(open_rsp.node_id, 0, open_rsp.size)
                 if rsp.is_error():
                     self.set_status(500)
-                    raise RuntimeError(zyn_util.errors.error_to_string(rsp.error_code()))
+                    raise RuntimeError(zyn.errors.error_to_string(rsp.error_code()))
                 self.write(data)
             else:
                 self.set_status(500)
@@ -279,43 +258,6 @@ class RootHandler(tornado.web.RequestHandler):
     def get(self, path):
         self.redirect('/fs/', permanent=True)
 
-
-class ZynConnectionFactory:
-    def __init__(
-            self,
-            path_cert,
-            server_ip,
-            server_port,
-            remote_hostname=None,
-            debug_protocol=False,
-    ):
-        self._path_cert = path_cert
-        self._server_ip = server_ip
-        self._server_port = server_port
-        self._debug_protocol = debug_protocol
-        self._remote_hostname = remote_hostname
-
-    def ip(self):
-        return self._server_ip
-
-    def port(self):
-        return self._server_port
-
-    def create_connection_and_connect(self):
-
-        if self._path_cert is None:
-            socket = zyn_util.connection.ZynSocket.create(self._server_ip, self._server_port)
-        else:
-            socket = zyn_util.connection.ZynSocket.create_with_custom_cert(
-                self._server_ip,
-                self._server_port,
-                self._path_cert,
-                self._remote_hostname,
-            )
-        return zyn_util.connection.ZynConnection(
-            socket,
-            self._debug_protocol
-        )
 
 
 def _timer_callback():
@@ -376,57 +318,18 @@ def _certificate_expiration(path):
     return ts
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('local-port', type=int, default=8080, help='')
-    parser.add_argument('zyn-server-ip', help='')
-    parser.add_argument('zyn-server-port', help='', type=int)
+def start_server(
+        local_port,
+        websocket_address,
+        create_zyn_connection_callback,
+        debug_tornado=False,
 
-    parser.add_argument('--ssl-path-to-cert', help='')
-    parser.add_argument('--ssl-path-to-key', help='')
-    parser.add_argument('--zyn-server-path-to-cert', help='', default=None)
-    parser.add_argument('--debug-protocol', action='store_true', help='')
-    parser.add_argument('--debug-tornado', action='store_true', help='')
-    parser.add_argument('--verbose', '-v', action='count', default=0)
-    parser.add_argument('--remote-hostname', default=None)
-    parser.add_argument('--server-websocket-address', default=None)
-
-    args = vars(parser.parse_args())
-
-    ssl_path_cert = args['ssl_path_to_cert']
-    ssl_path_key = args['ssl_path_to_key']
-    ssl_context = None
-
-    if ssl_path_cert is not None or ssl_path_key is not None:
-        if ssl_path_cert is None or ssl_path_key is None:
-            print('When using SSL, both key and certificate need to be passed')
-            return
-
-        ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        ssl_context.load_cert_chain(ssl_path_cert, ssl_path_key)
-
+):
     global server_address
-    server_address = args['server_websocket_address']
-    if server_address is None:
-        server_address = 'wss://{}:{}'.format(args['zyn-server-ip'], args['zyn-server-port'])
+    global create_zyn_connection
 
-    global connection_factory
-    connection_factory = ZynConnectionFactory(
-        args['zyn_server_path_to_cert'],
-        args['zyn-server-ip'],
-        args['zyn-server-port'],
-        args['remote_hostname'],
-        args['debug_protocol'],
-    )
-
-    try:
-        connection = connection_factory.create_connection_and_connect()
-        connection.disconnect()
-    except ConnectionRefusedError as e:
-        print(e)
-        print()
-        print('Failed to connect to Zyn server')
-        return
+    server_address = websocket_address
+    create_zyn_connection = create_zyn_connection_callback
 
     timer = tornado.ioloop.PeriodicCallback(
         _timer_callback,
@@ -443,24 +346,14 @@ def main():
         cookie_secret=base64.b64encode(os.urandom(50)).decode('utf8'),
         static_path=PATH_STATIC_FILES,
         template_path=PATH_TEMPLATES,
-        debug=args['debug_tornado'],
+        debug=debug_tornado,
     )
 
     tornado.log.enable_pretty_logging()
-    zyn_util.util.verbose_count_to_log_level(args['verbose'])
 
     global user_sessions
     user_sessions = UserSessions()
 
-    global certifacte_expiration
-    certifacte_expiration = None
-    if args['zyn_server_path_to_cert']:
-        certifacte_expiration = _certificate_expiration(args['zyn_server_path_to_cert'])
-
-    app.listen(args['local-port'], ssl_options=ssl_context)
+    app.listen(local_port)
     timer.start()
     tornado.ioloop.IOLoop.current().start()
-
-
-if __name__ == '__main__':
-    main()

@@ -16,8 +16,6 @@ import zyn_util.exception
 
 PATH_FILE = os.path.dirname(os.path.abspath(__file__))
 PATH_BIN = PATH_FILE + '/../../../zyn/target/debug/zyn'
-PATH_CERT = os.path.expanduser("/etc/ssl/certs/zyn-test.pem")
-PATH_KEY = os.path.expanduser("/etc/ssl/private/zyn-test.key")
 PATH_GPG_FINGERPRINT = os.path.expanduser("~/.zyn-test-user-gpg-fingerprint")
 DEFAULT_TLS_REMOTE_HOSTNAME = 'zyn'
 DEFAULT_SERVER_WORKDIR = 'server-workdir'
@@ -46,10 +44,12 @@ class TestZyn(unittest.TestCase):
         enviroment_variables = os.environ.copy()
         enviroment_variables['RUST_LOG'] = 'trace'
         enviroment_variables['RUST_BACKTRACE'] = '1'
-        logging.debug('Starting node with params: {}'.format(args))
+        logging.debug(f'Starting node "{PATH_BIN}" with arguments: "{" ".join(args)}"')
+        if not os.path.exists(PATH_BIN):
+            raise RuntimeError(f'Zyn binary "{PATH_BIN}" not found')
+
         return subprocess.Popen(
             [PATH_BIN] + args,
-            stdout=subprocess.PIPE,
             env=enviroment_variables
         )
 
@@ -62,8 +62,6 @@ class TestZyn(unittest.TestCase):
     def _start_server(
             self,
             path_data_dir,
-            path_cert=None,
-            path_key=None,
             local_port=None,
             local_address=None,
             remote_port=None,
@@ -91,12 +89,6 @@ class TestZyn(unittest.TestCase):
         params.append(str(remote_port or self._remote_port))
         params.append('--local-address')
         params.append(remote_address or self._remote_ip)
-
-        params.append('--path-cert')
-        params.append(path_cert or PATH_CERT)
-
-        params.append('--path-key')
-        params.append(path_key or PATH_KEY)
 
         params.append('--gpg-fingerprint')
         if gpg_fingerprint is not None:
@@ -146,13 +138,18 @@ class TestZyn(unittest.TestCase):
             remote_ip=None,
             remote_hostname=DEFAULT_TLS_REMOTE_HOSTNAME
     ):
-
-        socket = zyn_util.connection.ZynSocket.create_with_custom_cert(
+        socket = zyn_util.connection.ZynSocket.create_no_tls(
             remote_ip or self._remote_ip,
             remote_port or self._remote_port,
-            path_cert or PATH_CERT,
-            remote_hostname=remote_hostname,
         )
+
+
+        #socket = zyn_util.connection.ZynSocket.create_with_custom_cert(
+        #    remote_ip or self._remote_ip,
+        #    remote_port or self._remote_port,
+        #    path_cert or PATH_CERT,
+        #    remote_hostname=remote_hostname,
+        #)
 
         return zyn_util.connection.ZynConnection(socket)
 
@@ -302,6 +299,7 @@ class TestCommon(TestZyn):
         offset_start = 0
         offset_end = block_size
 
+        print('--------')
         while offset_end <= size:
             expected_data = fp.read(block_size)
             read_rsp, data = connection.read_file(node_id, offset_start, block_size)

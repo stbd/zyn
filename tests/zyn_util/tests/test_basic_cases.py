@@ -901,13 +901,8 @@ class TestWebsocket(TestBasicEditFile):
 
     class Websocket:
         def __init__(self, remote_ip, remote_port):
-            url = 'wss://{}:{}'.format(remote_ip, remote_port)
-            ssl_options = {
-                'ca_cert': zyn_util.tests.common.PATH_CERT,
-                'server_hostname': zyn_util.tests.common.DEFAULT_TLS_REMOTE_HOSTNAME,
-                'cert_reqs': ssl.CERT_NONE
-            }
-            self._socket = websocket.create_connection(url, sslopt=ssl_options)
+            url = 'ws://{}:{}'.format(remote_ip, remote_port)
+            self._socket = websocket.create_connection(url)
 
         def settimeout(self, timeout):
             return self._socket.settimeout(timeout)
