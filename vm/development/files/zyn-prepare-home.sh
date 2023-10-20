@@ -14,8 +14,6 @@ tag=ZYN-DEV-ENV
 sed -i "/$tag/,/$tag/d" "$path_user_home/.bashrc"
 cat <<EOF >> "$path_user_home/.bashrc"
 # $tag
-export ZYN_ROOT=$path_project_root
-PATH=\$PATH:$path_files_source
 echo -e "
 \\tZyn - Development environment
 
@@ -26,7 +24,7 @@ Available commands:"
 for script in "$path_files_source"/zyn-*; do
     echo -e "\\t\$(basename "\$script")"
 done
-GPG_TTY=\$(tty)
-export GPG_TTY
 # /$tag
 EOF
+
+echo "Configured"

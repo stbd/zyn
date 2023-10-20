@@ -19,21 +19,34 @@
           - 'software-properties-common'
           - 'ssl-cert'
 
-    - name: "Init home"
-      script: "/zyn/vm/development/files/zyn-prepare-home.sh /home/vagrant"
+    - name: "Create symlinks to scripts"
+      become: yes
+      shell: |
+        for file in files/*sh; do
+            path_file=$(readlink -f "$file")
+            link=/usr/bin/$(basename "$file")
+            if [ ! -e "$link" ]; then
+                ln -s "$path_file" "$link"
+            fi
+        done
 
     - name: "Install Rust"
-      script: "/zyn/vm/development/files/zyn-install-rust-debian.sh"
+      shell: "/usr/bin/zyn-install-rust-debian.sh"
+      args:
+        creates: "/home/vagrant/.cargo/bin/rustup"
 
-    - name: "Install Libressl"
-      script: "/zyn/vm/development/files/zyn-install-libressl-debian.sh"
+    - name: "Init home"
+      shell: "/zyn/vm/development/files/zyn-prepare-home.sh /home/vagrant"
 
     - name: "Configure encryption"
-      script: "/zyn/vm/development/files/zyn-prepare-encryption-keys.sh"
-
-    - name: "Configure certificates"
       become: yes
-      script: "/zyn/vm/development/files/zyn-prepare-certificates.sh"
+      become_user: vagrant
+      shell: "/zyn/vm/development/files/zyn-prepare-encryption-keys.sh"
+
+    # Certificates are not used in development at the moment, disable for now
+    #- name: "Configure certificates"
+    #  become: yes
+    #  script: "/zyn/vm/development/files/zyn-prepare-certificates.sh"
 
     - name: "Install Docker"
       become: yes
@@ -50,10 +63,14 @@
         add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable"
         apt-get update
         apt-get -y install docker-ce
+      args:
+        creates: "/usr/bin/docker"
 
-    - name: "Install zyn-util"
+    - name: "Install Python Zyn library"
       become: yes
-      shell: pip3 install -e /zyn/tests
+      shell: pip3 install --break-system-packages -e /zyn/py
+      args:
+        creates: "/usr/local/bin/zyn-cli"
 
     - name: "Configure developer user"
       become: yes
@@ -64,3 +81,10 @@
           - 'sudo'
           - 'docker'
           - 'ssl-cert'
+
+    - name: "Create data directory"
+      become: yes
+      shell: |
+        mkdir -p /data/server
+        mkdir -p /data/client
+        chown -R vagrant:vagrant /data

@@ -10,6 +10,8 @@ if [ "$sourced" -ne 1 ]; then
     exit 1
 fi
 
+path_test_user_gpg_files=/home/vagrant
+zyn_project_root=/zyn
 system_test_files=( \
     "test_basic_cases.py" \
     "test_edit_files.py" \
@@ -18,10 +20,15 @@ system_test_files=( \
 )
 
 function zyn-system-tests() {
-    path_project=$ZYN_ROOT/tests/zyn_util/tests
+    path_project=$zyn_project_root/tests/zyn_util/tests
     result=0
     pushd "$path_project" &> /dev/null || exit 1
-    nosetests "${system_test_files[@]}" --nologcapture --nocapture -vv "$@" || result=1
+    echo
+    echo "Running Zyn system tests"
+    echo
+    echo "Add --log-level=debug -s --log-cli-level=debug to increase logging"
+    echo
+    pytest "${system_test_files[@]}"
     popd &> /dev/null || exit 1
     return "$result"
 }

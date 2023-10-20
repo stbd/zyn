@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
 function generate_gpg_keys() {
 
     exists=true
@@ -48,6 +50,7 @@ function install_gpg_development_environment() {
     echo "Installing gpg fingerprint to \"$path_gpg_fingerprint\" and keygrip to \"$path_gpg_keygrip\""
     echo "$fingerprint" > "$path_gpg_fingerprint"
     echo "$keygrip" > "$path_gpg_keygrip"
+    echo "$password" > "$path_gpg_password"
 
     echo "Installing secret key to $path_gpg_private_key"
     gpg --export-secret-key --pinentry-mode loopback --passphrase "$password" "$email" > "$path_gpg_private_key"
@@ -91,12 +94,13 @@ EOF
 
 }
 
-path_user_home=$HOME
+path_user_home=$path_test_user_gpg_files
 username=tester
 password=password
 email=$username@invalid.com
 path_gpg_fingerprint=$path_user_home/.zyn-test-user-gpg-fingerprint
 path_gpg_keygrip=$path_user_home/.zyn-test-user-gpg-keygrip
+path_gpg_password=$path_user_home/.zyn-test-user-gpg-password
 path_gpg_private_key=$path_user_home/.zyn-test-user-gpg-secret-key
 path_gpg_login_trigger=$path_user_home/.zyn-gpg-agent-start-cmd
 gpg_agent_cache_expires=$((60 * 60 * 24 * 365 * 10))
