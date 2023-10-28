@@ -9,6 +9,7 @@ static DEFAULT_SLEEP_DURATION_MS: u64 = 100;
 
 pub struct Socket {
     stream: TcpStream,
+    pub is_ok: bool,
 }
 
 impl Socket{
@@ -46,13 +47,14 @@ impl Socket{
 
     pub fn read(& mut self, buffer: & mut Buffer) -> Result<bool, ()> {
 
-        let mut has_read = false;
-        let mut offset = buffer.len();
-        let mut size = offset;
+        let original_size = buffer.len();
+        let mut offset = original_size;
+        let mut size = original_size;
         buffer.resize(buffer.capacity(), 0);
 
         loop {
 
+            let mut has_read = false;
             let amount_read = match self.stream.read(buffer.get_mut(offset..).unwrap()) {
                 Ok(s) => {
                     has_read = true;
@@ -65,23 +67,31 @@ impl Socket{
                 }
             } ? ;
 
+            size += amount_read;
+            offset += amount_read;
+
             if size == buffer.capacity() {
                 return Ok(true);
+            }
+
+            // If socket reads something, but the amount is zero
+            // is most likely means socket was closed
+            // https://doc.rust-lang.org/std/io/trait.Read.html#tymethod.read
+            if has_read && amount_read == 0 {
+                self.is_ok = false;
+                return Ok(false)
             }
 
             if amount_read <= 0 {
                 break;
             }
-
-            size += amount_read;
-            offset += amount_read;
         }
 
         buffer.resize(size, 0);
-        if has_read {
-            return Ok(true)
-        } else {
+        if original_size == buffer.len() {
             return Ok(false)
+        } else {
+            return Ok(true)
         }
     }
 }
@@ -121,6 +131,7 @@ impl SocketServer {
 
                 return Ok(Some(Socket {
                     stream: stream,
+                    is_ok: true,
                 }))
             },
             Err(error) => {
