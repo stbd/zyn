@@ -573,6 +573,7 @@ impl Client {
             ("Q-SYSTEM:".as_bytes(), handle_query_system, 1),
             ("ADD-USER-GROUP:".as_bytes(), handle_add_user_group, 1),
             ("MOD-USER-GROUP:".as_bytes(), handle_mod_user_group, 1),
+            ("HB:".as_bytes(), handle_heartbeat, 1),
         ];
 
         let mut latest_succesfull_command_timestamp: Timestamp = utc_timestamp();
@@ -633,7 +634,6 @@ impl Client {
                 continue ;
             }
 
-            latest_succesfull_command_timestamp = utc_timestamp();
 
             if ! self.connection.get_receive_buffer().is_complete_message() {
                 continue ;
@@ -680,6 +680,8 @@ impl Client {
                         self.status.set(Status::ProtocolProcessingError);
                         break ;
                     }
+
+                latest_succesfull_command_timestamp = utc_timestamp();
             }
 
             self.connection.get_receive_buffer().drop_consumed_data();
@@ -783,6 +785,23 @@ impl Client {
         }
     }
 }
+
+/*
+Healtcheck request
+<- [Version]:HB:;[End]
+*/
+fn handle_heartbeat(client: & mut Client) -> Result<(), ()>
+{
+    debug!("Heartbeat received");
+    client.connection.get_receive_buffer().expect(ZYN_FIELD_END)
+        .map_err(| () | client.status.set(Status::ProtocolProcessingError))
+        ? ;
+    client.connection.get_receive_buffer().parse_end_of_message()
+        .map_err(| () | client.status.set(Status::ProtocolProcessingError))
+        ? ;
+    Ok(())
+}
+
 
 /*
 Authenticate request:

@@ -184,7 +184,7 @@ impl Arguments {
 
                 (Arguments::max_inactivity_duration_secs(),
                  "Maximum duration allowed for inactive client connections, in seconds",
-                 Argument::Uint { value: Some(60 * 60 * 5) }),
+                 Argument::Uint { value: Some(60 * 60) }),
 
                 (Arguments::authentication_token_duration_secs(),
                  "Duration of the authentication token, in seconds",

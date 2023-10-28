@@ -103,7 +103,11 @@ impl Connection {
                 }
             },
             None => {
-                Ok(())
+                if self.socket.is_ok {
+                    Ok(())
+                } else {
+                    Err(())
+                }
             }
         }
     }
@@ -166,7 +170,7 @@ impl Connection {
 
         while buffer.len() != buffer.capacity() && trial < MAX_NUMBER_OF_TRIALS {
 
-            info!("fill_buffer_from_client: {} {}", buffer.len(), buffer.capacity());
+            // info!("fill_buffer_from_client: {} {}", buffer.len(), buffer.capacity());
 
             let result = Connection::read_from_client(
                 & mut self.websocket,
@@ -283,7 +287,7 @@ impl ZynWebsocket {
 
             output_buffer.resize(message_size, 0);
             if socket.write_with_sleep(& output_buffer) ? != message_size {
-                error!("Failed to write websocket message to socket");
+                error!("Failed to write message to socket");
                 self.state = ZynWebsocketState::Error;
                 return Err(());
             }
@@ -311,7 +315,7 @@ impl ZynWebsocket {
 
         output_buffer.resize(message_size, 0);
         if socket.write_with_sleep(& output_buffer) ? != message_size {
-            error!("Failed to write websocket close emssage to socket");
+            error!("Failed to write close message to socket");
             self.state = ZynWebsocketState::Error;
             return Err(());
         }
