@@ -19,7 +19,7 @@ def _create_socket(address, port, no_tls=False):
     if no_tls:
         return zyn.socket.ZynSocket.create_no_tls(address, port)
     else:
-        raise NotImplementedError()
+        return zyn.socket.ZynSocket.create_tls(address, port)
 
 
 def _create_connection(socket, debug_protocol):
@@ -113,6 +113,10 @@ def shell():
         )
         state.to_file(path_client_conf)
         print('Configuration initialized')
+
+    if not os.path.exists(path_client_conf):
+        log.error('Cient configuration not found, please create it or point to right path')
+        raise RuntimeError(f'Client configuration at path "{path_client_conf}" does not exists')
 
     client_state = zyn.client.client.State.from_file(path_client_conf, log)
     socket = _create_socket(client_state.address, client_state.port, args['no_tls'])

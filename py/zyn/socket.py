@@ -35,7 +35,7 @@ class ZynSocket:
             socket,
             server_hostname=remote_hostname or remote_address,
         )
-        return ZynSocket(socket, context, tls_socket)
+        return ZynSocket(socket, tls_socket, context)
 
     def create_no_tls(remote_address, remote_port):
         log.info(f'Creating connection to {remote_address}:{remote_port}')
@@ -46,7 +46,7 @@ class ZynSocket:
         return self._socket_tls or self._socket
 
     def settimeout(self, timeout):
-        return self._socket.settimeout(timeout)
+        return self.socket().settimeout(timeout)
 
     def recv(self, size=None):
         if size is None:
