@@ -1,16 +1,12 @@
 import os
 
-from nose.plugins.attrib import attr
+import pytest
 
-import zyn_util.tests.common
-import zyn_util.errors
-
-
-PATH_FILE = os.path.dirname(os.path.abspath(__file__))
+import common
+import zyn.errors
 
 
-class TestLargeFiles(zyn_util.tests.common.TestCommon):
-
+class TestLargeFiles(common.ZynNodeCommon):
     def _create_write_read_file(self, connection, file_size, block_size, filename='blob'):
         path_data = self._create_binary_blob_for_test_data(file_size)
         create_rsp = connection.create_file_blob(filename, parent_path='/').as_create_rsp()
@@ -32,16 +28,16 @@ class TestLargeFiles(zyn_util.tests.common.TestCommon):
         connection.close_file(open_rsp.node_id)
 
     def test_edit_blob_20(self):
-        c = self._start_and_connect_to_node_and_handle_auth()
+        c = self._prepare_node_and_authenticate_connection()
         self._create_write_read_file(
             c,
             self._megabytes_to_bytes(20),
             int(self._megabytes_to_bytes(.5))
         )
 
-    @attr('slow')
+    @pytest.mark.slow
     def test_edit_blob_100(self):
-        c = self._start_and_connect_to_node_and_handle_auth()
+        c = self._prepare_node_and_authenticate_connection()
         self._create_write_read_file(
             c,
             self._megabytes_to_bytes(100),
@@ -54,7 +50,7 @@ class TestLargeFiles(zyn_util.tests.common.TestCommon):
         block_size = int(self._megabytes_to_bytes(.5))
         data = 'qwerty'.encode('utf8')
 
-        c = self._start_and_connect_to_node_and_handle_auth()
+        c = self._prepare_node_and_authenticate_connection()
         self._create_write_read_file(c, file_size, block_size, filename)
 
         open_rsp = c.open_file_write(path='/' + filename).as_open_rsp()
@@ -69,7 +65,7 @@ class TestLargeFiles(zyn_util.tests.common.TestCommon):
         self.assertEqual(read_rsp.size, len(data))
 
 
-class TestMultipleUsersEditingFile(zyn_util.tests.common.TestCommon):
+class TestMultipleUsersEditingFile(common.ZynNodeCommon):
     def _open_file_write(self, node_id, connections):
         revision = None
         for c in connections:
@@ -102,7 +98,7 @@ class TestMultipleUsersEditingFile(zyn_util.tests.common.TestCommon):
             n = c.pop_notification(timeout=1)
             self._validate_notification(
                 n,
-                zyn_util.connection.Notification.TYPE_MODIFIED,
+                zyn.connection.Notification.TYPE_MODIFIED,
                 node_id,
                 rsp.revision,
                 offset,
@@ -116,7 +112,7 @@ class TestMultipleUsersEditingFile(zyn_util.tests.common.TestCommon):
             n = c.pop_notification(timeout=1)
             self._validate_notification(
                 n,
-                zyn_util.connection.Notification.TYPE_INSERTED,
+                zyn.connection.Notification.TYPE_INSERTED,
                 node_id,
                 rsp.revision,
                 offset,
@@ -130,7 +126,7 @@ class TestMultipleUsersEditingFile(zyn_util.tests.common.TestCommon):
             n = c.pop_notification(timeout=1)
             self._validate_notification(
                 n,
-                zyn_util.connection.Notification.TYPE_DELETED,
+                zyn.connection.Notification.TYPE_DELETED,
                 node_id,
                 rsp.revision,
                 offset,
@@ -140,7 +136,7 @@ class TestMultipleUsersEditingFile(zyn_util.tests.common.TestCommon):
 
     def test_edit_triggers_notification(self):
         filename = 'file'
-        c_1 = self._start_and_connect_to_node_and_handle_auth()
+        c_1 = self._prepare_node_and_authenticate_connection()
         c_2 = self._connect_to_node_and_handle_auth()
         c_3 = self._connect_to_node_and_handle_auth()
         node_id = c_1.create_file_random_access(filename, parent_path='/').as_create_rsp().node_id

@@ -5,35 +5,50 @@ import os.path
 import random
 import sys
 
-import zyn_util.cli_client
-import zyn_util.client
-import zyn_util.errors
-import zyn_util.tests.common
-import zyn_util.util
+import zyn.client.client
+import zyn.client.data
+import zyn.client.shell
+import zyn.errors
+import zyn.util
+
+import common
 
 
 class ClientData:
-    def __init__(self, client_id, path_workdir, path_client_state, path_data):
+    def __init__(
+            self,
+            client_id,
+            path_workdir,
+            path_client_state,
+            path_data,
+            connection,
+            log,
+    ):
         self.client_id = client_id
         self.path_workdir = path_workdir
         self.path_data = path_data
         self.path_state_file = path_client_state
-        self.client = zyn_util.client.ZynFilesystemClient.init_from_saved_state(
-            self.path_state_file
-        )
-        self.cli = zyn_util.cli_client.ZynCliClient(self.client)
+        self.log = log
 
-    def restart_client(self):
-        self.client.store(self.path_state_file)
-        self.client = zyn_util.client.ZynFilesystemClient.init_from_saved_state(
-            self.path_state_file
-        )
-        self.cli = zyn_util.cli_client.ZynCliClient(self.client)
+        state = zyn.client.client.State.from_file(path_client_state, log)
+        self.client = zyn.client.client.ZynFilesystemClient(connection, state, log)
+        self.cli = zyn.client.shell.ZynShell(self.client, log)
+
+        #self.client = ZynFilesystemClient.init_from_saved_state(
+        #    self.path_state_file
+        #)
+        #self.cli = zyn_util.cli_client.ZynCliClient(self.client)
+
+    def restart_client(self, connection):
+        self.client._state.to_file(self.path_state_file)
+        state = zyn.client.client.State.from_file(self.path_state_file, self.log)
+        self.client = zyn.client.client.ZynFilesystemClient(connection, state, self.log)
+        self.cli = zyn.client.shell.ZynShell(self.client, self.log)
 
     def validate_local_data(self, expected_elements):
         elements = \
-                   glob.glob(zyn_util.util.join_remote_paths([self.path_data, '/**/*'])) \
-                   + glob.glob(zyn_util.util.join_remote_paths([self.path_data, '/*']))
+                   glob.glob(zyn.util.join_remote_paths([self.path_data, '/**/*'])) \
+                   + glob.glob(zyn.util.join_remote_paths([self.path_data, '/*']))
 
         if len(elements) != len(expected_elements):
             print('Number of filesystem elements do not match')
@@ -56,7 +71,7 @@ class ClientData:
         if expected_text_content is not None:
             expected_content = expected_text_content.encode('utf-8')
 
-        path_local = zyn_util.util.join_remote_paths([self.path_data, path_in_remote])
+        path_local = zyn.util.join_remote_paths([self.path_data, path_in_remote])
         assert os.path.exists(path_local)
         content = open(path_local, 'rb').read()
         if content != expected_content:
@@ -77,22 +92,23 @@ class ClientData:
         try:
             self.client.element(path_remote=path_remote)
         except Exception:
+            self.log.exception('Erro while validating element')
             is_tracked = False
 
         if is_tracked != expected:
-            print('Element "{}" did not match tracked status'.format(path_remote))
+            self.log.error('Element "{}" did not match tracked status'.format(path_remote))
             assert is_tracked == expected
 
     def validate_local_file_exists(self, path_in_remote, expected=True):
-        path_local = zyn_util.util.join_remote_paths([self.path_data, path_in_remote])
+        path_local = zyn.util.join_remote_paths([self.path_data, path_in_remote])
         assert os.path.isfile(path_local) is expected
 
     def validate_local_directory_exists(self, path_in_remote, expected=True):
-        path_local = zyn_util.util.join_remote_paths([self.path_data, path_in_remote])
+        path_local = zyn.util.join_remote_paths([self.path_data, path_in_remote])
         assert os.path.isdir(path_local) is expected
 
     def write_local_file_text(self, path_in_remote, text_content):
-        path_file = zyn_util.util.join_remote_paths([self.path_data, path_in_remote])
+        path_file = zyn.util.join_remote_paths([self.path_data, path_in_remote])
         assert os.path.exists(path_file)
         data = text_content.encode('utf-8')
         fp = open(path_file, 'wb')
@@ -100,18 +116,18 @@ class ClientData:
         fp.close()
 
     def delete_local_file(self, path_in_remote):
-        path_local = zyn_util.util.join_remote_paths([self.path_data, path_in_remote])
+        path_local = zyn.util.join_remote_paths([self.path_data, path_in_remote])
         os.remove(path_local)
 
     def create_local_directory(self, path_remote):
-        path_local = zyn_util.util.join_remote_paths([self.path_data, path_remote])
-        print('Creating directory, path="{}"'.format(path_local))
+        path_local = zyn.util.join_remote_paths([self.path_data, path_remote])
+        self.log.info('Creating directory, path="{}"'.format(path_local))
         os.makedirs(path_local)
         return path_remote
 
     def create_local_file(self, path_remote, content=None):
-        path_local = zyn_util.util.join_remote_paths([self.path_data, path_remote])
-        print('Creating file, path="{}"'.format(path_local))
+        path_local = zyn.util.join_remote_paths([self.path_data, path_remote])
+        self.log.info('Creating file, path="{}"'.format(path_local))
         open(path_local, 'w').close()
         if content is not None:
             self.write_local_file_text(path_remote, content)
@@ -126,9 +142,9 @@ class ClientData:
         self.validate_local_file_exists(path, exists_locally)
 
 
-class TestClient(zyn_util.tests.common.TestCommon):
+class TestClient(common.ZynNodeCommon):
     def _path_clients_data(self):
-        return '{}/clients'.format(self._work_dir.name)
+        return '{}/clients'.format(self.work_dir.name)
 
     def _restart_server_and_replace_connection(self, client_state):
         connection = self._restart_node_and_connect_and_handle_auth(
@@ -149,38 +165,50 @@ class TestClient(zyn_util.tests.common.TestCommon):
         if init_data:
             os.mkdir(path_client_workdir)
             os.mkdir(path_client_data)
-            zyn_util.client.ZynFilesystemClient.init(
-                path_client_state,
-                path_client_data,
-                self._username,
-                self._remote_ip,
-                self._remote_port,
-            )
 
-        state = ClientData(
+            state = zyn.client.client.State(
+                self.username,
+                self.server_address,
+                self.server_port,
+                zyn.client.data.LocalFilesystemManager(path_client_data, self.log),
+            )
+            state.to_file(path_client_state)
+
+            #ZynFilesystemClient.init(
+            #    path_client_state,
+            #    path_client_data,
+            #    self._username,
+            #    self._remote_ip,
+            #    self._remote_port,
+            #)
+
+
+        connection = self._connect_and_authenticate(state)
+        client_data = ClientData(
             client_id,
             path_client_workdir,
             path_client_state,
             path_client_data,
+            connection,
+            self.log,
         )
-        state.client.connect_and_authenticate(
-            self._password,
-            None,
-            None,
-            use_tls=False,
-            debug_protocol=True,
-        )
-        return state
+        #state.client.connect_and_authenticate(
+        #    self._password,
+        #    None,
+        #    None,
+        #    use_tls=False,
+        #    debug_protocol=True,
+        #)
+        return client_data
+
+    def _connect_and_authenticate(self, state):
+        connection = self._connect(state.address, state.port)
+        self._authenticate(connection, state.username, self.password)
+        return connection
 
     def _restart_client(self, state):
-        state.restart_client()
-        state.client.connect_and_authenticate(
-            self._password,
-            None,
-            None,
-            use_tls=False,
-            debug_protocol=True,
-        )
+        connection = self._connect_and_authenticate(state.client._state)
+        state.restart_client(connection)
 
     def _server_workdir(self, server_workdir_id):
         return 'server-workdir-{}'.format(server_workdir_id)
@@ -188,18 +216,18 @@ class TestClient(zyn_util.tests.common.TestCommon):
     def _restart_server(self):
         self._stop_node()
         self._start_node(
-            server_workdir=self._server_workdir(self._server_workdir_id),
+            data_dir=self._server_workdir(self._server_workdir_id),
             init=False,
         )
 
     def _start_new_server_with_different_work_dir(self):
         self._server_workdir_id += 1
         self._stop_node()
-        self._start_node(self._server_workdir(self._server_workdir_id))
+        self._start_node(init=True, data_dir=self._server_workdir(self._server_workdir_id))
 
     def _start_server_and_client(self, client_id=0):
         self._server_workdir_id = 0
-        self._start_node(self._server_workdir(self._server_workdir_id))
+        self._start_node(init=True, data_dir=self._server_workdir(self._server_workdir_id))
         return self._init_client(client_id)
 
     def _params(self, params):
@@ -463,7 +491,7 @@ class TestClientCreateAndFetch(TestClient):
         state = self._start_server_and_client()
         path = self._create_remote_ra(state, 'file-1')
         state.create_local_file(path)
-        with self.assertRaises(zyn_util.client_data.ZynClientException):
+        with self.assertRaises(zyn.client.data.ZynClientException):
             self._fetch(state, path)
         state.validate_file_state(path, is_tracked=False, exists_locally=True)
 
@@ -676,7 +704,7 @@ class TestClientRemove(TestClient):
         state = self._start_server_and_client()
         path = state.create_local_file('/file')
         state.validate_file_state(path, is_tracked=False, exists_locally=True)
-        with self.assertRaises(zyn_util.client_data.ZynClientException):
+        with self.assertRaises(zyn.client.data.ZynClientException):
             self._remove(state, path)
 
     def test_client_remove_directory(self):
@@ -697,7 +725,7 @@ class TestClientRemove(TestClient):
         state = self._start_server_and_client()
         path = self._create_remote_directory_and_fetch(state, '/dir')
         state.create_local_file('/dir/file')
-        with self.assertRaises(zyn_util.client_data.ZynClientException):
+        with self.assertRaises(zyn.client.data.ZynClientException):
             self._remove(state, path, ['--delete-local'])
 
     def test_client_remove_remote(self):
@@ -727,9 +755,11 @@ class TestClientCommon(TestClient):
         state = self._start_server_and_client()
         self._restart_server()
         self._restart_client(state)
-        self.assertFalse(state.client.server_info().is_connected_to_same_server())
-        state.client.server_info().initialize()
-        self.assertTrue(state.client.server_info().is_connected_to_same_server())
+        is_same, server_id, server_started = state.client.validate_remote_matches_expected()
+        self.assertFalse(is_same)
+        state.client.set_remote_info(server_id, server_started)
+        is_same, server_id, server_started = state.client.validate_remote_matches_expected()
+        self.assertTrue(is_same)
 
     def test_client_inital_synchronization(self):
         state = self._start_server_and_client()
@@ -830,7 +860,7 @@ class TestClientList(TestClient):
     def test_client_list_on_file_path(self):
         state = self._start_server_and_client()
         path = self._create_remote_ra(state, '/file')
-        with self.assertRaises(zyn_util.exception.ZynServerException):
+        with self.assertRaises(zyn.exception.ZynServerException):
             self._list(state, '-p {}'.format(path))
 
     def test_client_list_fetched_files(self):

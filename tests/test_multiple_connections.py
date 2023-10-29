@@ -1,51 +1,61 @@
 import logging
 import time
 
-import zyn_util.tests.common
-import zyn_util.errors
+import zyn.errors
+
+import common
 
 
-class TestMultipleConnections(zyn_util.tests.common.TestZyn):
-    def setUp(self):
-        super(TestMultipleConnections, self).setUp()
-        self._process = None
-        self._process = self._start_node_default_params(self._work_dir.name, init=True)
+class TestMultipleConnections(common.ZynNodeCommon):
+    #def setUp(self):
+    #    super(TestMultipleConnections, self).setUp()
+    #    self._process = None
+    #    self._process = self._start_node_default_params(self._work_dir.name, init=True)
+    #
+    #def tearDown(self):
+    #    if self._process:
+    #        self._stop_node(self._process)
 
-    def tearDown(self):
-        if self._process:
-            self._stop_node(self._process)
+    #def _stop_node(self, process, expected_return_code=0):
+    #    ret = process.poll()
+    #    if ret is not None:
+    #        assert ret == expected_return_code
+    #    else:
+    #        logging.info('Process {} was still alive, stopping'.format(process.pid))
+    #        process.kill()
+    #
+    #def _connect_and_authenticate(self):
+    #    connection = self._create_connection()
+    #    connection.enable_debug_messages()
+    #    connection.connect(self._remote_ip, self._remote_port)
+    #    rsp = connection.authenticate(self._username, self._password)
+    #    self.assertFalse(rsp.is_error())
+    #    return connection
 
-    def _stop_node(self, process, expected_return_code=0):
-        ret = process.poll()
-        if ret is not None:
-            assert ret == expected_return_code
-        else:
-            logging.info('Process {} was still alive, stopping'.format(process.pid))
-            process.kill()
+    def _init_node(self):
+        self._start_node(init=True)
 
     def _connect_and_authenticate(self):
-        connection = self._create_connection()
-        connection.enable_debug_messages()
-        connection.connect(self._remote_ip, self._remote_port)
-        rsp = connection.authenticate(self._username, self._password)
-        self.assertFalse(rsp.is_error())
+        connection = self._connect()
+        self._authenticate(connection)
         return connection
 
     def test_counters(self):
         def _validate_counters(connection, expected_number_of_connections):
             rsp = connection.query_counters()
-            counters = rsp.get_field(0).key_value_list_to_dict()
+            counters = rsp.field(0).key_value_list_to_dict()
             self.assertEqual(
                 counters['active-connections'].as_uint(),
                 expected_number_of_connections
             )
 
+        self._init_node()
         c_1 = self._connect_and_authenticate()
         _validate_counters(c_1, 1)
         c_2 = self._connect_and_authenticate()
         _validate_counters(c_1, 2)
-        c_2.close()
-        time.sleep(0.1)
+        c_2.disconnect()
+        time.sleep(1.1)
         _validate_counters(c_1, 1)
 
     def _expect_part_of_file_notification(
@@ -59,10 +69,11 @@ class TestMultipleConnections(zyn_util.tests.common.TestZyn):
     ):
         n = connection.read_message()
         self.assertEqual(n.notification_type(), type_of_notification)
-        self.assertEqual(n.type(), zyn_util.connection.Message.NOTIFICATION)
-        self.assertEqual(n.get_field(0).as_node_id(), expected_node_id)
-        self.assertEqual(n.get_field(1).as_uint(), expected_revision)
-        self.assertEqual(n.get_field(2).as_block(), (expected_offset, expected_size))
+        self.assertEqual(n.type(), zyn.connection.Message.NOTIFICATION)
+        self.assertEqual(n.node_id, expected_node_id)
+        self.assertEqual(n.revision, expected_revision)
+        self.assertEqual(n.block_offset, expected_offset)
+        self.assertEqual(n.block_size, expected_size)
         return n
 
     def _expect_part_of_file_modified(
@@ -75,7 +86,7 @@ class TestMultipleConnections(zyn_util.tests.common.TestZyn):
     ):
         return self._expect_part_of_file_notification(
             connection,
-            'PF-MOD',
+            zyn.connection.Notification.TYPE_MODIFIED,
             expected_node_id,
             expected_revision,
             expected_offset,
@@ -92,7 +103,7 @@ class TestMultipleConnections(zyn_util.tests.common.TestZyn):
     ):
         return self._expect_part_of_file_notification(
             connection,
-            'PF-DEL',
+            zyn.connection.Notification.TYPE_DELETED,
             expected_node_id,
             expected_revision,
             expected_offset,
@@ -109,7 +120,7 @@ class TestMultipleConnections(zyn_util.tests.common.TestZyn):
     ):
         return self._expect_part_of_file_notification(
             connection,
-            'PF-INS',
+            zyn.connection.Notification.TYPE_INSERTED,
             expected_node_id,
             expected_revision,
             expected_offset,
@@ -118,39 +129,39 @@ class TestMultipleConnections(zyn_util.tests.common.TestZyn):
 
     def test_edit_random_access_file(self):
 
-        # todo: Cleanup to use updated connection interface
-
         def _open(connection, node_id):
-            rsp = connection.file_open_write(node_id)
+            rsp = connection.open_file_write(node_id)
             self.assertFalse(rsp.is_error())
-            self.assertEqual(rsp.get_field(0).as_node_id(), node_id)
-            return rsp.get_field(1).as_uint()
+            rsp = rsp.as_open_rsp()
+            self.assertEqual(rsp.node_id, node_id)
+            return rsp.revision
 
         def _write(connection, node_id, revision, offset, data):
-            rsp = connection.file_write(node_id, revision, offset, data)
+            rsp = connection.ra_write(node_id, revision, offset, data)
             self.assertFalse(rsp.is_error())
-            return rsp.get_field(0).as_uint()
+            return rsp.as_write_rsp().revision
 
         def _insert(connection, node_id, revision, offset, data):
-            rsp = connection.file_insert(node_id, revision, offset, data)
+            rsp = connection.ra_insert(node_id, revision, offset, data)
             self.assertFalse(rsp.is_error())
-            return rsp.get_field(0).as_uint()
+            return rsp.as_insert_rsp().revision
 
         def _delete(connection, node_id, revision, offset, size):
-            rsp = connection.file_delete(node_id, revision, offset, size)
+            rsp = connection.ra_delete(node_id, revision, offset, size)
             self.assertFalse(rsp.is_error())
-            return rsp.get_field(0).as_uint()
+            return rsp.as_delete_rsp().revision
 
         def _read(connection, node_id, offset, expected_data):
-            rsp, data = connection.file_read(node_id, offset, len(expected_data))
+            rsp, data = connection.read_file(node_id, offset, len(expected_data))
             self.assertEqual(data, expected_data)
 
+        self._init_node()
         c_1 = self._connect_and_authenticate()
         c_2 = self._connect_and_authenticate()
 
-        rsp = c_1.file_create('/', 'file')
+        rsp = c_1.create_file_random_access('file', parent_path='/')
         self.assertFalse(rsp.is_error())
-        node_id = rsp.get_field(0).as_node_id()
+        node_id = rsp.as_create_rsp().node_id
 
         _open(c_1, node_id)
         revision = _open(c_2, node_id)
@@ -181,7 +192,6 @@ class TestMultipleConnections(zyn_util.tests.common.TestZyn):
         _read(c_1, node_id, len(data), data_written)
 
         data += data_written
-
         c_3 = self._connect_and_authenticate()
         self.assertEqual(_open(c_3, node_id), revision)
 
@@ -197,22 +207,20 @@ class TestMultipleConnections(zyn_util.tests.common.TestZyn):
         _read(c_2, node_id, 0, data)
         _read(c_3, node_id, 0, data)
 
-    def _test_edit_blob_file(self):
+    def test_edit_blob_file(self):
+        self._init_node()
         c_1 = self._connect_and_authenticate()
         c_2 = self._connect_and_authenticate()
 
-        node_id = c_1.create_file_blob('file', parent_path='/').as_create_rsp()
+        node_id = c_1.create_file_blob('file', parent_path='/').as_create_rsp().node_id
 
         c_1.open_file_write(node_id).as_open_rsp()
-        _, revision, _, _ = c_2.open_file_write(node_id=node_id).as_open_rsp()
+        revision = c_2.open_file_write(node_id=node_id).as_open_rsp().revision
 
         data = 'qwerty'.encode('utf-8')
-        c_1.blob_write(node_id, revision, data, 2).as_write_rsp()
+        revision = c_1.blob_write(node_id, revision, data).as_write_rsp().revision
 
-        notification = c_2.pop_notification()
-        notification = c_2.read_message()
-        self.assertNotEqual(notification, None)
-        notification = c_2.read_message()
-        self.assertNotEqual(notification, None)
+        self._expect_part_of_file_modified(c_2, node_id, revision, 0, len(data))
 
-        # self._expect_part_of_file_modified(c_2, node_id, revision + 1, 0, 2)
+        notification = c_2.read_message()
+        self.assertEqual(notification, None)
