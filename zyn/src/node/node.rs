@@ -119,7 +119,6 @@ pub struct Counters {
 }
 
 pub struct AdminSystemInformation {
-    pub certificate_expiration: Timestamp,
 }
 
 pub struct SystemInformation {
@@ -578,7 +577,6 @@ impl Node {
 
                                 let result = Node::handle_query_system_request(
                                     & mut self.auth,
-                                    & self.server,
                                     self.started_at,
                                     self.server_id,
                                     user,
@@ -997,7 +995,6 @@ impl Node {
 
     fn handle_query_system_request(
         auth: & mut UserAuthority,
-        server: & SocketServer,
         started_at: Timestamp,
         server_id: u64,
         user: Id,
@@ -1006,7 +1003,6 @@ impl Node {
         let admin_system_information = {
             if auth.is_authorized(& ADMIN_GROUP, & user, utc_timestamp()).is_ok() {
                 Some(AdminSystemInformation {
-                    certificate_expiration: server.certificate_expiration(),
                 })
             } else {
                 None

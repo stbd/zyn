@@ -3,7 +3,7 @@ use std::net::{ TcpListener, TcpStream };
 use std::thread::{ sleep };
 use std::time::{ Duration };
 
-use crate::node::common::{ Buffer, Timestamp, utc_timestamp };
+use crate::node::common::{ Buffer };
 
 static DEFAULT_SLEEP_DURATION_MS: u64 = 100;
 
@@ -143,9 +143,5 @@ impl SocketServer {
             }
         }
 
-    }
-
-    pub fn certificate_expiration(& self) -> Timestamp {
-        utc_timestamp()
     }
 }

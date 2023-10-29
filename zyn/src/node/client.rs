@@ -1846,7 +1846,6 @@ fn write_le_kv_st(buffer: & mut SendBuffer, key: & str, value: Timestamp) -> Res
     buffer.write_list_element_end()
 }
 
-/*
 fn write_le_kv_ss(buffer: & mut SendBuffer, key: & str, value: String) -> Result<(), ()> {
     buffer.write_list_element_start() ? ;
     buffer.write_key_value_pair_start() ? ;
@@ -1855,7 +1854,6 @@ fn write_le_kv_ss(buffer: & mut SendBuffer, key: & str, value: String) -> Result
     buffer.write_key_value_pair_end() ? ;
     buffer.write_list_element_end()
 }
-*/
 
 fn write_le_kv_sa(buffer: & mut SendBuffer, key: & str, value: Authority) -> Result<(), ()> {
     buffer.write_list_element_start() ? ;
@@ -2225,8 +2223,8 @@ fn handle_query_system(client: & mut Client) -> Result<(), ()>
                     try_and_return_on_error!(client, write_le_kv_su(& mut buffer, "number-of-open-files", client.open_files.len() as u64), Status::FailedToWriteToSendBuffer);
 
                     match desc.admin_system_information {
-                        Some(info) => {
-                            try_and_return_on_error!(client, write_le_kv_st(& mut buffer, "certification-expiration", info.certificate_expiration), Status::FailedToWriteToSendBuffer);
+                        Some(_info) => {
+                            try_and_return_on_error!(client, write_le_kv_ss(& mut buffer, "is-admin", "true".to_string()), Status::FailedToWriteToSendBuffer);
                         },
                         None => (),
                     }
