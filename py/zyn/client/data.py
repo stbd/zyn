@@ -817,7 +817,7 @@ class LocalFilesystemManager:
     def local_element_from_remote_path(self, path_remote):
         node_id = self._path_to_node_id.get(path_remote, None)
         if node_id is None:
-            raise zyn.client_data.ZynClientException(
+            raise ZynClientException(
                 'Element is not known for client, path="{}"'.format(
                     path_remote
                 ))
@@ -834,7 +834,7 @@ class LocalFilesystemManager:
         elif node_id is not None:
             return node_id in self._elements
         else:
-            raise zyn.client_data.ZynClientException(
+            raise ZynClientException(
                 'Must pass either Node Id or path'
             )
 
@@ -856,7 +856,7 @@ class LocalFilesystemManager:
             return Element(c, local)
 
         if element is None:
-            raise zyn.client_data.ZynClientException(
+            raise ZynClientException(
                 'Element "{}" does not exist on remote'.format(path_remote)
             )
         return element
@@ -881,7 +881,7 @@ class LocalFilesystemManager:
                 zyn.util.unhandled()
 
         if element is None:
-            raise zyn.client_data.ZynClientException(
+            raise ZynClientException(
                 'Element "{}" does not exist on remote'.format(path_remote)
             )
         return element

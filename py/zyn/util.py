@@ -11,18 +11,11 @@ def timestamp_to_datetime(timestamp):
     return datetime.datetime.utcfromtimestamp(timestamp)
 
 
-def get_logger(name, verbose_count):
+def get_logger(name, level):
     logger = logging.getLogger(name)
     logging.basicConfig(
         format='ZynClient %(asctime)-15s %(filename)s:%(lineno)s %(levelname)s: %(message)s',
     )
-    level = logging.WARNING
-    if verbose_count == 1:
-        level = logging.INFO
-    elif verbose_count == 2:
-        level = logging.DEBUG
-    elif verbose_count > 2:
-        logger.warn('Maximum number of verbose flags is 2, greater value is ignored')
     logger.setLevel(level)
     return logger
 

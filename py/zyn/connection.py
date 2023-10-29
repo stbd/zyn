@@ -3,6 +3,7 @@ import socket
 import ssl
 import time
 import os
+import threading
 
 import zyn.exception
 
@@ -43,6 +44,28 @@ class RandomAccessBatchEdit:
         return self.connection._commit_ra_batch(self)
 
 
+class ConnectionHearbeat:
+    def __init__(self, interval_seconds, connection):
+        self._interval_s = interval_seconds
+        self._connection = connection
+        self._heartbeat_thread = threading.Timer(
+            self._interval_s,
+            self._handle_timeout
+        )
+        self._heartbeat_thread.start()
+
+    def _handle_timeout(self):
+        self._connection.heartbeat()
+        self._heartbeat_thread = threading.Timer(
+            self._interval_s,
+            self._handle_timeout
+        )
+        self._heartbeat_thread.start()
+
+    def stop(self):
+        self._heartbeat_thread.cancel()
+
+
 class ZynConnection:
 
     def __init__(self, zyn_socket, debug_messages=False):
@@ -51,13 +74,23 @@ class ZynConnection:
         self._transaction_id = 1
         self._debug_messages = debug_messages
         self._input_buffer = b''
+        self._heartbeat = None
         self._notifications = []
 
     def disconnect(self):
+        if self._heartbeat is not None:
+            self._heartbeat.stop()
         self._socket.close()
 
     def enable_debug_messages(self):
         self._debug_messages = True
+
+    def start_heartbeat_thread(self):
+        interval = 60
+        self._log.info(
+            f'Starting heartbeat thread with interval of {interval} seconds'
+        )
+        self._heartbeat = ConnectionHearbeat(interval, self)
 
     def _send_receive(self, req):
         self.write(req)
@@ -83,6 +116,14 @@ class ZynConnection:
         if self._read_notification(timeout):
             return self._notifications.pop(0)
         return None
+
+    def heartbeat(self):
+        msg = \
+            self.field_version() \
+            + 'HB:' \
+            + self.field_end_of_message() \
+
+        self.write(msg)
 
     def authenticate(self, username, password, transaction_id=None):
         req = \
@@ -651,7 +692,7 @@ class ZynConnection:
 
         eom = end_of_message_field or self.field_end_of_message()
         eom = eom.encode('utf-8')
-        self._socket.settimeout(timeout)
+        self._socket.settimeout(timeout or 0)
         message = ''
 
         while True:

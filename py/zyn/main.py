@@ -26,6 +26,16 @@ def _create_connection(socket, debug_protocol):
     return zyn.connection.ZynConnection(socket, debug_protocol)
 
 
+def get_logger(verbose_count):
+    level = logging.WARNING
+    if verbose_count == 1:
+        level = logging.INFO
+    elif verbose_count == 2:
+        level = logging.DEBUG
+    elif verbose_count > 2:
+        logger.warn('Maximum number of verbose flags is 2, greater value is ignored')
+    return zyn.util.get_logger('zyn', level)
+
 
 def cli():
     parser = argparse.ArgumentParser()
@@ -34,14 +44,24 @@ def cli():
     parser.add_argument('username')
     parser.add_argument('--no-tls', action='store_true')
     parser.add_argument('--debug-protocol', action='store_true')
+    parser.add_argument('--verbose', '-v', action='count', default=0)
     args = vars(parser.parse_args())
 
+    get_logger(args['verbose'])
     socket = _create_socket(args['address'], args['port'], args['no_tls'])
     connection = _create_connection(socket, args['debug_protocol'])
     password = getpass.getpass('Password: ')
     rsp = connection.authenticate(args['username'], password)
     if rsp.is_error():
         raise RuntimeError('Failed to login')
+    connection.start_heartbeat_thread()
+
+    import time
+    try:
+        while True:
+            time.sleep(10)
+    except KeyboardInterrupt:
+        connection.disconnect()
 
 
 def shell():
@@ -62,7 +82,7 @@ def shell():
     args = vars(parser.parse_args())
 
     print (args)
-    log = zyn.util.get_logger('zyn-shell', args['verbose'])
+    log = get_logger(args['verbose'])
     path_client_conf = args['path_to_client_file']
     password = args['password']
 
@@ -162,6 +182,7 @@ def shell():
         remote_description=f'{client_state.address}:{client_state.port}'
     )
 
+    connection.start_heartbeat_thread()
     while True:
         try:
             shell.cmdloop()
