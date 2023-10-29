@@ -6,9 +6,8 @@ if [ "$#" -ne 1 ]; then
     exit 1
 fi
 
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 path_user_home=$1
-path_project_root=/zyn
-path_files_source=$path_project_root/vm/development/files
 
 tag=ZYN-DEV-ENV
 sed -i "/$tag/,/$tag/d" "$path_user_home/.bashrc"
@@ -17,11 +16,11 @@ cat <<EOF >> "$path_user_home/.bashrc"
 echo -e "
 \\tZyn - Development environment
 
-Project repository is mounted to \$ZYN_ROOT
+Project repository is mounted to $zyn_project_root
 
 Available commands:"
 
-for script in "$path_files_source"/zyn-*; do
+for script in "$path_scripts"/zyn-*; do
     echo -e "\\t\$(basename "\$script")"
 done
 # /$tag
