@@ -1415,7 +1415,7 @@ class QuerySystemResponse:
             self.number_of_open_files = desc['number-of-open-files'].as_uint()
         if len(desc) in [5]:
             self.has_admin_information = True
-            self.expiration = desc['certification-expiration'].as_timestamp()
+            self.is_admin = desc['is-admin'].as_string()
         else:
             _malfomed_message()
 

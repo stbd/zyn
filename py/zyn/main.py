@@ -71,6 +71,7 @@ def shell():
     parser.add_argument('--password')
     parser.add_argument('--debug-protocol', help='', action='store_true')
     parser.add_argument('--verbose', '-v', action='count', default=0)
+    parser.add_argument('--hearbeat', action='store_true')
 
     subparsers = parser.add_subparsers(dest='cmd')
     parser_init = subparsers.add_parser('init')
@@ -186,7 +187,8 @@ def shell():
         remote_description=f'{client_state.address}:{client_state.port}'
     )
 
-    connection.start_heartbeat_thread()
+    if args['hearbeat']:
+        connection.start_heartbeat_thread()
     while True:
         try:
             shell.cmdloop()
