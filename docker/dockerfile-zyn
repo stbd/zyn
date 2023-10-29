@@ -1,0 +1,32 @@
+ARG ZYN_RUST_VERSION=1.69.0
+
+FROM rust:$ZYN_RUST_VERSION-alpine as build
+
+RUN apk add \
+    build-base
+
+RUN mkdir -p /project/src
+
+# Create dummy main that allows compiling the project once,
+# so that dependecies are installed
+COPY zyn/Cargo.toml /project
+RUN echo "fn main() {}" > /project/src/main.rs
+RUN cargo install --path /project
+
+COPY zyn/ /project
+RUN cargo build -r --manifest-path /project/Cargo.toml --target-dir /zyn-build-artifacts
+
+from rust:$ZYN_RUST_VERSION-alpine
+
+RUN apk add \
+    bash \
+    gpg \
+    gpg-agent \
+    expect
+
+RUN mkdir /opt/zyn
+COPY --from=build /zyn-build-artifacts/release/zyn /opt/zyn
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN mkdir /data
+ENTRYPOINT ["/entrypoint.sh"]
+EXPOSE 80

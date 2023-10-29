@@ -1,0 +1,85 @@
+version: "3"
+services:
+  zyn:
+    image: 127.0.0.1:5000/zyn:latest
+    environment:
+      ZYN_DEFAULT_USERNAME:
+      ZYN_DEFAULT_USER_PASSWORD:
+      ZYN_MAX_NUMBER_OF_FILESYSTEM_ELEMENTS:
+      ZYN_MAX_SIZE_BLOB_FILE:
+      ZYN_MAX_SIZE_RANDON_ACCESS:
+      ZYN_MAX_INACTIVITY_SECONDS:
+      ZYN_TOKEN_DURATION_SECONDS:
+    secrets:
+      - gpg_secret_key
+      - gpg_password
+      - gpg_keygrip
+      - gpg_fingerprint
+    networks:
+      zyn-backend:
+        aliases:
+          - zyn-backend
+
+    # For debugging, exposed port should not be listed here
+    #ports:
+    #  - "8082:80"
+    deploy:
+      labels:
+        - traefik.enable=true
+        - traefik.tcp.routers.zyn.rule=HostSNI(`*`)
+        - traefik.tcp.routers.zyn.entrypoints=zyn-backend
+        - traefik.tcp.services.zyn.loadbalancer.server.port=80
+
+  web-client:
+    image: 127.0.0.1:5000/zyn-web-client:latest
+    command: >
+      80
+      zyn-backend
+      80
+      --no-tls
+      --server-websocket-address ws://localhost:8081
+    #ports:
+    #  - "8082:80"
+    networks:
+      - zyn-backend
+    deploy:
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.web-client.rule=Host(`localhost`)
+        - traefik.http.services.web-client.loadbalancer.server.port=80
+        - traefik.http.routers.web-client.entrypoints=zyn-frontend
+
+  proxy:
+    image: traefik:v2.10
+    command: >
+      --api.insecure=true
+      --providers.docker
+      --providers.docker.swarmmode=true
+      --providers.docker.network=zyn_zyn-backend
+      --providers.docker.exposedbydefault=false
+      --entryPoints.zyn-backend.address=:81/tcp
+      --entryPoints.zyn-frontend.address=:80/tcp
+      --log
+      --log.level=DEBUG
+      --accesslog=true
+    ports:
+      - "8080:80"
+      - "8081:81"
+      - "8082:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - zyn-backend
+
+networks:
+  zyn-backend:
+
+secrets:
+  gpg_fingerprint:
+    external: true
+  gpg_keygrip:
+    external: true
+  gpg_secret_key:
+    external: true
+  gpg_password:
+    external: true

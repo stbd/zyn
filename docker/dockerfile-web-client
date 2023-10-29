@@ -1,0 +1,9 @@
+FROM python:3.9-bookworm
+
+COPY py/requirements.txt /requirements.txt
+RUN pip install -r /requirements.txt
+
+COPY py /zyn
+RUN pip install /zyn
+
+ENTRYPOINT ["/usr/local/bin/zyn-webserver"]
