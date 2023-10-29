@@ -15,15 +15,16 @@ zyn_project_root=/zyn
 path_scripts=$zyn_project_root/vm/development/files
 system_test_files=( \
     "test_basic_cases.py" \
-    "test_edit_files.py" \
     "test_client.py" \
+    "test_edit_files.py" \
+    "test_multiple_connections.py" \
     "test_util.py" \
 )
 
 function zyn-system-tests() {
     path_project=$zyn_project_root/tests/zyn_util/tests
     result=0
-    pushd "$path_project" &> /dev/null || exit 1
+    pushd "$zyn_project_root/tests" &> /dev/null || exit 1
     echo
     echo "Running Zyn system tests"
     echo
@@ -31,7 +32,7 @@ function zyn-system-tests() {
     echo "Add -k <filter> to specific test cases"
     echo "Add --collect-only to list cases without running them"
     echo
-    pytest "${system_test_files[@]}"
+    pytest "${system_test_files[@]}" "$@"
     popd &> /dev/null || exit 1
     return "$result"
 }
