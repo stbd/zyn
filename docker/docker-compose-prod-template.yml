@@ -1,0 +1,101 @@
+version: "3"
+services:
+  zyn:
+    image: stbd/zyn:0.9.0-rc-2
+    environment:
+      ZYN_DEFAULT_USERNAME:
+      ZYN_DEFAULT_USER_PASSWORD:
+      ZYN_MAX_NUMBER_OF_FILESYSTEM_ELEMENTS:
+      ZYN_MAX_SIZE_BLOB_FILE:
+      ZYN_MAX_SIZE_RANDON_ACCESS:
+      ZYN_MAX_INACTIVITY_SECONDS:
+      ZYN_TOKEN_DURATION_SECONDS:
+    secrets:
+      - zyn_gpg_secret_key
+      - zyn_gpg_password
+      - zyn_gpg_keygrip
+      - zyn_gpg_fingerprint
+    networks:
+      zyn-backend:
+        aliases:
+          - zyn-backend
+    # For debugging, exposed port should not be listed here
+    #ports:
+    #  - "8082:80"
+    volumes:
+      - /opt/zyn/data:/data
+    deploy:
+      labels:
+        - traefik.enable=true
+        - traefik.tcp.routers.zyn.rule=HostSNI(`<zyn-server-domain-name>`)
+        - traefik.tcp.routers.zyn.entrypoints=web-secure
+        - traefik.tcp.routers.zyn.tls=true
+        - traefik.tcp.routers.zyn.tls.certresolver=tls-resolver
+        - traefik.tcp.services.zyn.loadbalancer.server.port=80
+
+  web-client:
+    image: stbd/zyn-client-web:0.9.0-rc-1
+    command:
+      - "80"
+      - zyn-backend
+      - "80"
+      - --no-tls
+      - --server-websocket-address=wss://zyn.hopto.org
+    #ports:
+    #  - "8082:80"
+    networks:
+      - zyn-backend
+    deploy:
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.web-client.rule=Host(`<zyn-webserver-domain-name>`)
+        - traefik.http.routers.web-client.entrypoints=web-secure
+        - traefik.http.routers.web-client.tls=true
+        - traefik.http.routers.web-client.tls.certresolver=tls-resolver
+        - traefik.http.services.web-client.loadbalancer.server.port=80
+
+  proxy:
+    image: traefik:v2.10
+    command:
+      #- --api.insecure=true
+      - --providers.docker
+      - --providers.docker.swarmmode=true
+      - --providers.docker.network=<dokcer-swarm-stack-name>_zyn-backend
+      - --providers.docker.exposedbydefault=false
+      - --entryPoints.web.address=:80
+      - --entryPoints.web-secure.address=:443
+      #- --log
+      #- --log.level=DEBUG
+      #- --accesslog=true
+      - --certificatesresolvers.tls-resolver.acme.tlschallenge=true
+      - --certificatesresolvers.tls-resolver.acme.email=<email-domain-owner>
+      - --certificatesresolvers.tls-resolver.acme.storage=/acme.json
+      #- --certificatesresolvers.tls-resolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
+    ports:
+      #- "80:80"
+      #- "8080:8080"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # I never got the acme.json mount working out of the box:
+      # There is an example at the Traefik homepage: https://doc.traefik.io/traefik/user-guides/docker-compose/acme-tls/
+      # But when run, it never created acme.json
+      #
+      # How I got this to work is by running the container once with below mounte commented out
+      # Coyp the acme.json mount point with docker cp, and then removing comment and restarting container
+      - <path-host-data>/acme.json:/acme.json
+    networks:
+      - zyn-backend
+
+networks:
+  zyn-backend:
+
+secrets:
+  zyn_gpg_fingerprint:
+    external: true
+  zyn_gpg_keygrip:
+    external: true
+  zyn_gpg_secret_key:
+    external: true
+  zyn_gpg_password:
+    external: true
