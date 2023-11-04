@@ -10,8 +10,8 @@ if [ "$sourced" -ne 1 ]; then
     exit 1
 fi
 
-path_test_user_gpg_files=/home/vagrant
 zyn_project_root=/zyn
+path_test_user_gpg_files=/home/vagrant
 path_scripts=$zyn_project_root/vm/development/files
 system_test_files=( \
     "test_basic_cases.py" \

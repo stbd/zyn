@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
 
 function generate_gpg_keys() {
 

@@ -16,7 +16,9 @@ cat <<EOF >> "$path_user_home/.bashrc"
 echo -e "
 \\tZyn - Development environment
 
-Project repository is mounted to $zyn_project_root
+Project repository is mounted to \"$zyn_project_root\"
+
+There is folder for client and server datas under \"/data\"
 
 Available commands:"
 
@@ -26,4 +28,4 @@ done
 # /$tag
 EOF
 
-echo "Configured"
+echo "\"$path_user_home\" configured"

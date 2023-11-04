@@ -2,13 +2,14 @@
 
 set -euo pipefail
 
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+
 result=0
-path_project=$ZYN_ROOT
-pushd "$path_project" &> /dev/null
+pushd "$zyn_project_root" &> /dev/null
 for file in $(git ls-files); do
 
     if [[ "$file" = *".py" ]]; then
-        flake8 --config /zyn/tests/zyn_util/setup.cfg "$file" || result=1
+        flake8 --config "$zyn_project_root/setup.cfg" "$file" || result=1
     elif [[ "$file" = *".sh" ]]; then
         shellcheck "$file" || result=1
     else
