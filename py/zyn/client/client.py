@@ -6,6 +6,7 @@ import time
 import zyn.errors
 import zyn.exception
 import zyn.util
+import zyn.messages
 from zyn.client.data import (
     Element,
     OpenLocalFile,
@@ -328,12 +329,12 @@ class ZynFilesystemClient:
                     n = self._connection.pop_notification()
                     if n is None:
                         break
-                    if n.notification_type() == zyn.connection.Notification.TYPE_DISCONNECTED:
+                    if n.notification_type() == zyn.messages.Notification.TYPE_DISCONNECTED:
                         print('Connection to Zyn server lost: "{}"'.format(n.reason))
                     elif n.notification_type() in [
-                        zyn.connection.Notification.TYPE_MODIFIED,
-                        zyn.connection.Notification.TYPE_DELETED,
-                        zyn.connection.Notification.TYPE_INSERTED,
+                        zyn.messages.Notification.TYPE_MODIFIED,
+                        zyn.messages.Notification.TYPE_DELETED,
+                        zyn.messages.Notification.TYPE_INSERTED,
                     ]:
                         print('Read notification from remote')
                         if n.node_id in files:

@@ -34,11 +34,6 @@ class ClientData:
         self.client = zyn.client.client.ZynFilesystemClient(connection, state, log)
         self.cli = zyn.client.shell.ZynShell(self.client, log)
 
-        #self.client = ZynFilesystemClient.init_from_saved_state(
-        #    self.path_state_file
-        #)
-        #self.cli = zyn_util.cli_client.ZynCliClient(self.client)
-
     def restart_client(self, connection):
         self.client._state.to_file(self.path_state_file)
         state = zyn.client.client.State.from_file(self.path_state_file, self.log)
@@ -174,15 +169,6 @@ class TestClient(common.ZynNodeCommon):
             )
             state.to_file(path_client_state)
 
-            #ZynFilesystemClient.init(
-            #    path_client_state,
-            #    path_client_data,
-            #    self._username,
-            #    self._remote_ip,
-            #    self._remote_port,
-            #)
-
-
         connection = self._connect_and_authenticate(state)
         client_data = ClientData(
             client_id,
@@ -192,13 +178,6 @@ class TestClient(common.ZynNodeCommon):
             connection,
             self.log,
         )
-        #state.client.connect_and_authenticate(
-        #    self._password,
-        #    None,
-        #    None,
-        #    use_tls=False,
-        #    debug_protocol=True,
-        #)
         return client_data
 
     def _connect_and_authenticate(self, state):

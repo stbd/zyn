@@ -39,29 +39,59 @@ def get_logger(verbose_count):
 
 def cli():
     parser = argparse.ArgumentParser()
-    parser.add_argument('address')
-    parser.add_argument('port', type=int)
+    parser.add_argument('zyn-address')
+    parser.add_argument('zyn-port', type=int)
     parser.add_argument('username')
     parser.add_argument('--no-tls', action='store_true')
     parser.add_argument('--debug-protocol', action='store_true')
     parser.add_argument('--verbose', '-v', action='count', default=0)
+
+    subparsers = parser.add_subparsers(dest='cmd', required=True)
+
+    subparsers.add_parser('test-connection')
+
+    parser_list = subparsers.add_parser('list')
+    parser_list.add_argument('path')
+
+    subparsers.add_parser('change-password')
+
     args = vars(parser.parse_args())
 
     get_logger(args['verbose'])
-    socket = _create_socket(args['address'], args['port'], args['no_tls'])
+    socket = _create_socket(args['zyn-address'], args['zyn-port'], args['no_tls'])
     connection = _create_connection(socket, args['debug_protocol'])
     password = getpass.getpass('Password: ')
     rsp = connection.authenticate(args['username'], password)
     if rsp.is_error():
         raise RuntimeError('Failed to login')
-    connection.start_heartbeat_thread()
 
-    import time
-    try:
-        while True:
-            time.sleep(10)
-    except KeyboardInterrupt:
-        connection.disconnect()
+    cmd = args['cmd']
+    if cmd == 'test-connection':
+        print('Login successfull, connection ok')
+    elif cmd == 'list':
+        rsp = connection.query_fs_children(path=args['path'])
+        zyn.util.check_server_response(rsp)
+        rsp = rsp.as_query_fs_children_rsp()
+        if rsp.number_of_elements() == 0:
+            print('No elements found')
+            return
+
+        for e in rsp.elements:
+            if e.is_file():
+                print(f'File: {e.name}, {e.node_id}, {e.revision}, {e.size}')
+            else:
+                print(f'Dir: {e.name}, {e.node_id}')
+    elif cmd == 'change-password':
+
+        new_password = getpass.getpass('New Password: ')
+        rsp = connection.modify_user(args['username'], password=new_password)
+        zyn.util.check_server_response(rsp)
+        print('Change completed')
+
+    else:
+        raise RuntimeError(f'Unknown command "$cmd"')
+
+    connection.disconnect()
 
 
 def shell():
@@ -81,8 +111,6 @@ def shell():
     parser_init.add_argument('remote-port', type=int)
 
     args = vars(parser.parse_args())
-
-    print (args)
     log = get_logger(args['verbose'])
     path_client_conf = args['path_to_client_file']
     password = args['password']

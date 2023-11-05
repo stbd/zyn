@@ -87,7 +87,7 @@ class TestNotification(unittest.TestCase):
     def _create_notification(self, msg):
         connection = zyn.connection.ZynConnection(None)
         parsed = connection.parse_message(msg)
-        return zyn.connection.Notification(parsed)
+        return zyn.messages.Notification(parsed)
 
     def _notification_with_uint_field(self):
         return self._create_notification('V:1;NOTIFICATION:;FAKE-TYPE:U:5;;E:;')

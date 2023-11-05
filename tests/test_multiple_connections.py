@@ -2,36 +2,12 @@ import logging
 import time
 
 import zyn.errors
+import zyn.messages
 
 import common
 
 
 class TestMultipleConnections(common.ZynNodeCommon):
-    #def setUp(self):
-    #    super(TestMultipleConnections, self).setUp()
-    #    self._process = None
-    #    self._process = self._start_node_default_params(self._work_dir.name, init=True)
-    #
-    #def tearDown(self):
-    #    if self._process:
-    #        self._stop_node(self._process)
-
-    #def _stop_node(self, process, expected_return_code=0):
-    #    ret = process.poll()
-    #    if ret is not None:
-    #        assert ret == expected_return_code
-    #    else:
-    #        logging.info('Process {} was still alive, stopping'.format(process.pid))
-    #        process.kill()
-    #
-    #def _connect_and_authenticate(self):
-    #    connection = self._create_connection()
-    #    connection.enable_debug_messages()
-    #    connection.connect(self._remote_ip, self._remote_port)
-    #    rsp = connection.authenticate(self._username, self._password)
-    #    self.assertFalse(rsp.is_error())
-    #    return connection
-
     def _init_node(self):
         self._start_node(init=True)
 
@@ -86,7 +62,7 @@ class TestMultipleConnections(common.ZynNodeCommon):
     ):
         return self._expect_part_of_file_notification(
             connection,
-            zyn.connection.Notification.TYPE_MODIFIED,
+            zyn.messages.Notification.TYPE_MODIFIED,
             expected_node_id,
             expected_revision,
             expected_offset,
@@ -103,7 +79,7 @@ class TestMultipleConnections(common.ZynNodeCommon):
     ):
         return self._expect_part_of_file_notification(
             connection,
-            zyn.connection.Notification.TYPE_DELETED,
+            zyn.messages.Notification.TYPE_DELETED,
             expected_node_id,
             expected_revision,
             expected_offset,
@@ -120,7 +96,7 @@ class TestMultipleConnections(common.ZynNodeCommon):
     ):
         return self._expect_part_of_file_notification(
             connection,
-            zyn.connection.Notification.TYPE_INSERTED,
+            zyn.messages.Notification.TYPE_INSERTED,
             expected_node_id,
             expected_revision,
             expected_offset,

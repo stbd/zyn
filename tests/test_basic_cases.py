@@ -3,6 +3,7 @@ import time
 import websocket
 import zyn.connection
 import zyn.errors
+import zyn.messages
 
 import common
 
@@ -40,7 +41,7 @@ class TestBasicServerUsage(common.ZynNodeCommon):
         self._stop_node(trials=3)
         msg = c.read_message()
         self._validate_msg_is_notification(msg)
-        self._validate_notification_type(msg, zyn.connection.Notification.TYPE_DISCONNECTED)
+        self._validate_notification_type(msg, zyn.messages.Notification.TYPE_DISCONNECTED)
         self._validate_socket_is_disconnected(c)
 
     def test_authetication_with_invalid_password(self):
@@ -60,7 +61,7 @@ class TestBasicServerUsage(common.ZynNodeCommon):
         time.sleep(max_inactity_duration_secs + 1)
         msg = c.read_message()
         self._validate_msg_is_notification(msg)
-        self._validate_notification_type(msg, zyn.connection.Notification.TYPE_DISCONNECTED)
+        self._validate_notification_type(msg, zyn.messages.Notification.TYPE_DISCONNECTED)
         self._validate_socket_is_disconnected(c)
 
     def test_authentication_token(self):

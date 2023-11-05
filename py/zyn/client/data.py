@@ -6,6 +6,7 @@ import logging
 import zyn.exception
 import zyn.util
 import zyn.connection
+import zyn.messages
 
 
 _REMOTE_PATH_ROOT = '/'
@@ -476,7 +477,7 @@ class LocalFile(LocalFileSystemElement):
             n.notification_type(), self.node_id()
         ))
 
-        if n.notification_type() == zyn.connection.Notification.TYPE_MODIFIED:
+        if n.notification_type() == zyn.messages.Notification.TYPE_MODIFIED:
             rsp, new_bytes = connection.read_file(
                 self.node_id(),
                 n.block_offset,
@@ -487,7 +488,7 @@ class LocalFile(LocalFileSystemElement):
                 + new_bytes \
                 + byte_buffer[n.block_offset + n.block_size:]
 
-        elif n.notification_type() == zyn.connection.Notification.TYPE_INSERTED:
+        elif n.notification_type() == zyn.messages.Notification.TYPE_INSERTED:
             rsp, new_bytes = connection.read_file(
                 self.node_id(),
                 n.block_offset,
@@ -498,7 +499,7 @@ class LocalFile(LocalFileSystemElement):
                 + new_bytes \
                 + byte_buffer[n.block_offset:]
 
-        elif n.notification_type() == zyn.connection.Notification.TYPE_DELETED:
+        elif n.notification_type() == zyn.messages.Notification.TYPE_DELETED:
             byte_buffer = \
                 byte_buffer[0:n.block_offset] \
                 + byte_buffer[n.block_offset + n.block_size:]

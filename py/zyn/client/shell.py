@@ -104,7 +104,7 @@ class ZynShell(cmd.Cmd):
         if self._client.connection().check_for_notifications():
             notification = self._client.connection().pop_notification()
             if notification.notification_type() == \
-               zyn.connection.Notification.TYPE_DISCONNECTED:
+               zyn.messages.Notification.TYPE_DISCONNECTED:
                 print('Connection to Zyn server lost, reason: "{}"'.format(notification.reason))
             else:
                 raise NotImplementedError()

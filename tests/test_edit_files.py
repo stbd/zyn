@@ -4,6 +4,7 @@ import pytest
 
 import common
 import zyn.errors
+import zyn.messages
 
 
 class TestLargeFiles(common.ZynNodeCommon):
@@ -98,7 +99,7 @@ class TestMultipleUsersEditingFile(common.ZynNodeCommon):
             n = c.pop_notification(timeout=1)
             self._validate_notification(
                 n,
-                zyn.connection.Notification.TYPE_MODIFIED,
+                zyn.messages.Notification.TYPE_MODIFIED,
                 node_id,
                 rsp.revision,
                 offset,
@@ -112,7 +113,7 @@ class TestMultipleUsersEditingFile(common.ZynNodeCommon):
             n = c.pop_notification(timeout=1)
             self._validate_notification(
                 n,
-                zyn.connection.Notification.TYPE_INSERTED,
+                zyn.messages.Notification.TYPE_INSERTED,
                 node_id,
                 rsp.revision,
                 offset,
@@ -126,7 +127,7 @@ class TestMultipleUsersEditingFile(common.ZynNodeCommon):
             n = c.pop_notification(timeout=1)
             self._validate_notification(
                 n,
-                zyn.connection.Notification.TYPE_DELETED,
+                zyn.messages.Notification.TYPE_DELETED,
                 node_id,
                 rsp.revision,
                 offset,
