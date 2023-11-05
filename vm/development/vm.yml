@@ -72,6 +72,12 @@
       args:
         creates: "/usr/local/bin/zyn-cli"
 
+    - name: "Install Python test dependecies"
+      become: yes
+      shell: pip3 install --break-system-packages -r /zyn/tests/requirements.txt
+      args:
+        creates: "/usr/local/bin/pytest"
+
     - name: "Configure developer user"
       become: yes
       user:
