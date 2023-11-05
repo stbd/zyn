@@ -2,6 +2,7 @@ import logging
 import argparse
 import getpass
 import os.path
+import traceback
 
 import zyn.socket
 import zyn.connection
@@ -251,7 +252,6 @@ def webserver():
     parser.add_argument('--server-websocket-address', default=None)
 
     args = vars(parser.parse_args())
-    print(args)
 
     def create_connection_callback():
         s = _create_socket(args['zyn-server-ip'], args['zyn-server-port'], args['no_tls'])

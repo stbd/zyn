@@ -114,11 +114,11 @@ class ClientData:
         path_local = zyn.util.join_remote_paths([self.path_data, path_in_remote])
         os.remove(path_local)
 
-    def create_local_directory(self, path_remote):
-        path_local = zyn.util.join_remote_paths([self.path_data, path_remote])
+    def create_local_directory(self, path):
+        path_local = zyn.util.join_remote_paths([self.path_data, path])
         self.log.info('Creating directory, path="{}"'.format(path_local))
         os.makedirs(path_local)
-        return path_remote
+        return path
 
     def create_local_file(self, path_remote, content=None):
         path_local = zyn.util.join_remote_paths([self.path_data, path_remote])
@@ -400,6 +400,18 @@ class TestClientCd(TestClient):
         self.assertEqual(state.cli.get_pwd(), path)
         state.cli.do_cd('/')
         self.assertEqual(state.cli.get_pwd(), '/')
+
+    def test_client_cd_to_directory_that_exists_only_locally(self):
+        state = self._start_server_and_client()
+        path = state.create_local_directory('/dir')
+        with self.assertRaises(zyn.client.data.ZynClientException):
+            state.cli.do_cd(path)
+
+    def test_client_cd_to_directory_that_exists_only_remote(self):
+        state = self._start_server_and_client()
+        path = self._create_remote_directory(state, '/dir')
+        with self.assertRaises(zyn.client.data.ZynClientException):
+            state.cli.do_cd(path)
 
 
 class TestClientCreateAndFetch(TestClient):

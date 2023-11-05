@@ -5,13 +5,13 @@ import getpass
 import logging
 import os.path
 import sys
-import traceback
 
 import zyn.client.client
 import zyn.client.data
 import zyn.connection
 import zyn.exception
 import zyn.util
+import zyn.errors
 
 
 PATH_TO_DEFAULT_STATE_FILE = os.path.expanduser("~/.zyn-cli-client")
@@ -80,7 +80,21 @@ class ZynShell(cmd.Cmd):
         if path_remote == '/':
             pass
         else:
-            element = self._client.query_element(path_remote)
+            try:
+                element = self._client.query_element(path_remote)
+            except zyn.exception.ZynServerException as e:
+                if e.zyn_error_code == zyn.errors.InvalidPath:
+                    raise zyn.client.data.ZynClientException(
+                        f'Directory does not exists in server, path={path_remote}'
+                    ) from e
+                else:
+                    raise e
+
+            if not element.is_local():
+                raise zyn.client.data.ZynClientException(
+                    f'Directory does not exists locally, path={path_remote}'
+                )
+
             if not element.is_directory():
                 raise zyn.client.data.ZynClientException(
                     'Target is not a folder, path="{}"'.format(path_remote)
