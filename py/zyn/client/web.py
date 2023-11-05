@@ -8,6 +8,7 @@ import ssl
 import uuid
 import subprocess
 import sys
+import time
 
 import tornado.log
 import tornado.web
@@ -45,6 +46,7 @@ class UserSession:
         self._username = username
         self._password = password
         self._connection = initial_connection
+        self._created_timestamp = time.time()
 
     def _renew_connection(self):
         global create_zyn_connection
@@ -52,6 +54,9 @@ class UserSession:
         rsp = self._connection.authenticate(self._username, self._password)
         if rsp.is_error():
             raise RuntimeError('Failed to authenticate for user')
+
+    def session_age(self):
+        return time.time() - self._created_timestamp
 
     def get_connection(self):
         if self._connection is None:
@@ -266,8 +271,8 @@ def _timer_callback():
     expired_sessions = []
 
     for id_, session in user_sessions.data().items():
-        d = session.latest_login_duration()
-        if d.total_seconds() > expiration_duration_secs:
+        d = session.session_age()
+        if d > expiration_duration_secs:
             logging.getLogger(__name__).info(
                 'Cleaning up expired session: id="{}"'.format(id_)
             )
