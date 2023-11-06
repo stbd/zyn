@@ -6,6 +6,7 @@ function usage() {
     echo
     echo "where <release-type> is one of"
     echo "* py - create release of Python package"
+    echo "* docker-web - create Docker image of web-client"
 }
 
 if [ $# -ne 2 ]; then
@@ -18,7 +19,18 @@ version=$2
 
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
 
-if [ "$release_type" == "py" ] ; then
+if [ "$release_type" == "docker-web" ] ; then
+
+    tag=stbd/zyn-client-web:$version
+    docker build \
+           -t "$tag" \
+           -f "$zyn_project_root/docker/dockerfile-web-client" \
+           "$zyn_project_root"
+
+    echo "Docker image \"$tag\" created"
+    docker push "$tag"
+
+elif [ "$release_type" == "py" ] ; then
 
     path_workdir="$(mktemp -d)"
     echo "Using workdir $path_workdir"
