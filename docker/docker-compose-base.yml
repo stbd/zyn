@@ -1,0 +1,49 @@
+version: "3"
+services:
+  zyn:
+    image: stbd/zyn:0.9.0-rc-2
+    environment:
+      ZYN_DEFAULT_USERNAME:
+      ZYN_DEFAULT_USER_PASSWORD:
+      ZYN_MAX_NUMBER_OF_FILESYSTEM_ELEMENTS:
+      ZYN_MAX_SIZE_BLOB_FILE:
+      ZYN_MAX_SIZE_RANDON_ACCESS:
+      ZYN_MAX_INACTIVITY_SECONDS:
+      ZYN_TOKEN_DURATION_SECONDS:
+    secrets:
+      - zyn_gpg_secret_key
+      - zyn_gpg_password
+      - zyn_gpg_keygrip
+      - zyn_gpg_fingerprint
+    networks:
+      zyn-backend:
+        aliases:
+          - zyn-backend
+    # For debugging, exposed port should not be listed here
+    #ports:
+    #  - "8082:80"
+
+  web-client:
+    image: stbd/zyn-client-web:0.9.0-rc-2
+    #ports:
+    #  - "8082:80"
+    networks:
+      - zyn-backend
+
+  proxy:
+    image: traefik:v2.10
+    networks:
+      - zyn-backend
+
+networks:
+  zyn-backend:
+
+secrets:
+  zyn_gpg_fingerprint:
+    external: true
+  zyn_gpg_keygrip:
+    external: true
+  zyn_gpg_secret_key:
+    external: true
+  zyn_gpg_password:
+    external: true

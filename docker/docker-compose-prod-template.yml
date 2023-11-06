@@ -40,7 +40,7 @@ services:
       - zyn-backend
       - "80"
       - --no-tls
-      - --server-websocket-address=wss://zyn.hopto.org
+      - --server-websocket-address=wss://<zyn-server-domain-name>
     #ports:
     #  - "8082:80"
     networks:
