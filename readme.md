@@ -20,7 +20,7 @@ docker secret create zyn_gpg_password ...
 gpg --export-secret-key <key-email>| docker secret create zyn_gpg_secret_key -
 ```
 
-docker stack deploy --compose-file docker-compose-prod-<customized>.yml --compose-file docker/docker-compose-base.yml <stack-name>
+docker stack deploy --compose-file docker-compose-prod-<customized>.yml --compose-file docker/docker-compose-prod-base.yml <stack-name>
 
 
 ## Development Enviroment
