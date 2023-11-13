@@ -36,7 +36,7 @@ Zyn version $version
  * Server image:      $tag_image_server
  * Web client image:  $tag_image_web
 EOF
-    echo "Git tag \"$tag\" create, please push with \"git push $tag\" to publish tag"
+    echo "Git tag \"$tag\" create, please push with \"git push origin $tag\" to publish tag"
 
 elif [ "$release_type" == "docker-zyn" ] ; then
 
