@@ -1,6 +1,6 @@
 [package]
 name = "zyn"
-version = "0.1.0"
+version = "0.9.0"
 authors = ["Olli Huurinainen <huurinainen.olli@gmail.com>"]
 publish = false
 
