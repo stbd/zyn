@@ -1,0 +1,16 @@
+{
+    "name": "zynjs",
+    "version": "1.0.0",
+    "description": "Zyn Javascript library",
+    "main": "src/main.js",
+    "scripts": {
+        "zyn-compile": "browserify src/main.js > ../py/zyn/client/zyn-web-static/zyn-bundle.js",
+        "zyn-dev": "watchify -o ../py/zyn/client/zyn-web-static/zyn-bundle.js src/main.js",
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "author": "",
+    "license": "GPL-2.0-only",
+    "dependencies": {
+        "jsdiff": "git+https://github.com/kpdecker/jsdiff.git#v5.1.0"
+    }
+}

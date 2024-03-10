@@ -94,3 +94,31 @@
         mkdir -p /data/server
         mkdir -p /data/client
         chown -R vagrant:vagrant /data
+
+    - name: "Prepare Node environment"
+      block:
+        - name: "Make direcotry for modules"
+          become: yes
+          file:
+            path: "/node-modules"
+            owner: vagrant
+            group: vagrant
+            state: directory
+
+        - name: "Mount modules directory to repo workdir with bashrc"
+          become: yes
+          shell: |
+            tag=ZYN_NODEMODULES
+            sed -i "/$tag/,/$tag/d" /home/vagrant/.bashrc
+
+            cat <<EOF >> /home/vagrant/.bashrc
+            # $tag
+            node_modules_mounted=1
+            path_zyn_node_modules=/zyn/js/node_modules
+            mount | grep -q "\$path_zyn_node_modules" || node_modules_mounted=0
+            if [ \$node_modules_mounted -eq 0 ]; then
+                echo "Mounting node modules to \$path_zyn_node_modules"
+                sudo mount --bind /node-modules/ "\$path_zyn_node_modules"
+            fi
+            # /$tag
+            EOF
