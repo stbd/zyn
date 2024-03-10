@@ -1,3 +1,24 @@
+const {
+  MessageRsp,
+  ExpectRsp,
+  ListChildrenRsp,
+  OpenRsp,
+  ReadRsp,
+  Constants,
+  CreateFileRsp,
+  CreateDirectoryRsp,
+  EditRsp,
+  BatchEditRsp,
+  EditNotification,
+  DisconnectNotification,
+} = require('./messages')
+
+const {
+  FilesystemElementFile,
+  FilesystemElementDirectory,
+  Authority,
+  OpenMode,
+} = require('./common')
 
 const MSG_TYPE_AUTH = 'A';
 const MSG_TYPE_QUERY_FS_CHILDREN = 'Q-FS-C';
@@ -13,17 +34,8 @@ const MSG_HANDLER_EDIT = 'EDIT';
 const MSG_HANDLER_BATCH_EDIT = 'EDIT-BATCH';
 const MSG_HANDLER_EDIT_PREAMBLE = 'EDIT-PREAMBLE';
 
-const ELEMENT_TYPE_FILE = 0;
-const ELEMENT_TYPE_DIRECTORY = 1;
 
-const ELEMENT_FILE_TYPE_RANDOM_ACCESS = 0;
-const ELEMENT_FILE_TYPE_BLOB = 1;
-
-const AUTHORITY_TYPE_USER = 0;
-const AUTHORITY_TYPE_GROUP = 1;
-
-
-class MoficationState {
+class ModificationState {
     constructor(node_id, revision, modifications, callback, connection) {
         this._node_id = node_id;
         this._revision = revision;
@@ -66,118 +78,124 @@ class MoficationState {
     }
 }
 
-class BatchMoficationState {
-    constructor(node_id, revision, modifications, callback, connection) {
-        this._node_id = node_id;
-        this._revision = revision;
-        this._modifications = modifications;
-        this._callback = callback;
-        this._connection = connection;
-        this._operation_index = 0;
-        this._connection.edit_ra_file_preamble_batch_edit(this._node_id, this._revision, this._modifications.length, (rsp_preamble) => {
-            if (rsp_preamble.is_error()) {
-                return this._complete_operation(rsp_preamble);
-            }
-            this.apply();
-        });
-    }
 
-    apply() {
-        this._connection._expected_msg.set_callback_for_rsp(MSG_HANDLER_BATCH_EDIT, (rsp) => {
-            return this.complete_operation(rsp);
-        });
+class BatchModificationState {
+  constructor(node_id, revision, modifications, callback, connection) {
+    this._node_id = node_id;
+    this._revision = revision;
+    this._modifications = modifications;
+    this._callback = callback;
+    this._connection = connection;
+    this._operation_index = 0;
+    this._connection.edit_ra_file_preamble_batch_edit(this._node_id, this._revision, this._modifications.length, (rsp_preamble) => {
+      if (rsp_preamble.is_error()) {
+        return this._complete_operation(rsp_preamble);
+      }
+      this.apply();
+    });
+  }
 
-        zyn_show_modal_loading(`Applying modification ${this._operation_index + 1} / ${this._modifications.length}`);
-        let mod = this._modifications[this._operation_index];
-        if (mod.type == 'add') {
-            this._connection.edit_ra_batch_edit(2, mod.offset, mod.bytes.length);
-            this._connection._socket.send(mod.bytes);
-        } else if (mod.type == 'delete') {
-            this._connection.edit_ra_batch_edit(1, mod.offset, mod.size);
-        } else {
-            zyn_unhandled();
-        }
-    }
+  apply() {
+    this._connection._expected_msg.set_callback_for_rsp(MSG_HANDLER_BATCH_EDIT, (rsp) => {
+      return this.complete_operation(rsp);
+    });
 
-    complete_operation(rsp) {
-        this._revision = rsp.revision;
-        this._operation_index += 1;
-        if (rsp.is_error()) {
-            this._callback(rsp);
-        } else {
-            if (this._operation_index == this._modifications.length) {
-                this._callback(rsp);
-            } else {
-                this.apply();
-            }
-        }
+    //zyn_show_modal_loading(`Applying modification ${this._operation_index + 1} / ${this._modifications.length}`);
+
+    let mod = this._modifications[this._operation_index];
+    if (mod.type == 'add') {
+      this._connection.edit_ra_batch_edit(2, mod.offset, mod.bytes.length);
+      this._connection._socket.send(mod.bytes);
+    } else if (mod.type == 'delete') {
+      this._connection.edit_ra_batch_edit(1, mod.offset, mod.size);
+    } else {
+      zyn_unhandled();
     }
+  }
+
+  complete_operation(rsp) {
+    this._revision = rsp.revision;
+    this._operation_index += 1;
+    if (rsp.is_error()) {
+        this._callback(rsp);
+    } else {
+      if (this._operation_index == this._modifications.length) {
+        this._callback(rsp);
+      } else {
+        this.apply();
+      }
+    }
+  }
 }
 
-class ZynConnection {
-    constructor(server_url, on_connected) {
-        console.log(`Trying to connect to server at ${server_url}`);
-        this._text_encoder = new TextEncoder();
-        this._text_decoder = new TextDecoder();
-        this._socket = new WebSocket(server_url);
-        this._socket.onopen = on_connected;
-        this._socket.onerror = (event) => {};
-        this._socket.onclose = (event) => {};
-        this._socket.onmessage = (event) => this._socket_on_message(event);
-        this._socket.binaryType = "arraybuffer";
-        this._transaction_id = 1;
 
-        this._tag_end = this._text_encoder.encode('E:;');
+class Connection {
+  constructor(server_address, on_connected, on_error, on_close) {
+    this._text_encoder = new TextEncoder();
+    this._text_decoder = new TextDecoder();
 
-        this._handle_notification = null;
+    this._socket = new WebSocket(server_address);
+    this._socket.onopen = on_connected;
+    this._socket.onerror = on_error;
+    this._socket.onclose = on_close;
+    this._socket.onmessage = (event) => this._handle_socket_message(event);
+    this._socket.binaryType = "arraybuffer";
+    this._transaction_id = 1;
 
-        this._expected_msg = new ExpectRsp();
+    this._expected_msg = new ExpectRsp();
+    this._msg = null;
+    this._tag_end = this._text_encoder.encode('E:;');
+  }
+
+  is_ok() {
+    return this._socket.readyState in [WebSocket.CONNECTING, WebSocket.OPEN];
+  }
+
+  encode_to_bytes(text) {
+    return this._text_encoder.encode(text);
+  }
+
+  decode_from_bytes(bytes) {
+    return this._text_decoder.decode(bytes);
+  }
+
+  _handle_socket_message(event) {
+    let event_data = new Uint8Array(event.data);
+
+    if (this._msg !== null) {
+      this._msg.add_data(event_data);
+      if (this._msg.is_complete()) {
+        let msg = this._msg;
         this._msg = null;
+        let c = this._expected_msg.reset();
+        c(msg);
+      }
+    } else {
+      let msg = this._parse_message(event_data);
+
+      if (msg.is_notification()) {
+        this._handle_notification(msg);
+      } else if (msg.is_data_message() && !msg.is_complete()) {
+        this._msg = msg;
+      } else {
+        let c = this._expected_msg.reset();
+        c(msg);
+      }
     }
+  }
 
-    register_event_handlers(on_error, on_close, on_notitication) {
-        this._socket.onerror = on_error;
-        this._socket.onclose = on_close;
-        this._handle_notification = on_notitication;
+  _peek(msg, expected) {
+    let s = msg.substr(0, expected.length);
+    return s === expected;
+  }
+
+  _parse_advance(msg, expected) {
+    let s = msg.substr(0, expected.length);
+    if (s != expected) {
+      throw `Malformed message: expected "${expected}", received "${msg}"`;
     }
-
-    _socket_on_message(event) {
-        let event_data = new Uint8Array(event.data);
-
-        if (this._msg !== null) {
-            this._msg.add_data(event_data);
-            if (this._msg.is_complete()) {
-                let msg = this._msg;
-                this._msg = null;
-                let c = this._expected_msg.reset();
-                c(msg);
-            }
-        } else {
-            let msg = this._parse_message(event_data);
-
-            if (msg.is_notification()) {
-                this._handle_notification(msg);
-            } else if (msg.is_data_message() && !msg.is_complete()) {
-                this._msg = msg;
-            } else {
-                let c = this._expected_msg.reset();
-                c(msg);
-            }
-        }
-    }
-
-    _peek(msg, expected) {
-        let s = msg.substr(0, expected.length);
-        return s === expected;
-    }
-
-    _parse_advance(msg, expected) {
-        let s = msg.substr(0, expected.length);
-        if (s != expected) {
-            throw `Malformed message: expected "${expected}", received "${msg}"`;
-        }
-        return msg.substr(expected.length);
-    }
+    return msg.substr(expected.length);
+  }
 
     _parse_unsigned(msg) {
         msg = this._parse_advance(msg, 'U:');
@@ -439,7 +457,7 @@ class ZynConnection {
                         [msg, type_of] = this._parse_unsigned(msg);
                         [msg, name] = this._parse_string(msg);
                         [msg, node_id] = this._parse_node_id(msg);
-                        if (type_of == ELEMENT_TYPE_FILE) {
+                        if (type_of == Constants.ELEMENT_TYPE_FILE) {
 
                             let revision = null, file_type = null, size = null, is_open = null;
                             [msg, revision] = this._parse_unsigned(msg);
@@ -448,7 +466,7 @@ class ZynConnection {
                             [msg, is_open] = this._parse_unsigned(msg);
                             rsp.add_element(new FilesystemElementFile(name, node_id, revision, file_type, size, is_open));
 
-                        } else if (type_of == ELEMENT_TYPE_DIRECTORY) {
+                        } else if (type_of == Constants.ELEMENT_TYPE_DIRECTORY) {
                             let auth_read = null;
                             let auth_write = null;
                             [msg, auth_read] = this._parse_authority(msg);
@@ -611,9 +629,9 @@ class ZynConnection {
 
     apply_modifications(node_id, revision, modifications, callback) {
         if (modifications.length > 1) {
-            new BatchMoficationState(node_id, revision, modifications, callback, this);
+            new BatchModificationState(node_id, revision, modifications, callback, this);
         } else {
-            new MoficationState(node_id, revision, modifications, callback, this);
+            new ModificationState(node_id, revision, modifications, callback, this);
         }
     }
 
@@ -649,3 +667,5 @@ class ZynConnection {
         this._socket.send(msg.buffer);
     }
 }
+
+module.exports = Connection

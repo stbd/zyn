@@ -25,6 +25,8 @@ Available commands:"
 for script in "$path_scripts"/zyn-*; do
     echo -e "\\t\$(basename "\$script")"
 done
+
+cd $zyn_project_root
 # /$tag
 EOF
 

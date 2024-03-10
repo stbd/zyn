@@ -1,0 +1,21 @@
+{
+    "name": "zynjs",
+    "version": "1.0.0",
+    "description": "Zyn Javascript library",
+    "main": "src/main.js",
+    "scripts": {
+        "zyn-compile": "esbuild --platform=browser --global-name=zyn --bundle src/main.js --outfile=../py/zyn/client/zyn-web-static/zyn-bundle.js",
+        "zyn-compile-watch": "esbuild --watch --platform=browser --global-name=zyn   --bundle src/main.js --outfile=../py/zyn/client/zyn-web-static/zyn-bundle.js",
+        "zyn-compile-css": "tailwindcss -i css/zyn.css -o ../py/zyn/client/zyn-web-static/zyn.css",
+        "zyn-compile-css-watch": "tailwindcss --watch --poll -i css/zyn.css -o ../py/zyn/client/zyn-web-static/zyn.css",
+        "static-analysis": "standard --ignore '*test_*'",
+        "test": "mocha"
+    },
+    "author": "",
+    "license": "GPL-2.0-only",
+    "dependencies": {
+        "diff": "^5.2.0",
+        "showdown": "^2.1.0",
+        "tailwindcss": "^3.4.1"
+    }
+}
