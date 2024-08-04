@@ -242,7 +242,6 @@ def webserver():
     parser.add_argument('zyn-server-ip')
     parser.add_argument('zyn-server-port', type=int)
 
-
     parser.add_argument('--no-tls', action='store_true')
     parser.add_argument('--zyn-server-path-to-cert', help='', default=None)
     parser.add_argument('--debug-protocol', action='store_true')
@@ -252,6 +251,7 @@ def webserver():
     parser.add_argument('--server-websocket-address', default=None)
 
     args = vars(parser.parse_args())
+    log = get_logger(args['verbose'])
 
     def create_connection_callback():
         s = _create_socket(args['zyn-server-ip'], args['zyn-server-port'], args['no_tls'])
@@ -277,5 +277,6 @@ def webserver():
         args['local-port'],
         server_websocket_address,
         create_connection_callback,
+        log,
         args['debug_tornado'],
     )
