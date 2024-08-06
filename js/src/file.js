@@ -3,8 +3,14 @@ const {
 } = require('./common');
 const diff = require('diff');
 const showdown = require('showdown');
+const pdfjs = require('pdfjs-dist');
+const pdfjs_worker = require('pdfjs-dist/build/pdf.worker.mjs');
+
 
 class Base {
+  static filename_extension = null;
+  static is_editable = false;
+
   constructor(open_rsp, client, element) {
     this._client = client
     this._ui = client._ui;
@@ -16,8 +22,6 @@ class Base {
   }
 
   render() { throw 'Not implemented'; }
-  switch_to_edit_mode() { throw 'Not implemented'; }
-  switch_to_view_mode() { throw 'Not implemented'; }
   save() { throw 'Not implemented'; }
   open_mode() { return null; }
   has_changes() { return false; }
@@ -55,10 +59,14 @@ class Base {
 }
 
 class MarkdownFile extends Base {
+  static filename_extension = '.md';
+  static is_editable = true;
+
   constructor(open_rsp, client, element, mode) {
     super(open_rsp, client, element);
     this._content = null;
     this._mode = null;
+    this._mode_server = null;
     this._converter = new showdown.Converter();
     this._set_mode(mode);
 
@@ -72,9 +80,6 @@ class MarkdownFile extends Base {
         open_rsp.page_size,
         (rsp) => {
           if (rsp.is_error()) {
-            throw 'not implemetneed'
-          }
-          if (!rsp.is_complete()) {
             throw 'not implemetneed'
           }
           this._revision = rsp.revision
@@ -99,6 +104,10 @@ class MarkdownFile extends Base {
       this._ui.file_area_button_edit(false);
       this._ui.file_area_button_save(true);
       this._ui.file_area_button_cancel(true);
+      this._mode_server = OpenMode.edit;
+    }
+    if (this._mode_server === null) {
+      this._mode_server = mode;
     }
   }
 
@@ -107,7 +116,7 @@ class MarkdownFile extends Base {
       return ;
     }
 
-    if (mode === OpenMode.edit) {
+    if (mode === OpenMode.edit && this._mode_server !== OpenMode.edit) {
       // File needs to opened in edit mode
       this._ui.show_loading_modal();
       this._connection.close_file(this._node_id, (rsp) => {
@@ -124,10 +133,11 @@ class MarkdownFile extends Base {
           this._client.update_browser_url();
         });
       });
-    } else if (mode === OpenMode.read) {
+    } else {
       // We can just rerender
       this._set_mode(mode);
       this.render();
+      this._client.update_browser_url();
     }
   }
 
@@ -182,7 +192,11 @@ class MarkdownFile extends Base {
         this.render_empty();
       } else {
         this._ui.set_file_content(
-          this._converter.makeHtml(this._content)
+          `
+<div class="prose">
+${this._converter.makeHtml(this._content)}
+</div>
+          `
         );
       }
     } else if (this._mode == OpenMode.edit) {
@@ -192,3 +206,62 @@ class MarkdownFile extends Base {
 }
 
 exports.MarkdownFile = MarkdownFile;
+
+class PdfFile extends Base {
+  static filename_extension = '.pdf';
+  static is_editable = false;
+
+  constructor(open_rsp, client, element, mode) {
+    super(open_rsp, client, element);
+    this._content = null;
+    if (open_rsp.size === 0) {
+      this._content = '';
+      console.log('empty')
+      this.render()
+    } else {
+      this.read_file_content(
+        0,
+        open_rsp.size,
+        open_rsp.page_size,
+        (rsp) => {
+          if (rsp.is_error()) {
+            throw 'not implemetneed'
+          }
+          this._revision = rsp.revision
+          this._content = this._connection.decode_from_bytes(rsp.data());
+          console.log(`content ${this._content.length}` )
+          this.render();
+        }
+      );
+    }
+  }
+
+  render() {
+    console.log(`Rendering PDF`)
+    let canvas = this._ui.create_file_content_canvas();
+    let context = canvas.getContext('2d');
+    var scale = 1.5;
+
+    pdfjs.GlobalWorkerOptions.workerSrc = 'static/pdf-worker.mjs'
+
+    pdfjs.getDocument({data: this._content}).promise.then(function(pdf) {
+      console.log('PDF loaded');
+
+      let pageNumber = 1;
+      pdf.getPage(pageNumber).then(function(page) {
+        var viewport = page.getViewport({scale: scale});
+        var render_context = {
+          canvasContext: context,
+          viewport: viewport
+        };
+        page.render(render_context).promise.then(function () {
+          console.log('Page rendered');
+        });
+      });
+    }, function (reason) {
+      console.error(reason);
+    });
+  }
+}
+
+exports.PdfFile = PdfFile;

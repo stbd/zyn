@@ -1,6 +1,7 @@
 const connection = require('./connection');
 const {
   MarkdownFile,
+  PdfFile,
 } = require('./file');
 const {
   OpenMode,
@@ -29,6 +30,7 @@ class Client {
       filename = null;
     }
 
+
     console.log(`Initializing client with parent "${path_parent}", file "${filename}", root url "${root_url}" to server at "${server_address}"`)
 
     this._path_dir = path_parent;
@@ -36,6 +38,7 @@ class Client {
     this._ui = controller;
     this._file = null;
 
+    this._ui.show_loading_modal('Initializing...')
     this._ui.register_client_callbacks(this);
     this._ui.set_file_content_text('File');
 
@@ -54,6 +57,7 @@ class Client {
 
     setTimeout(() => this.healtcheck_callback(), HEALTHCHECK_TIMER_DURATION);
     this.update_browser_url();
+    this._ui.show_full_sidebar();
   }
 
   path(children=null) {
@@ -104,8 +108,10 @@ class Client {
   }
 
   map_filename_to_handler(filename) {
-    if (filename.endsWith('.md')) {
+    if (filename.endsWith(MarkdownFile.filename_extension)) {
       return MarkdownFile;
+    } else if (filename.endsWith(PdfFile.filename_extension)) {
+      return PdfFile;
     } else {
       return null;
     }
@@ -115,7 +121,6 @@ class Client {
     if (!this._connection.is_ok()) {
       console.log('reconnecting')
     }
-    console.log(`Healthcheck: ${this._connection.is_ok()}`)
     setTimeout(() => this.healtcheck_callback(), HEALTHCHECK_TIMER_DURATION);
   }
 
@@ -175,29 +180,53 @@ class Client {
   }
 
   handle_create_clicked(type_of_element, user_action, name) {
-    console.log(`handle_create_clicked ${user_action}`);
+    console.log(`handle_create_clicked ${type_of_element}  ${user_action}`);
     if (user_action == 'cancel') {
-      this._ui.reset_and_hide_create_element_modal()
+      this._ui.reset_and_hide_create_element_modal();
       return
     }
 
     if (type_of_element == 'markdown') {
+      if (this.map_filename_to_handler(name) !== MarkdownFile) {
+        this._ui.activate_modal_notification(
+          'Note',
+          `Markdown filename should have extension ${MarkdownFile.filename_extension}
+          <br\>
+          <br\>
+          Plaese try again
+          `,
+          'Ok',
+          () => {
+            this._ui.hide_modals();
+          }
+        );
+        return ;
+      }
+
       console.log(`Creating New Markdown file ${name}`);
       this._connection.create_file_ra(name, this._path_dir, (rsp) => this.handle_create_response('markdown', rsp));
+      this._ui.show_loading_modal();
     } else {
       throw 'Invalid '
     }
   }
 
   handle_create_response(type_of_element, rsp) {
-    // todo
-    console.log(rsp)
+    if (rsp.is_error()) {
+      this._ui.unhandled_sittuation_modal(`server replied with error code ${rsp.error_code}`)
+      return ;
+    }
+    this._ui.reset_and_hide_create_element_modal();
+    this._connection.query_element_children(
+      this._path_dir,
+      (rsp) => this.handle_query_children_rsp(rsp, this._path_dir),
+    );
   }
 
   handle_connection_completed(rsp, filename, file_mode) {
     if (rsp.is_error()) {
       this._ui.unhandled_sittuation_modal(`server replied with error code ${rsp.error_code}`)
-      return
+      return ;
     }
     this._connection.query_element_children(
       this._path_dir,
@@ -225,13 +254,14 @@ class Client {
 
     this._path_dir = new_path_dir
     this._ui.set_working_dir_path(this._path_dir);
-    this._ui.show_full_sidebar();
     this._ui.render_filesystem_elements(
       rsp.elements,
+      this.map_filename_to_handler,
       (element, mode) => this.handle_file_clicked(element, mode),
       (element) => this.handle_directory_clicked(element),
       (element) => this.handle_fs_element_delete_clicked(element),
     );
+    this._ui.hide_modals();
     return rsp.elements;
   }
 
