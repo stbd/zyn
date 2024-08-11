@@ -20,8 +20,9 @@
 
     <div id="modal-loading-root" class="absolute bottom-[50%] left-[12.5%] z-[11] bg-zyn_green border-solid border-2 rounded-lg w-[75%] hidden">
         <div class="m-5">
-            <span class="text-xl my-[3rem] text-center block">Loading...</span>
             <div class="my-[3rem] mx-auto loading_circle"></div>
+            <span class="text-3xl my-[3rem] text-center block">Loading...</span>
+            <span id="modal-loading-description" class="my-[3rem] text-center block"></span>
         </div>
     </div>
 
@@ -38,7 +39,7 @@
             </div>
         </div>
 
-        <div class="flex h-[calc(100%-7rem)] min-w-[60rem]">
+        <div class="flex h-[calc(100%-7rem)] min-w-[60rem] w-full">
 
             <div id="layout-sidebar" class="relative w-[25rem] mx-5 overflow-auto hidden">
                 <div class="sidebar-element-full relative border-solid border-2 rounded border-zyn_green mx-2 my-10 p-2">
@@ -55,7 +56,7 @@
                     <button id="button-create-markdown" class="zyn-button px-2 mt-4 mx-1">Markdown</button>
                     <button id="button-create-directory" class="zyn-button px-2 mt-4 mx-1">Directory</button>
 
-                    <div id="sidebar-create-element-modal" class="hidden absolute w-[23rem] top-[10%] left-[2%] bg-white rounded-md border-2 z-5">
+                    <div id="sidebar-create-element-modal" class="hidden absolute w-[23rem] top-[10%] left-[2%] bg-white rounded-md border-2 z-[5]">
                         <span class="block ml-4 my-2">Name</span>
                         <span id="sidebar-create-element-modal-desc" class="block ml-4 my-2">Description</span>
                         <input id="sidebar-create-element-modal-input" class="block mx-4 border-2 w-[20rem] mb-2">
@@ -85,7 +86,7 @@
 
             </div>
 
-            <div id="file-area" class="relative grow border-l-2">
+            <div id="file-area" class="relative grow border-l-2 w-[100%]">
                 
                     <div class="h-[5rem] border-b-2">
                         <div class="ml-5">
@@ -109,8 +110,9 @@
                         </div>
                     </div>
 
-                    <div id="file-content" class="overflow-auto">
-                     </div>
+                    <div id="file-content" class="overflow-auto w-[100%] h-[calc(100%-5rem)] m-1">
+                        
+                    </div>
             </div>
             <div class="basis-4 border-l-2"></div>
 
@@ -177,6 +179,7 @@
                 }
 
                 activate_modal_notification(header, description, button_text, button_callback) {
+                    this.hide_modals();
                     document.getElementById("modal-background").classList.remove('hidden');
                     document.getElementById("modal-notification-root").classList.remove('hidden');
                     document.getElementById("modal-header").innerHTML = header;
@@ -215,9 +218,10 @@
                     )
                 }
 
-                show_loading_modal() {
+                show_loading_modal(description="") {
                     document.getElementById("modal-background").classList.remove('hidden');
                     document.getElementById("modal-loading-root").classList.remove('hidden');
+                    document.getElementById("modal-loading-description").innerHTML = description;
                 }
 
                 show_create_element_modal(description, placeholder, callback_create, callback_cancel) {
@@ -263,6 +267,10 @@
                     window.history.replaceState(null, null, url.href);
                 }
 
+                get_browser_url() {
+                    return new URL(window.location.href);    
+                }
+
                 show_full_sidebar() {
                     document.getElementById("layout-sidebar").classList.remove('hidden');
                     document.getElementById("layout-sidebar").classList.add(this.sidebar_width_full);
@@ -288,7 +296,8 @@
                 }
 
                 render_filesystem_elements(
-                    elements, 
+                    elements,
+                    element_to_handler,
                     open_file_callback, 
                     open_directory_callback,
                     delete_element_callback,
@@ -298,6 +307,7 @@
 
                     for (let e of elements) {
 
+                        let handler = element_to_handler(e.name);
                         let button_edit = null;
                         let icon = document.createElement('div');
                         let name = document.createElement('span');
@@ -310,13 +320,17 @@
                         button_delete.classList.add('zyn-button')
 
                         if (e instanceof zyn.FilesystemElementFile) {
-                            button_edit = document.createElement('button');
-                            button_edit.classList.add('zyn-button')
-                            button_edit.innerHTML = 'Edit';
+                            if (handler.is_editable) {
+                                button_edit = document.createElement('button');
+                                button_edit.classList.add('zyn-button')
+                                button_edit.innerHTML = 'Edit';
+                                button_edit.addEventListener("click", (event) => {
+                                    open_file_callback(e, zyn.OpenMode.edit);
+                                });
+                            } else {
+                                button_edit = document.createElement('div');
+                            }
                             icon.innerHTML = '&#x1F5CE;';
-                            button_edit.addEventListener("click", (event) => {
-                                open_file_callback(e, zyn.OpenMode.edit);
-                            });
                             name.addEventListener("click", (event) => {
                                 open_file_callback(e, zyn.OpenMode.read);
                             });
@@ -342,6 +356,22 @@
                 set_file_content(content) {
                     let file_content = document.getElementById("file-content");
                     file_content.innerHTML = content;
+                }
+
+                create_file_content_canvas() {
+                    const output_scale = window.devicePixelRatio || 1;
+                    const transform = output_scale !== 1 ? [output_scale, 0, 0, output_scale, 0, 0] : null;
+                    const canvas = document.createElement("canvas");
+                    let file_content = document.getElementById("file-content");
+                    const computed_style = window.getComputedStyle(file_content);
+
+                    file_content.innerHTML = '';
+                    file_content.appendChild(canvas);
+
+                    canvas.id = 'file-canvas';
+                    canvas.width = parseInt(computed_style.width);
+                    canvas.height = parseInt(computed_style.height);
+                    return canvas;
                 }
 
                 set_file_content_text(text) {

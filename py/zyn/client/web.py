@@ -47,6 +47,7 @@ def _get_client_cookie(handler):
             COOKIE_NAME,
             max_age_days=COOKIE_DURATION_DAYS
         ))
+        print(cookie_user_id)
     except ValueError:
         pass
     except TypeError:
@@ -317,6 +318,21 @@ class LoginHandler(tornado.web.RequestHandler):
                 self.redirect(url)
 
 
+class ReloginHandler(tornado.web.RequestHandler):
+    def post(self, args, kwargs=None):
+        global user_sessions
+        user_id = _get_client_cookie(self)
+
+        if user_id is None or not user_sessions.has_session(user_id):
+            self.set_status(403)
+            return
+
+        session = user_sessions.session(user_id)
+        token = session.allocate_token()
+        session.release_connection()
+        self.write({'token': token})
+
+
 class LogoutHandler(tornado.web.RequestHandler):
     def get(self, args, kwargs=None):
         _logout_user(self)
@@ -363,6 +379,7 @@ def start_server(
             (r'/raw/(.*)', RawHandler),
             (r'/fs(.*)', MainHandler),
             (r'/login(.*)', LoginHandler),
+            (r'/relogin(.*)', ReloginHandler),
             (r'/logout(.*)', LogoutHandler),
             (r'/(.*)', RootHandler),
         ],

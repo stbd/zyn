@@ -147,6 +147,15 @@ class Connection {
     this._tag_end = this._text_encoder.encode('E:;');
   }
 
+  handle_notification(msg) {
+    // todo
+    throw('Unhandled')
+  }
+
+  close() {
+    this._socket.close();
+  }
+
   is_ok() {
     return this._socket.readyState in [WebSocket.CONNECTING, WebSocket.OPEN];
   }

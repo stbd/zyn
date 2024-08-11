@@ -36,6 +36,7 @@ class Client {
     this._path_dir = path_parent;
     this._root_url = root_url;
     this._ui = controller;
+    this._server_address = server_address;
     this._file = null;
 
     this._ui.show_loading_modal('Initializing...')
@@ -46,18 +47,33 @@ class Client {
       file_mode = OpenMode.read;
     }
 
+    this.create_connection_and_auhenticate(
+      authentication_token,
+      (rsp) => this.handle_connection_completed(rsp, filename, file_mode)
+    );
+
+    this.update_browser_url();
+    this._ui.show_full_sidebar();
+  }
+
+  connection() {
+    return this._connection;
+  }
+
+  ui() {
+    return this._ui;
+  }
+
+  create_connection_and_auhenticate(token, callback) {
     this._connection = new connection(
-      server_address,
-      (event) => {
-        this._connection.authenticate_with_token(authentication_token, (rsp) => this.handle_connection_completed(rsp, filename, file_mode));
+      this._server_address,
+      (_event) => {
+        setTimeout(() => this.healtcheck_callback(), HEALTHCHECK_TIMER_DURATION);
+        this._connection.authenticate_with_token(token, (rsp) => callback(rsp));
       },
       (event) => this.on_socket_error(event),
       (event) => this.on_socket_close(event),
     );
-
-    setTimeout(() => this.healtcheck_callback(), HEALTHCHECK_TIMER_DURATION);
-    this.update_browser_url();
-    this._ui.show_full_sidebar();
   }
 
   path(children=null) {
@@ -99,9 +115,11 @@ class Client {
     } else {
       let url_postfix = `${this._root_url}/${this._file.path_to_file()}`;
       let params = {}
-      let mode = this._file.open_mode();
-      if (mode !== null) {
-        params['mode'] = mode
+      if (this._file.constructor.is_editable) {
+        let mode = this._file.open_mode();
+        if (mode !== null) {
+          params['mode'] = mode
+        }
       }
       this._ui.set_browser_url(url_postfix, params);
     }
@@ -120,8 +138,99 @@ class Client {
   healtcheck_callback() {
     if (!this._connection.is_ok()) {
       console.log('reconnecting')
+      this._ui.activate_modal_notification(
+        'Connection closed',
+        'Connection to server was closed, click reconnect to reconnect',
+        'Reconnect',
+        () => this.handle_reconnect(),
+      );
+    } else {
+      setTimeout(() => this.healtcheck_callback(), HEALTHCHECK_TIMER_DURATION);
     }
-    setTimeout(() => this.healtcheck_callback(), HEALTHCHECK_TIMER_DURATION);
+  }
+
+  handle_reconnect() {
+    this._ui.show_loading_modal('Reconnecting...')
+    let browser_url = this._ui.get_browser_url();
+    let reconnect_url = new URL(`${browser_url.protocol}//${browser_url.host}/relogin`);
+    let http = new XMLHttpRequest();
+    let client = this;
+
+    http.onreadystatechange = function() {
+      if (http.readyState != 4) {
+        return ;
+      }
+      if (http.status != 200) {
+
+        return ;
+      }
+      const token = JSON.parse(http.responseText)['token'];
+      client.create_connection_and_auhenticate(token, (rsp) => client.restore_state_after_reauthenticating(rsp));
+    };
+    http.open("POST", reconnect_url.href, true);
+    http.send(null);
+  }
+
+  restore_state_after_reauthenticating(rsp) {
+    if (rsp.is_error()) {
+      this._ui.unhandled_sittuation_modal(`server replied with error code ${rsp.error_code}`)
+      return ;
+    }
+
+    if (this._file === null) {
+      this._ui.hide_modals();
+      return ;
+    }
+
+    if (this._file.constructor.is_editable && this._file.open_mode() == OpenMode.edit) {
+      this._connection.open_file(
+        this._file.node_id(),
+        OpenMode.edit,
+        (rsp) => {
+          if (rsp.revision != this._file.revision()) {
+
+            if (this._file.has_changes()) {
+
+              this._ui.activate_modal_notification(
+                'Note',
+                `This file has been modified on remote, please copy changes and reload
+                <br\>
+                <br\>
+                `,
+                'Ok',
+                () => {
+                  this._ui.hide_modals();
+                }
+              );
+
+            } else {
+
+              const object = this.map_filename_to_handler(this._file.filename());
+              this._file = new object(rsp, this, this._file.filename(), OpenMode.edit);
+
+            }
+          } else {
+            this._ui.hide_modals();
+          }
+      });
+
+    } else {
+
+      this._connection.open_file(
+        this._file.node_id(),
+        OpenMode.read,
+        (rsp) => {
+          if (rsp.revision != this._file.revision()) {
+
+            const object = this.map_filename_to_handler(this._file.filename());
+            this._file = new object(rsp, this, this._file.filename(), OpenMode.read);
+
+          } else {
+            this._ui.hide_modals();
+          }
+      });
+
+    }
   }
 
   on_socket_error(e) {
@@ -205,7 +314,7 @@ class Client {
 
       console.log(`Creating New Markdown file ${name}`);
       this._connection.create_file_ra(name, this._path_dir, (rsp) => this.handle_create_response('markdown', rsp));
-      this._ui.show_loading_modal();
+      this._ui.show_loading_modal('Creating file...');
     } else {
       throw 'Invalid '
     }
@@ -266,7 +375,7 @@ class Client {
   }
 
   handle_file_clicked(element, mode) {
-    this._ui.show_loading_modal();
+    this._ui.show_loading_modal(`Loading file ${element.name}`);
     console.log(`Opening element "${element.name}" with node id ${element.node_id}`)
     this._connection.open_file(element.node_id, mode, (rsp) => this.handle_open_file_rsp(rsp, mode, element));
   }
@@ -292,14 +401,14 @@ class Client {
       return
     }
 
-    this._ui.hide_modals();
     const object = this.map_filename_to_handler(element.name);
     if (object === null) {
       this._ui.unhandled_sittuation_modal(`no handler found for elment with name ${element.name}`);
       return ;
     }
-    this._file = new object(rsp, this, element, mode);
+    this._file = new object(rsp, this, element.name, mode);
     this.update_browser_url();
+    this._ui.hide_modals();
   }
 }
 
