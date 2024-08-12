@@ -216,7 +216,9 @@ class Client {
 
             }
           } else {
+
             this._ui.hide_modals();
+
           }
       });
 

@@ -71,6 +71,7 @@ class MarkdownFile extends Base {
     this._mode_server = null;
     this._converter = new showdown.Converter();
     this._set_mode(mode);
+    this._edited = false;
 
     this._client.ui().show_loading_modal('Loading file content...')
 
@@ -95,6 +96,7 @@ class MarkdownFile extends Base {
   }
 
   open_mode() { return this._mode; }
+  file_edited() { this._edited = true; }
 
   _set_mode(mode) {
     this._mode = mode;
@@ -204,7 +206,10 @@ ${this._converter.makeHtml(this._content)}
         );
       }
     } else if (this._mode == OpenMode.edit) {
-      this._client.ui().set_file_content_textarea(this._content);
+      this._client.ui().set_file_content_textarea(
+        this._content,
+        () => this.file_edited(),
+      );
     }
     this._client.ui().hide_modals();
   }

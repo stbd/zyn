@@ -380,7 +380,7 @@
                     )
                 }
 
-                set_file_content_textarea(content) {
+                set_file_content_textarea(content, edited_callback) {
                     let file_area = document.getElementById("file-area");
                     let line_height = parseInt(getComputedStyle(document.getElementById("file-area")).lineHeight);
                     let number_of_rows = (file_area.offsetHeight - 5 * line_height) / line_height;
@@ -388,6 +388,20 @@
                     this.set_file_content(
                        `<textarea id="file-content-textarea" class="p-0.5 bg-zyn_green w-[100%]" rows=${number_of_rows} wrap='off'>${content}</textarea>`
                     )
+                    let textarea = document.getElementById("file-content-textarea");
+                    textarea.addEventListener('paste', function(e) {
+                        e.preventDefault();
+
+                        if (e.clipboardData) {
+                            content = (e.originalEvent || e).clipboardData.getData('text/plain');
+                            document.execCommand('insertText', false, content);
+                        } else if (window.clipboardData) {
+                            content = window.clipboardData.getData('Text');
+                            document.selection.createRange().pasteHTML(content);
+                        }   
+                    });
+                    textarea.onkeyup = edited_callback;
+                    textarea.onchange = edited_callback;
                 }
 
                 get_file_textarea_content() {
