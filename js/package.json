@@ -4,9 +4,9 @@
     "description": "Zyn Javascript library",
     "main": "src/main.js",
     "scripts": {
-        "zyn-compile": "esbuild --platform=browser --global-name=zyn --bundle src/main.js --outfile=../py/zyn/client/zyn-web-static/zyn-bundle.js",
-        "zyn-compile-watch": "esbuild --watch --platform=browser --global-name=zyn   --bundle src/main.js --outfile=../py/zyn/client/zyn-web-static/zyn-bundle.js",
-        "zyn-compile-css": "tailwindcss -i css/zyn.css -o ../py/zyn/client/zyn-web-static/zyn.css",
+        "zyn-compile-js": "node esbuild.mjs",
+        "zyn-compile-js-watch": "esbuild --watch --platform=browser --global-name=zyn --bundle src/main.js --outfile=../py/zyn/client/zyn-web-static/zyn-bundle.js",
+        "zyn-compile-css": "tailwindcss -i css/zyn.css -o zyn.css",
         "zyn-compile-css-watch": "tailwindcss --watch --poll -i css/zyn.css -o ../py/zyn/client/zyn-web-static/zyn.css",
         "static-analysis": "standard --ignore '*test_*'",
         "test": "mocha"
@@ -19,5 +19,10 @@
         "pdfjs-dist": "^4.5.136",
         "showdown": "^2.1.0",
         "tailwindcss": "^3.4.1"
+    },
+    "devDependencies": {
+        "esbuild": "^0.23.0",
+        "mocha": "^10.7.3",
+        "standard": "^17.1.0"
     }
 }
