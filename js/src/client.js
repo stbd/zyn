@@ -73,7 +73,13 @@ class Client {
       },
       (event) => this.on_socket_error(event),
       (event) => this.on_socket_close(event),
+      (msg) => this.handle_notification(msg),
     );
+  }
+
+  handle_notification(msg) {
+    console.log('Notification')
+    console.log(msg)
   }
 
   path(children=null) {
