@@ -149,7 +149,7 @@ class Connection {
     this._tag_end = this._text_encoder.encode('E:;');
   }
 
-  handle_notification(msg) {
+  _handle_notification(msg) {
     this._on_notification(msg)
   }
 
