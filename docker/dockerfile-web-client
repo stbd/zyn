@@ -1,9 +1,21 @@
+FROM node:20.11.0-alpine as build
+
+WORKDIR /zyn
+COPY py /py
+COPY js /zyn
+RUN npm install
+RUN npm run-script zyn-compile-js
+RUN npm run-script zyn-compile-css
+
 FROM python:3.9-bookworm
 
 COPY py/requirements.txt /requirements.txt
 RUN pip install -r /requirements.txt
 
+RUN mkdir -p /zyn
 COPY py /zyn
+COPY --from=build /zyn/zyn.js /zyn/zyn/client/zyn-web-static
+COPY --from=build /zyn/zyn.css /zyn/zyn/client/zyn-web-static
 RUN pip install /zyn
 
 ENTRYPOINT ["/usr/local/bin/zyn-webserver"]

@@ -24,11 +24,19 @@ docker secret create gpg_fingerprint "$path_test_user_gpg_files/.zyn-test-user-g
 echo
 echo "Docker swarm ready!"
 echo
-echo "Push image to 127.0.0.1:5000/zyn and 127.0.0.1:5000/zyn-web-client to registry"
-echo "If needed retag image with \"docker tag <old-image> 127.0.0.1:5000/zyn\""
-echo "Then push with \"docker push 127.0.0.1:5000/zyn\""
+echo "Build Zyn server and webclient"
 echo
-echo "To deploy, run \"docker stack deploy --compose-file docker/docker-compose.yml zyn\""
+echo "docker build -t 127.0.0.1:5000/zyn -f docker/dockerfile-zyn ."
+echo "docker build -t 127.0.0.1:5000/zyn-web-client -f docker/dockerfile-web-client ."
+echo
+echo "Push images to 127.0.0.1:5000/zyn and 127.0.0.1:5000/zyn-web-client to registry"
+echo "docker push 127.0.0.1:5000/zyn"
+echo "docker push 127.0.0.1:5000/zyn-web-client"
+echo
+echo "(If needed retag image with \"docker tag <old-tag> 127.0.0.1:5000/<service>\")"
+echo
+echo "To deploy, run:"
+echo "docker stack deploy --compose-file docker/docker-compose.yml zyn"
 echo
 echo "To cleanup:"
 echo "Delete service: \"docker service ls\" to list them and \"docker service rm <service>\" to delete"

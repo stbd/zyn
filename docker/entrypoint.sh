@@ -3,10 +3,10 @@ set -euo pipefail
 
 gpg_agent_cache_expires=$((60 * 60 * 24 * 365 * 10))
 path_secrets=/run/secrets
-path_secret_gpg_secret_key=$path_secrets/zyn_gpg_secret_key
-path_secret_gpg_password=$path_secrets/zyn_gpg_password
-path_secret_gpg_keygrip=$path_secrets/zyn_gpg_keygrip
-path_secret_gpg_fingerprint=$path_secrets/zyn_gpg_fingerprint
+path_secret_gpg_secret_key=$path_secrets/gpg_secret_key
+path_secret_gpg_password=$path_secrets/gpg_password
+path_secret_gpg_keygrip=$path_secrets/gpg_keygrip
+path_secret_gpg_fingerprint=$path_secrets/gpg_fingerprint
 path_data=/data
 
 # Call GPG with some command to make sure .gnupg is generated to user home
