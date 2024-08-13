@@ -6,7 +6,7 @@
     "scripts": {
         "zyn-compile-js": "node esbuild.mjs",
         "zyn-compile-js-watch": "esbuild --watch --platform=browser --global-name=zyn --bundle src/main.js --outfile=../py/zyn/client/zyn-web-static/zyn.js",
-        "zyn-compile-css": "tailwindcss -i css/zyn.css -o zyn.css",
+        "zyn-compile-css": "tailwindcss -i css/zyn.css --minify -o zyn.css",
         "zyn-compile-css-watch": "tailwindcss --watch --poll -i css/zyn.css -o ../py/zyn/client/zyn-web-static/zyn.css",
         "static-analysis": "standard --ignore '*test_*'",
         "test": "mocha"
