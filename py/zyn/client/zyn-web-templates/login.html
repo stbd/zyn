@@ -1,7 +1,6 @@
 <!doctype html>
 <head>
     <title>Zyn - Login</title>
-    <script src="{{ static_url('zyn-bundle.js') }}" type="text/javascript"></script>
     <link href="{{ static_url('zyn.css') }}" rel="stylesheet">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
@@ -46,6 +45,8 @@
                 set_error_description("Login failed: invalid credentials");
             } else if (error === "system") {
                 set_error_description("Login failed: system error");
+            } else {
+                
             }
         }
 
