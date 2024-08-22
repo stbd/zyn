@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
 
-<body class="h-screen w-screen">
+<body class="h-[calc(100dvh)] w-screen">
 
     <div id="modal-background" class="absolute w-screen h-screen bg-zinc-500 z-[10] opacity-50 hidden"></div>
     
@@ -30,33 +30,33 @@
 
         <div class="w-screen h-[5rem] border-b-2">
             <div class="flex ">
-                <span class="text-5xl px-10 py-3 tracking-wider">Zyn</span>
+                <span class="text-5xl pl-10 py-3 tracking-wider">Zyn</span>
                 <div class="flex-auto"></div>
-                <button class="mx-2 mt-5 px-10 zyn-button">Server Info</button>
+                <button class="mx-2 mt-5 px-5 zyn-button h-[3rem]">Server Info</button>
                 <a href="/logout">
-                    <button class="mr-10 mt-5 px-10 zyn-button">Logout</button>
+                    <button class="mr-5 mt-5 px-5 zyn-button h-[3rem]">Logout</button>
                 </a>
             </div>
         </div>
 
         <div class="flex h-[calc(100%-7rem)] min-w-[60rem] w-full">
 
-            <div id="layout-sidebar" class="relative w-[25rem] mx-5 overflow-auto hidden">
-                <div class="sidebar-element-full relative border-solid border-2 rounded border-zyn_green mx-2 my-10 p-2">
+            <div id="layout-sidebar" class="relative w-[23rem] ml-5 overflow-auto hidden">
+                <div class="sidebar-element-full relative border-solid border-2 rounded border-zyn_green mx-2 my-10 p-2 w-[21rem]">
                     <span class="block absolute top-[-1rem] bg-zyn_green mx-2 p-1 rounded-md">Working Directory</span>
                     
-                    <input id="working-dir-path" disabled class="mt-4 mx-2 block border-2 w-[22rem] p-2" value="/path">
+                    <input id="working-dir-path" disabled class="mt-4 mx-2 block border-2 w-[19rem] p-2" value="/path">
                     <button id="working-dir-cd-parent" class="mt-2 ml-2 px-4 h-[2rem] zyn-button">&uArr;</button>
                     <button id="working-dir-copy-path" class="mt-2 ml-2 px-4 h-[2rem] zyn-button absolute right-[1rem]">Copy</button>
                 </div>
 
-                <div class="sidebar-element-full relative border-solid border-2 rounded border-zyn_green mx-2 my-10 p-2">
+                <div class="sidebar-element-full relative border-solid border-2 rounded border-zyn_green mx-2 my-10 p-2 w-[21rem]">
                     <span class="block absolute top-[-1rem] bg-zyn_green mx-2 p-1 rounded-md">Create</span>
                     
                     <button id="button-create-markdown" class="zyn-button px-2 mt-4 mx-1">Markdown</button>
                     <button id="button-create-directory" class="zyn-button px-2 mt-4 mx-1">Directory</button>
 
-                    <div id="sidebar-create-element-modal" class="hidden absolute w-[23rem] top-[10%] left-[2%] bg-white rounded-md border-2 z-[5]">
+                    <div id="sidebar-create-element-modal" class="hidden absolute w-[21rem] top-[10%] left-[2%] bg-white rounded-md border-2 z-[5]">
                         <span class="block ml-4 my-2">Name</span>
                         <span id="sidebar-create-element-modal-desc" class="block ml-4 my-2">Description</span>
                         <input id="sidebar-create-element-modal-input" class="block mx-4 border-2 w-[20rem] mb-2">
@@ -65,7 +65,7 @@
                     </div>
                 </div>
 
-                <div class="sidebar-element-full relative border-solid border-2 rounded border-zyn_green mx-2 mt-10 p-2 mb-[2rem]">
+                <div class="sidebar-element-full relative border-solid border-2 rounded border-zyn_green mx-2 mt-10 p-2 mb-[2rem] w-[21rem]">
                     <span class="block absolute top-[-1rem] bg-zyn_green mx-2 p-1 rounded-md">Filesystem</span>
                     
                     <div id="sidebar-filesystem-listing" class="grid grid-cols-[2fr_1fr_8fr_2fr] mt-10 gap-y-2">
@@ -74,7 +74,7 @@
 
                 <button 
                 id="button-show-small-sidebar" 
-                class="sidebar-element-full block w-[24rem] text-2xl zyn-button h-[3rem] mx-1 border-zyn_green">
+                class="sidebar-element-full block w-[21rem] text-2xl zyn-button h-[3rem] mx-1 border-zyn_green">
                     Hide
                 </button>
 
@@ -110,7 +110,7 @@
                         </div>
                     </div>
 
-                    <div id="file-content" class="overflow-auto w-[100%] h-[calc(100%-5rem)] m-1">
+                    <div id="file-content" class="overflow-auto w-[100%] h-[calc(100%-6rem)] m-1">
                         
                     </div>
             </div>
@@ -126,7 +126,7 @@
             class Controller {
 
                 constructor() {
-                    this.sidebar_width_full = "min-w-[25rem]"
+                    this.sidebar_width_full = "min-w-[23rem]"
                     this.sidebar_width_hidden = "w-[4rem]"
 
                     document.getElementById("button-show-small-sidebar").addEventListener("click", (event) => {
