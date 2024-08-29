@@ -432,6 +432,12 @@
                 file_area_button_cancel(enabled) {
                     this._file_area_button_enabled("file-button-cancel", enabled);
                 }
+
+                show_save_button_indication() {
+                    let button = document.getElementById("file-button-save");
+                    button.classList.add('zyn-save-indication');
+                    setTimeout(function(){ button.classList.remove('zyn-save-indication'); }, 1000);
+                }
             };
 
             let file_open_mode = null;

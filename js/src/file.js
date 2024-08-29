@@ -15,6 +15,7 @@ class Base {
     this._client = client
     this._node_id = open_rsp.node_id;
     this._revision = open_rsp.revision;
+    this._page_size = open_rsp.page_size;
     this._path_parent = client._path_dir;
     this._filename = filename;
     this._mode = OpenMode.read;
@@ -27,6 +28,7 @@ class Base {
   has_changes() { return false; }
   render() { throw 'Not implemented'; }
   save() { throw 'Not implemented'; }
+  handle_notification(notification) { throw 'Not implemented'; }
 
   path_to_file() {
     if (this._path_parent === '/') {
@@ -76,7 +78,7 @@ class MarkdownFile extends Base {
     this._client.ui().show_loading_modal('Loading file content...')
 
     if (open_rsp.size === 0) {
-      this._content = '';
+      this._content = new Uint8Array([]);
       this.render()
     } else {
       this.read_file_content(
@@ -88,7 +90,7 @@ class MarkdownFile extends Base {
             throw 'not implemetneed'
           }
           this._revision = rsp.revision
-          this._content = this._client.connection().decode_from_bytes(rsp.data());
+          this._content = rsp.data();
           this.render();
         }
       )
@@ -147,12 +149,94 @@ class MarkdownFile extends Base {
     }
   }
 
+  handle_notification(notification) {
+    if (notification.node_id !== this._node_id) {
+
+      return ;
+    }
+    if (this._mode !== OpenMode.edit && this.has_changes()) {
+
+    } else {
+      if (notification.type_of_edit == 'insert') {
+
+        this.read_file_content(
+          notification.offset,
+          notification.size,
+          this._page_size,
+          (rsp) => {
+            if (rsp.is_error()) {
+              throw 'unhandle'
+            }
+
+            let result = new Uint8Array(this._content.length + notification.size);
+            result.set(this._content.subarray(0, notification.offset));
+            result.set(rsp.data(), notification.offset);
+
+            const remaining = this._content.length - notification.offset;
+            result.set(
+              this._content.subarray(
+                notification.offset,
+                notification.offset + remaining
+              ),
+              notification.offset + notification.size,
+            );
+            this._content = result
+            this._revision = notification.revision;
+            this.render();
+          });
+
+      } else if (notification.type_of_edit == 'modify') {
+
+        this.read_file_content(
+          notification.offset,
+          notification.size,
+          this._page_size,
+          (rsp) => {
+            if (rsp.is_error()) {
+              throw 'unhandle'
+            }
+
+            let result = new Uint8Array(this._content.length);
+            result.set(this._content.subarray(0, notification.offset));
+            result.set(rsp.data(), notification.offset);
+            const remaining = this._content.length - notification.offset - notification.size;
+
+            result.set(
+              this._content.subarray(
+                notification.offset + notification.size,
+                notification.offset + notification.size + remaining
+              ),
+              notification.offset + notification.size,
+            );
+            this._content = result
+            this._revision = notification.revision;
+            this.render();
+          });
+
+
+      } else if (notification.type_of_edit == 'delete') {
+        let result = new Uint8Array(this._content.length - notification.size);
+        result.set(this._content.subarray(0, notification.offset));
+        result.set(
+          this._content.subarray(notification.offset + notification.size, this._content.length),
+          notification.offset,
+        );
+        this._content = result
+        this._revision = notification.revision;
+        this.render();
+      }
+    }
+  }
+
   save() {
-    let edited_content = this._client.ui().get_file_textarea_content()
+    let edited_content = this._client.ui().get_file_textarea_content();
     let modifications = []
     let offset = 0;
 
-    for (let mod of diff.diffChars(this._content, edited_content)) {
+    for (let mod of diff.diffChars(
+      this._client.connection().decode_from_bytes(this._content),
+      edited_content,
+    )) {
       console.log(mod)
       if (mod.added === true) {
         modifications.push({
@@ -177,7 +261,7 @@ class MarkdownFile extends Base {
       this._node_id,
       this._revision,
       modifications,
-      (rsp) => this.handle_edit_completed(rsp, edited_content),
+      (rsp) => this.handle_edit_completed(rsp, this._client.connection().encode_to_bytes(edited_content)),
     )
   }
 
@@ -189,6 +273,7 @@ class MarkdownFile extends Base {
     }
     this._revision = rsp.revision;
     this._content = new_content;
+    this._client.ui().show_save_button_indication();
   }
 
   render() {
@@ -200,14 +285,14 @@ class MarkdownFile extends Base {
         this._client.ui().set_file_content(
           `
 <div class="prose">
-${this._converter.makeHtml(this._content)}
+${this._converter.makeHtml(this._client.connection().decode_from_bytes(this._content))}
 </div>
           `
         );
       }
     } else if (this._mode == OpenMode.edit) {
       this._client.ui().set_file_content_textarea(
-        this._content,
+        this._client.connection().decode_from_bytes(this._content),
         () => this.file_edited(),
       );
     }

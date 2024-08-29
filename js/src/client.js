@@ -12,7 +12,7 @@ FilesystemElementTypes = Object.freeze({
   'markdown': 'Markdown',
 })
 
-const HEALTHCHECK_TIMER_DURATION = 30000;
+const HEALTHCHECK_TIMER_DURATION = 3000;
 
 class Client {
   constructor(
@@ -80,6 +80,13 @@ class Client {
   handle_notification(msg) {
     console.log('Notification')
     console.log(msg)
+    if (msg.is_edit()) {
+      if (this._file !== null) {
+        this._file.handle_notification(msg);
+      } else {
+        console.log(`Received edit notification when no file is active, node_id ${msg.node_id}`);
+      }
+    }
   }
 
   path(children=null) {
