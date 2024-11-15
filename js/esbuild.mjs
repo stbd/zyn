@@ -1,7 +1,7 @@
 import * as esbuild from 'esbuild'
 
 await esbuild.build({
-  entryPoints: ['src/main.js'],
+  entryPoints: ['src/main.mjs'],
   bundle: true,
   outfile: 'zyn.js',
   globalName: 'zyn',

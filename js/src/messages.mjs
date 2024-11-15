@@ -1,6 +1,6 @@
-const {
+import {
   ZynFileType,
-} = require('./common')
+} from './common.mjs';
 
 
 const ELEMENT_TYPE_FILE = 0;
@@ -12,7 +12,7 @@ const ELEMENT_FILE_TYPE_BLOB = 1;
 const AUTHORITY_TYPE_USER = 0;
 const AUTHORITY_TYPE_GROUP = 1;
 
-exports.Constants = Object.freeze({
+const Constants = Object.freeze({
     'ELEMENT_TYPE_FILE': ELEMENT_TYPE_FILE,
     'ELEMENT_TYPE_DIRECTORY': ELEMENT_TYPE_DIRECTORY,
 })
@@ -70,7 +70,7 @@ class Notification extends Message {
     is_edit() { return false; }
 }
 
-exports.DisconnectNotification = class DisconnectNotification extends Notification {
+class DisconnectNotification extends Notification {
     constructor(description) {
         super();
         this.description = description;
@@ -80,7 +80,7 @@ exports.DisconnectNotification = class DisconnectNotification extends Notificati
     is_disconnect() { return true; }
 }
 
-exports.EditNotification = class EditNotification extends Notification {
+class EditNotification extends Notification {
     constructor(type_of, node_id, revision, offset, size) {
         super();
         this.type_of_edit = type_of;
@@ -105,7 +105,7 @@ class MessageRsp extends Message {
     is_data_message() { return false; }
 }
 
-exports.ListChildrenRsp = class ListChildrenRsp extends MessageRsp {
+class ListChildrenRsp extends MessageRsp {
     constructor(namespace, transaction_id, error_code) {
         super(namespace, transaction_id, error_code);
         this.elements = []
@@ -132,7 +132,6 @@ class OpenRsp extends MessageRsp {
         }
     }
 }
-exports.OpenRsp = OpenRsp;
 
 class CreateFileRsp extends MessageRsp {
    constructor(namespace, transaction_id, error_code, node_id, revision) {
@@ -141,7 +140,6 @@ class CreateFileRsp extends MessageRsp {
         this.revision = revision;
    }
 }
-exports.CreateFileRsp = CreateFileRsp;
 
 class CreateDirectoryRsp extends MessageRsp {
    constructor(namespace, transaction_id, error_code, node_id) {
@@ -149,39 +147,42 @@ class CreateDirectoryRsp extends MessageRsp {
         this.node_id = node_id;
    }
 }
-exports.CreateDirectoryRsp = CreateDirectoryRsp;
 
-exports.ReadRsp = class ReadRsp extends MessageRsp {
-    constructor(namespace, transaction_id, error_code, revision, offset, size) {
-        super(namespace, transaction_id, error_code);
-        this.revision = revision;
-        this.offset = offset;
-        this._data = new ZynByteBuffer(size);
-    }
+class ReadRsp extends MessageRsp {
+  constructor(namespace, transaction_id, error_code, revision, offset, size) {
+    super(namespace, transaction_id, error_code);
+    this.revision = revision;
+    this.offset = offset;
+    this._data = new ZynByteBuffer(size);
+  }
 
-    data() {
-        return this._data.data();
-    }
+  data() {
+    return this._data.data();
+  }
 
-    is_data_message() { return true; }
+  is_data_message() { return true; }
 
-    is_complete() {
-        return this._data.is_complete();
-    }
+  is_complete() {
+    return this._data.is_complete();
+  }
 
-    add_data(data) {
-        this._data.add(data);
-    }
+  add_data(data) {
+    this._data.add(data);
+  }
+
+  size() {
+    return this._data.current_size();
+  }
 }
 
-exports.EditRsp = class EditRsp extends MessageRsp {
+class EditRsp extends MessageRsp {
     constructor(namespace, transaction_id, error_code, revision) {
         super(namespace, transaction_id, error_code);
         this.revision = revision;
     }
 }
 
-exports.BatchEditRsp = class BatchEditRsp extends MessageRsp {
+class BatchEditRsp extends MessageRsp {
     constructor(namespace, transaction_id, error_code, revision, operation_index) {
         super(namespace, transaction_id, error_code);
         this.revision = revision;
@@ -203,7 +204,7 @@ class QueryRsp extends MessageRsp {
     }
 }
 
-exports.ExpectRsp = class ExpectRsp {
+class ExpectRsp {
     constructor() {
         this.callback = null;
         this.expecte_rsp_type = null;
@@ -226,4 +227,18 @@ exports.ExpectRsp = class ExpectRsp {
     }
 }
 
-exports.MessageRsp = MessageRsp;
+export {
+  Constants,
+  DisconnectNotification,
+  EditNotification,
+  ListChildrenRsp,
+  OpenRsp,
+  CreateFileRsp,
+  CreateDirectoryRsp,
+  ReadRsp,
+  EditRsp,
+  BatchEditRsp,
+  QueryRsp,
+  MessageRsp,
+  ExpectRsp,
+};

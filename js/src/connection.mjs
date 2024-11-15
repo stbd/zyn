@@ -1,4 +1,4 @@
-const {
+import {
   MessageRsp,
   ExpectRsp,
   ListChildrenRsp,
@@ -11,14 +11,14 @@ const {
   BatchEditRsp,
   EditNotification,
   DisconnectNotification,
-} = require('./messages')
+} from './messages.mjs';
 
-const {
+import {
   FilesystemElementFile,
   FilesystemElementDirectory,
   Authority,
   OpenMode,
-} = require('./common')
+} from './common.mjs';
 
 const MSG_TYPE_AUTH = 'A';
 const MSG_TYPE_QUERY_FS_CHILDREN = 'Q-FS-C';
@@ -678,4 +678,4 @@ class Connection {
   }
 }
 
-module.exports = Connection
+export { Connection };

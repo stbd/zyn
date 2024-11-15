@@ -1,14 +1,14 @@
-exports.ElementType = Object.freeze({
+const ElementType = Object.freeze({
     'file': 'file',
     'directory': 'dir',
 });
 
-exports.ZynFileType = Object.freeze({
+const ZynFileType = Object.freeze({
     'ra': 'random-access',
     'blob': 'blob',
 });
 
-exports.OpenMode = Object.freeze({
+const OpenMode = Object.freeze({
     'read': 'read',
     'edit': 'edit',
 })
@@ -21,7 +21,7 @@ class FilesystemElement {
     is_directory() { throw 'not implemented'; }
 }
 
-exports.FilesystemElementFile = class FilesystemElementFile extends FilesystemElement {
+class FilesystemElementFile extends FilesystemElement {
     constructor(name, node_id, revision, file_type, size, is_open) {
         super();
         this.name = name;
@@ -36,7 +36,7 @@ exports.FilesystemElementFile = class FilesystemElementFile extends FilesystemEl
     is_directory() { return false; }
 }
 
-exports.FilesystemElementDirectory = class FilesystemElementDirectory extends FilesystemElement {
+class FilesystemElementDirectory extends FilesystemElement {
     constructor(name, node_id, authtority_read, authority_write) {
         super();
         this.name = name;
@@ -49,9 +49,37 @@ exports.FilesystemElementDirectory = class FilesystemElementDirectory extends Fi
     is_directory() { return true; }
 }
 
-exports.Authority = class Authority {
+class Authority {
     constructor(type_of, name) {
         this._type_of = type_of;
         this.name = name;
     }
 }
+
+
+function encode_to_bytes(text) {
+  return new TextEncoder().encode(text);
+}
+
+
+function decode_from_bytes(bytes) {
+  return new TextDecoder().decode(bytes);
+}
+
+
+function log(msg) {
+  console.log(msg)
+}
+
+
+export {
+  Authority,
+  ElementType,
+  ZynFileType,
+  OpenMode,
+  FilesystemElementFile,
+  FilesystemElementDirectory,
+  encode_to_bytes,
+  decode_from_bytes,
+  log,
+};

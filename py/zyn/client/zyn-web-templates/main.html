@@ -451,7 +451,7 @@
                 console.log('ERROR: invalid open mode string: ' + "{{ file_mode }}")
             }
 
-            var zyn_client = new zyn.client(
+            var zyn_client = new zyn.Client(
                 '{{ authentication_token }}',
                 '{{ server_address }}',
                 "{{ zyn_user_id }}",

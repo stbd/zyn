@@ -1,13 +1,13 @@
-const connection = require('./connection');
-const {
+import { Connection } from './connection.mjs'
+import {
   MarkdownFile,
   PdfFile,
-} = require('./file');
-const {
+} from './file.mjs';
+import {
   OpenMode,
-} = require('./common');
+} from './common.mjs';
 
-FilesystemElementTypes = Object.freeze({
+const FilesystemElementTypes = Object.freeze({
   'dir': 'Directory',
   'markdown': 'Markdown',
 })
@@ -65,7 +65,7 @@ class Client {
   }
 
   create_connection_and_auhenticate(token, callback) {
-    this._connection = new connection(
+    this._connection = new Connection(
       this._server_address,
       (_event) => {
         setTimeout(() => this.healtcheck_callback(), HEALTHCHECK_TIMER_DURATION);
@@ -427,4 +427,4 @@ class Client {
   }
 }
 
-module.exports = Client;
+export { Client };
