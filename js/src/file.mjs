@@ -96,7 +96,11 @@ class Base {
     if (this._path_parent === '/') {
       return `${this._filename}`;
     }
-    return `${this._path_parent}/${this._filename}`;
+    let path = `${this._path_parent}/${this._filename}`;
+    if (path.startsWith(path)) {
+      path = path.slice(1);
+    }
+    return path;
   }
 
   render_empty() {
@@ -343,9 +347,10 @@ class MarkdownFile extends Base {
       if (this._content.length == 0) {
         this.render_empty();
       } else {
+        // Prose descriptions are from here: https://github.com/tailwindlabs/tailwindcss-typography
         this._client.ui().set_file_content(
           `
-<div class="prose">
+<div class="prose prose-headings:leading-none prose-ul:leading-none prose-li:leading-none">
 ${this._converter.makeHtml(this._client.connection().decode_from_bytes(this._content))}
 </div>
           `

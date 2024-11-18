@@ -112,12 +112,15 @@ class Client {
     }
     let parts = this._path_dir.split('/');
     parts.pop();
-    let path = '/';
+    let path = '';
     for (let p of parts) {
       if (!p) {
         continue;
       }
       path += '/' + p;
+    }
+    if (path === '') {
+      path = '/';
     }
     return path;
   }
@@ -134,6 +137,7 @@ class Client {
           params['mode'] = mode
         }
       }
+
       this._ui.set_browser_url(url_postfix, params);
     }
   }
@@ -273,6 +277,15 @@ class Client {
     );
   }
 
+  handle_create_directory_clicked() {
+    this._ui.show_create_element_modal(
+      "Name of the directory",
+      "photos",
+      (name) => this.handle_create_clicked("directory", "create", name),
+      (name) => this.handle_create_clicked("directory", "cancel", name),
+    );
+  }
+
   handle_file_done_clicked() {
     if (this._file !== null) {
       this._file.set_mode(OpenMode.read);
@@ -327,9 +340,15 @@ class Client {
         return ;
       }
 
-      console.log(`Creating New Markdown file ${name}`);
+      console.log(`Creating new Markdown file ${name} in path ${this._path_dir}`);
       this._connection.create_file_ra(name, this._path_dir, (rsp) => this.handle_create_response('markdown', rsp));
       this._ui.show_loading_modal('Creating file...');
+    } else if (type_of_element == 'directory') {
+
+      console.log(`Creating new directory ${name} in path ${this._path_dir}`);
+      this._connection.create_directory(name, this._path_dir, (rsp) => this.handle_create_response('directory', rsp));
+      this._ui.show_loading_modal('Creating directory...');
+
     } else {
       throw 'Invalid '
     }
@@ -424,6 +443,7 @@ class Client {
     this._file = new object(rsp, this, element.name, mode);
     this.update_browser_url();
     this._ui.hide_modals();
+    this._ui.show_small_sidebar();
   }
 }
 

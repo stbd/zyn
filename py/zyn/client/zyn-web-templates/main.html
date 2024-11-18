@@ -3,6 +3,7 @@
     <title>Zyn</title>
     <script src="{{ static_url('zyn.js') }}" type="text/javascript"></script>
     <link href="{{ static_url('zyn.css') }}" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
 
@@ -46,7 +47,9 @@
                     <span class="block absolute top-[-1rem] bg-zyn_green mx-2 p-1 rounded-md">Working Directory</span>
                     
                     <input id="working-dir-path" disabled class="mt-4 mx-2 block border-2 w-[19rem] p-2" value="/path">
-                    <button id="working-dir-cd-parent" class="mt-2 ml-2 px-4 h-[2rem] zyn-button">&uArr;</button>
+                    <button id="working-dir-cd-parent" class="mt-2 ml-2 px-4 h-[2rem] zyn-button">
+                        <i class="material-symbols-outlined">arrow_back</i>
+                    </button>
                     <button id="working-dir-copy-path" class="mt-2 ml-2 px-4 h-[2rem] zyn-button absolute right-[1rem]">Copy</button>
                 </div>
 
@@ -141,6 +144,10 @@
                 register_client_callbacks(client) {
                     document.getElementById("button-create-markdown").addEventListener("click", (event) => {
                         client.handle_create_markdown_clicked();
+                    });
+
+                    document.getElementById("button-create-directory").addEventListener("click", (event) => {
+                        client.handle_create_directory_clicked();
                     });
 
                     document.getElementById("file-button-done").addEventListener("click", (event) => {
@@ -253,7 +260,9 @@
                 }
 
                 set_browser_url(path, search_params={}) {
-                    let url = new URL(window.location.href);
+                    let url = new URL(
+                        window.location.protocol + '//' + window.location.host + window.location.pathname
+                    );
                     url.pathname = path;
                     
                     if (Object.keys(search_params).length === 0) {
@@ -309,13 +318,14 @@
 
                         let handler = element_to_handler(e.name);
                         let button_edit = null;
-                        let icon = document.createElement('div');
+                        let icon = document.createElement('i');
                         let name = document.createElement('span');
                         let button_delete = document.createElement('button');
 
-                        icon.classList.add('text-center')
+                        icon.classList.add('text-center');
+                        icon.classList.add("material-symbols-outlined");                        
                         name.innerText = e.name;
-                        name.classList.add('hover:bg-zinc-100', 'hover:cursor-pointer', 'rounded')
+                        name.classList.add('hover:bg-zinc-100', 'hover:cursor-pointer', 'rounded');
                         button_delete.innerHTML = 'Delete'
                         button_delete.classList.add('zyn-button')
 
@@ -330,13 +340,14 @@
                             } else {
                                 button_edit = document.createElement('div');
                             }
-                            icon.innerHTML = '&#x1F5CE;';
+                            
+                            icon.innerText = "description";
                             name.addEventListener("click", (event) => {
                                 open_file_callback(e, zyn.OpenMode.read);
                             });
                         }  else if (e instanceof zyn.FilesystemElementDirectory) {
                             button_edit = document.createElement('div');
-                            icon.innerHTML = '&#128448;';
+                            icon.innerText = "folder";
                             name.addEventListener("click", (event) => {
                                 open_directory_callback(e);
                             });
