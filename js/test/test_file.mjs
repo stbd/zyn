@@ -84,6 +84,20 @@ describe('ReadState', function () {
     assert(_compare_arrays(callback.getCall(0).args[1], 1));
   });
 
+  it('Test single block with offset', function () {
+    const callback = sinon.stub();
+    let s = new ReadState(5, 2, {_page_size: 10}, callback);
+    const data = new Uint8Array([5, 6]);
+    const b1 = s.next_block();
+    assert.equal(b1.start, 5);
+    assert.equal(b1.size, 2);
+    s.add_response(_create_read_rsp(data, 5, 2));
+    assert(s.is_complete())
+    s.complete();
+    assert(_compare_arrays(callback.getCall(0).args[0], data))
+    assert(_compare_arrays(callback.getCall(0).args[1], 2));
+  });
+
   it('Test two blocks', function () {
     const callback = sinon.stub();
     let s = new ReadState(0, 20, {_page_size: 10}, callback);

@@ -19,11 +19,16 @@ class ReadState {
 
   next_block() {
     const start = this.start_offset + this.bytes_read;
-    const bytes_left = this.size - start;
-    const size = Math.min(bytes_left, this.file._page_size);
-    if (start % this.file._page_size != 0) {
-      this.file.show_internal_error('Invalid read call, read does not alling with page size');
+    const bytes_left = this.size - this.bytes_read;
+    const end_offset = start + bytes_left - 1;
+
+    const start_page = Math.floor(start / this.file._page_size);
+    const end_page = Math.floor(end_offset / this.file._page_size);
+    let size = end_offset - start + 1;
+    if (start_page != end_page) {
+      size = this.file._page_size - start;
     }
+
     return {
       "start": start,
       "size": size,
@@ -235,7 +240,6 @@ class MarkdownFile extends Base {
         this.read_file_content(
           notification.offset,
           notification.size,
-          this._page_size,
           (data, revision) => {
             let result = new Uint8Array(this._content.length + notification.size);
             result.set(this._content.subarray(0, notification.offset));
@@ -259,7 +263,6 @@ class MarkdownFile extends Base {
         this.read_file_content(
           notification.offset,
           notification.size,
-          this._page_size,
           (data, revision) => {
             let result = new Uint8Array(this._content.length);
             result.set(this._content.subarray(0, notification.offset));
