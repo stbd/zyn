@@ -55,13 +55,12 @@ services:
         - traefik.http.services.web-client.loadbalancer.server.port=80
 
   proxy:
-    image: traefik:v2.10
+    image: traefik:v3.1
     command:
       #- --api.insecure=true
-      - --providers.docker
-      - --providers.docker.swarmmode=true
-      - --providers.docker.network=<dokcer-swarm-stack-name>_zyn-backend
-      - --providers.docker.exposedbydefault=false
+      - --providers.swarm.endpoint=unix:///var/run/docker.sock
+      - --providers.swarm.network=<dokcer-swarm-stack-name>_zyn-backend
+      - --providers.swarm.exposedbydefault=false
       - --entryPoints.web.address=:80
       - --entryPoints.web-secure.address=:443
       #- --log
