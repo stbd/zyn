@@ -6,6 +6,12 @@ class Controller {
   constructor() {}
   show_loading_modal() {}
   unhandled_sittuation_modal() {}
+  hide_modals() {}
+  file_area_button_done() {}
+  file_area_button_edit() {}
+  file_area_button_save() {}
+  file_area_button_cancel() {}
+  set_file_content() {}
 }
 
 function init_client_stub() {

@@ -161,7 +161,7 @@ class MarkdownFile extends Base {
 
     if (open_rsp.size === 0) {
       this._content = new Uint8Array([]);
-      this.render()
+      this.render();
     } else {
       this.read_file_content(
         0,
@@ -229,18 +229,22 @@ class MarkdownFile extends Base {
 
   handle_notification(notification) {
     if (notification.node_id !== this._node_id) {
-
+      console.log(`Received notification for unknown file ${notification.node_id}`)
       return ;
     }
     if (this._mode !== OpenMode.edit && this.has_changes()) {
 
+      this._client.ui().unhandled_sittuation_modal(`File has been modified on remote, please copy changes and refresh manually`);
+
     } else {
+
       if (notification.type_of_edit == 'insert') {
 
         this.read_file_content(
           notification.offset,
           notification.size,
           (data, revision) => {
+
             let result = new Uint8Array(this._content.length + notification.size);
             result.set(this._content.subarray(0, notification.offset));
             result.set(data, notification.offset);

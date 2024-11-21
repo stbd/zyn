@@ -1,11 +1,13 @@
 import {
   OpenRsp,
   ReadRsp,
+  EditNotification,
 } from '../src/messages.mjs';
 import {
   ZynFileType,
   encode_to_bytes,
   decode_from_bytes,
+  OpenMode,
 } from '../src/common.mjs';
 import {
   ReadState,
@@ -41,6 +43,16 @@ function _create_read_rsp(
   let rsp = new ReadRsp(0, 1, error, revision, offset, bytes.length);
   rsp.add_data(bytes);
   return rsp;
+}
+
+function _create_edit_notification(
+  type_of_notification,
+  offset,
+  size,
+  revision=0,
+  node_id=DEFAULT_NODE_ID,
+) {
+  return new EditNotification(type_of_notification, node_id, revision, offset, size);
 }
 
 function _init_base(
@@ -221,5 +233,69 @@ describe('Base', function () {
       assert.equal(stub.getCall(0).args[1], revision)
     });
 
+  });
+});
+
+describe('Markdown', function () {
+  describe('handle_notification', function () {
+    it('should handle insert notification', function () {
+      const data = 'data';
+      const size = data.length;
+      const stub = sinon.stub();
+      const resources = _init_base(size);
+      const edit_offset = 2;
+      let file = new MarkdownFile(resources.open_rsp, resources.stubs.client, FILENAME_MD, OpenMode.read);
+
+      resources.stubs.connection.read_file.getCall(0).args[3](
+        _create_read_rsp(encode_to_bytes(data), 0, 1)
+      );
+
+      file.handle_notification(_create_edit_notification('insert', edit_offset, 2));
+      assert.equal(resources.stubs.connection.read_file.getCall(1).args[1], edit_offset);
+      assert.equal(resources.stubs.connection.read_file.getCall(1).args[2], 2);
+      resources.stubs.connection.read_file.getCall(1).args[3](
+        _create_read_rsp(encode_to_bytes('12'), edit_offset, 2)
+      );
+
+      assert.equal(decode_from_bytes(file._content), 'da12ta');
+    });
+
+    it('should handle delete notification', function () {
+      const data = 'data1234';
+      const size = data.length;
+      const stub = sinon.stub();
+      const resources = _init_base(size);
+      const edit_offset = 2;
+      let file = new MarkdownFile(resources.open_rsp, resources.stubs.client, FILENAME_MD, OpenMode.read);
+
+      resources.stubs.connection.read_file.getCall(0).args[3](
+        _create_read_rsp(encode_to_bytes(data), 0, 1)
+      );
+
+      file.handle_notification(_create_edit_notification('delete', edit_offset, 2));
+      assert.equal(decode_from_bytes(file._content), 'da1234');
+    });
+
+    it('should handle modify notification', function () {
+      const data = 'data';
+      const size = data.length;
+      const stub = sinon.stub();
+      const resources = _init_base(size);
+      const edit_offset = 1;
+      let file = new MarkdownFile(resources.open_rsp, resources.stubs.client, FILENAME_MD, OpenMode.read);
+
+      resources.stubs.connection.read_file.getCall(0).args[3](
+        _create_read_rsp(encode_to_bytes(data), 0, 1)
+      );
+
+      file.handle_notification(_create_edit_notification('modify', edit_offset, 2));
+      assert.equal(resources.stubs.connection.read_file.getCall(1).args[1], edit_offset);
+      assert.equal(resources.stubs.connection.read_file.getCall(1).args[2], 2);
+      resources.stubs.connection.read_file.getCall(1).args[3](
+        _create_read_rsp(encode_to_bytes('12'), edit_offset, 2)
+      );
+
+      assert.equal(decode_from_bytes(file._content), 'd12a');
+    });
   });
 });
