@@ -74,11 +74,11 @@ networks:
   zyn-backend:
 
 secrets:
-  gpg_fingerprint:
+  zyn_gpg_fingerprint:
     external: true
-  gpg_keygrip:
+  zyn_gpg_keygrip:
     external: true
-  gpg_secret_key:
+  zyn_gpg_secret_key:
     external: true
-  gpg_password:
+  zyn_gpg_password:
     external: true
