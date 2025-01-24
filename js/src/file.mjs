@@ -1,8 +1,10 @@
 import {
   OpenMode,
   log,
+  encode_to_bytes,
+  decode_from_bytes,
 } from './common.mjs';
-import { diffChars } from 'diff';
+import { diffArrays } from 'diff';
 import showdown from 'showdown';
 import {getDocument, GlobalWorkerOptions} from 'pdfjs-dist';
 
@@ -305,16 +307,16 @@ class MarkdownFile extends Base {
     let modifications = []
     let offset = 0;
 
-    for (let mod of diffChars(
-      this._client.connection().decode_from_bytes(this._content),
-      edited_content,
+    for (let mod of diffArrays(
+      this._content,
+      encode_to_bytes(edited_content),
     )) {
       console.log(mod)
       if (mod.added === true) {
         modifications.push({
           'type': 'add',
           'offset': offset,
-          'bytes': this._client.connection().encode_to_bytes(mod.value),
+          'bytes': mod.value,
         })
         offset += mod.count;
       } else if (mod.removed === true) {
@@ -333,7 +335,7 @@ class MarkdownFile extends Base {
       this._node_id,
       this._revision,
       modifications,
-      (rsp) => this.handle_edit_completed(rsp, this._client.connection().encode_to_bytes(edited_content)),
+      (rsp) => this.handle_edit_completed(rsp, edited_content),
     )
   }
 
@@ -358,14 +360,14 @@ class MarkdownFile extends Base {
         this._client.ui().set_file_content(
           `
 <div class="prose prose-headings:leading-none prose-ul:leading-none prose-li:leading-none">
-${this._converter.makeHtml(this._client.connection().decode_from_bytes(this._content))}
+${this._converter.makeHtml(decode_from_bytes(this._content))}
 </div>
           `
         );
       }
     } else if (this._mode == OpenMode.edit) {
       this._client.ui().set_file_content_textarea(
-        this._client.connection().decode_from_bytes(this._content),
+        decode_from_bytes(this._content),
         () => this.file_edited(),
       );
     }
@@ -394,7 +396,7 @@ class PdfFile extends Base {
         open_rsp.size,
         (data, revision) => {
           this._revision = revision
-          this._content = this._client.connection().decode_from_bytes(data);
+          this._content = decode_from_bytes(data);
           console.log(`content ${this._content.length}` )
           this.render();
         }
