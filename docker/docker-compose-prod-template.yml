@@ -34,7 +34,7 @@ services:
         - traefik.tcp.services.zyn.loadbalancer.server.port=80
 
   web-client:
-    image: stbd/zyn-client-web:0.10-rc-2
+    image: stbd/zyn-client-web:0.10-rc-3
     command:
       - "80"
       - zyn-backend
