@@ -11,6 +11,7 @@ import {
   BatchEditRsp,
   EditNotification,
   DisconnectNotification,
+  QueryRsp,
 } from './messages.mjs';
 
 import {
@@ -80,7 +81,7 @@ class ModificationState {
 
 
 class BatchModificationState {
-  constructor(node_id, revision, modifications, callback, connection) {
+  constructor(node_id, revision, modifications, callback, connection, state_callback=null) {
     this._node_id = node_id;
     this._revision = revision;
     this._modifications = modifications;
@@ -91,16 +92,18 @@ class BatchModificationState {
       if (rsp_preamble.is_error()) {
         return this._complete_operation(rsp_preamble);
       }
-      this.apply();
+      this.apply(state_callback);
     });
   }
 
-  apply() {
+  apply(state_callback=null) {
     this._connection._expected_msg.set_callback_for_rsp(MSG_HANDLER_BATCH_EDIT, (rsp) => {
       return this.complete_operation(rsp);
     });
 
-    //zyn_show_modal_loading(`Applying modification ${this._operation_index + 1} / ${this._modifications.length}`);
+    if (state_callback !== null) {
+      state_callback(this._operation_index + 1, this._modifications.length);
+    }
 
     let mod = this._modifications[this._operation_index];
     if (mod.type == 'add') {
@@ -279,6 +282,12 @@ class Connection {
       try {
         [msg, value] = this._parse_timestamp(msg);
         type_of = 'timestamp';
+      } catch (_) {}
+    }
+    if (value === null) {
+      try {
+        [msg, value] = this._parse_string(msg);
+        type_of = 'string';
       } catch (_) {}
     }
     if (value === null) {
@@ -637,9 +646,9 @@ class Connection {
     this._socket.send(msg.buffer);
   }
 
-  apply_modifications(node_id, revision, modifications, callback) {
+  apply_modifications(node_id, revision, modifications, callback, state_callback=null) {
     if (modifications.length > 1) {
-      new BatchModificationState(node_id, revision, modifications, callback, this);
+      new BatchModificationState(node_id, revision, modifications, callback, this, state_callback);
     } else {
       new ModificationState(node_id, revision, modifications, callback, this);
     }

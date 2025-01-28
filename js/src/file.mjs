@@ -177,8 +177,13 @@ class MarkdownFile extends Base {
     }
   }
 
+  has_changes() { return this._edited; }
   open_mode() { return this._mode; }
   file_edited() { this._edited = true; }
+  revert_edits() {
+    this.render();
+    this._edited = false;
+  }
 
   _set_mode(mode) {
     this._mode = mode;
@@ -303,6 +308,9 @@ class MarkdownFile extends Base {
   }
 
   save() {
+    this._client.ui().show_save_button_indication();
+    return ;
+
     let edited_content = this._client.ui().get_file_textarea_content();
     let modifications = []
     let offset = 0;
@@ -311,7 +319,6 @@ class MarkdownFile extends Base {
       this._content,
       encode_to_bytes(edited_content),
     )) {
-      console.log(mod)
       if (mod.added === true) {
         modifications.push({
           'type': 'add',
@@ -335,7 +342,10 @@ class MarkdownFile extends Base {
       this._node_id,
       this._revision,
       modifications,
-      (rsp) => this.handle_edit_completed(rsp, edited_content),
+      (rsp) => this.handle_edit_completed(rsp, encode_to_bytes(edited_content)),
+      (operation_number, total_operations) => {
+        this._client.ui().show_loading_modal(`Applying modification ${operation_number} / ${total_operations}`);
+      },
     )
   }
 
@@ -347,7 +357,9 @@ class MarkdownFile extends Base {
     }
     this._revision = rsp.revision;
     this._content = new_content;
+    this._edited = false;
     this._client.ui().show_save_button_indication();
+    this.render();
   }
 
   render() {

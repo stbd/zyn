@@ -154,7 +154,6 @@ class Client {
 
   healtcheck_callback() {
     if (!this._connection.is_ok()) {
-      console.log('reconnecting')
       this._ui.activate_modal_notification(
         'Connection closed',
         'Connection to server was closed, click reconnect to reconnect',
@@ -300,19 +299,28 @@ class Client {
 
   handle_file_save_clicked() {
     if (this._file !== null) {
-      this._file.save();
+      if (this._file.has_changes()) {
+        this._file.save();
+      } else {
+        // Better indication
+        console.log('File has no edits')
+      }
     }
   }
 
   handle_file_cancel_clicked() {
     if (this._file !== null) {
-      this._file.cancel_edits();
+      this._file.revert_edits();
     }
   }
 
-  handle_file_file_info_clicked() {
+  handle_file_info_clicked() {
     if (this._file !== null) {
-
+      this._ui.render_file_info(
+        this._file.filename(),
+        this._file.node_id(),
+        this._file.revision(),
+      );
     }
   }
 
@@ -426,12 +434,31 @@ class Client {
 
   handle_fs_element_delete_clicked(element) {
     console.log(element)
+    this._ui.show_verify_modal(
+      `Are you sure it is ok to delete "${element.name}"?`,
+      () => {
+        this._connection.delete_element(
+          element.node_id,
+          (rsp) => {
+            if (rsp.is_error()) {
+              this._ui.unhandled_sittuation_modal(`server replied with error code ${rsp.error_code}`);
+            } else {
+              this._connection.query_element_children(
+                this._path_dir,
+                (rsp) => {
+                  this.handle_query_children_rsp(rsp, this._path_dir);
+                });
+            }
+          }
+        )
+      }
+    );
   }
 
   handle_open_file_rsp(rsp, mode, element) {
     // todo: handle case when user does not have edit permissions
     if (rsp.is_error()) {
-      this._ui.unhandled_sittuation_modal(`server replied with error code ${rsp.error_code}`)
+      this._ui.unhandled_sittuation_modal(`server replied with error code ${rsp.error_code}`);
       return
     }
 
@@ -444,6 +471,17 @@ class Client {
     this.update_browser_url();
     this._ui.hide_modals();
     this._ui.show_small_sidebar();
+  }
+
+  handle_server_info_clicked() {
+    this._connection.query_system((msg) => {
+      this._ui.server_info_modal(
+        msg.fields["server-id"].value,
+        msg.fields["started-at"].value,
+        msg.fields["number-of-open-files"].value,
+        msg.fields["max-number-of-open-files-per-connection"].value,
+      );
+    });
   }
 }
 

@@ -28,6 +28,7 @@
 .zyn-save-indication {
     animation: successfulSaveAnimation 1.0 s linear;
 }
+
 @keyframes successfulSaveAnimation {
     0% { background-color: springgreen; }
     100% { background-color: transparent; }

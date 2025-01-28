@@ -27,13 +27,35 @@
         </div>
     </div>
 
+    <div id="modal-server-info" class="absolute bottom-[50%] left-[12.5%] z-[11] bg-white border-solid border-2 rounded-lg w-[75%] hidden">
+        <div class="m-5">
+            <span class="text-3xl my-[3rem] text-center block">Server info</span>
+            <div class="text-center block">Server Id: <span id="server-info-server-id"></span></div>
+            <div class="text-center block">Server started at: <span id="server-info-server-started"></span></div>
+            <div class="text-center block">Number of open files: <span id="server-info-number-open-file"></span></div>
+            <div class="text-center block">Max number of open files (per connection): <span id="server-info-max-number-open-file"></span></div>
+            <span id="modal-loading-description" class="my-[3rem] text-center block"></span>
+            <button id="server-info-modal-button" class="zyn-button px-[3rem] mt-[2rem] mx-auto block bg-zinc-100">Ok</button>
+        </div>
+    </div>
+
+    <div id="modal-verify-yes-cancel" class="absolute bottom-[50%] left-[12.5%] bg-zyn_green z-[11] border-solid border-2 rounded-lg w-[75%] hidden">
+        <div class="m-5 relative">
+            <span id="modal-verify-text" class="block text-center"></span>
+            <div class="flex flex-row">
+                <button id="modal-verify-button-ok" class="zyn-button px-[3rem] mt-[2rem] mx-auto bg-zinc-100">Ok</button>
+                <button id="modal-verify-button-cancel" class="zyn-button px-[3rem] mt-[2rem] mx-auto bg-zinc-100">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <div class="w-full h-full">
 
         <div class="w-screen h-[5rem] border-b-2">
             <div class="flex ">
                 <span class="text-5xl pl-10 py-3 tracking-wider">Zyn</span>
                 <div class="flex-auto"></div>
-                <button class="mx-2 mt-5 px-5 zyn-button h-[3rem]">Server Info</button>
+                <button id="server-info-button" class="mx-2 mt-5 px-5 zyn-button h-[3rem]">Server Info</button>
                 <a href="/logout">
                     <button class="mr-5 mt-5 px-5 zyn-button h-[3rem]">Logout</button>
                 </a>
@@ -100,14 +122,14 @@
                             <button id="file-button-fileinfo" class="h-[3rem] mt-4 px-5 zyn-button">FileInfo</button>
                         </div>
 
-                        <div class="block hidden absolute top-0 right-0 w-[15rem] rounded-lg p-5 border-2 bg-white">
+                        <div id="file-info" class="block hidden absolute top-0 right-0 w-[15rem] rounded-lg p-5 border-2 bg-white">
                             <div class="relative">
-                                <button class="absolute top-0 right-0 zyn-button px-2">CLose</button>
+                                <button id="file-info-close-button" class="absolute top-0 right-0 zyn-button px-2">Close</button>
                                 <span class="block">Details</span>    
                                 <div class="grid grid-cols-2 mt-4">
-                                    <div>Filename</div><div>name</div>
-                                    <div>Size</div><div>0</div>
-                                    <div>Node Id</div><div>0</div>
+                                    <div>Filename: <span id="file-info-name"></span></div>
+                                    <div>Node Id: <span id="file-info-node-id"></span></div>
+                                    <div>Revision: <span id="file-info-revision"></span></div>
                                 </div>
                             </div>
                         </div>
@@ -174,6 +196,14 @@
                         client.handle_change_dir_to_parent_clicked();
                     });
 
+                    document.getElementById("file-info-close-button").addEventListener("click", (event) => {
+                        this.hide_file_info();
+                    });
+
+                    document.getElementById("server-info-button").addEventListener("click", (event) => {
+                        client.handle_server_info_clicked();
+                    });
+
                     document.getElementById("working-dir-copy-path").addEventListener("click", (event) => {
                         if (!navigator.clipboard) {
                             console.log('navigator.clipboard null, skipping')
@@ -182,6 +212,46 @@
                         navigator.clipboard.writeText(
                             document.getElementById("working-dir-path").value
                         );
+                    });
+                }
+
+                server_info_modal(
+                    server_id,
+                    server_started,
+                    number_of_open_files,
+                    max_number_of_open_files,
+                ) {
+                    this.hide_modals();
+                    document.getElementById("modal-background").classList.remove('hidden');
+                    document.getElementById("modal-server-info").classList.remove('hidden');
+                    
+                    document.getElementById("server-info-server-id").innerText = server_id;
+                    document.getElementById("server-info-server-started").innerText = server_started;
+                    document.getElementById("server-info-number-open-file").innerText = number_of_open_files;
+                    document.getElementById("server-info-max-number-open-file").innerText = max_number_of_open_files;
+
+                    document.getElementById("server-info-modal-button").addEventListener("click", (event) => {
+                        this.hide_modals();
+                    });
+                }
+
+                show_verify_modal(
+                    description,
+                    callback_ok,
+                    callback_cancel=null,
+                ) {
+                    document.getElementById("modal-background").classList.remove('hidden');
+                    document.getElementById("modal-verify-yes-cancel").classList.remove('hidden');
+                    document.getElementById("modal-verify-text").innerText = description;
+                    document.getElementById("modal-verify-button-ok").addEventListener("click", (event) => {
+                        this.hide_modals();
+                        callback_ok();
+                    });
+                    document.getElementById("modal-verify-button-cancel").addEventListener("click", (event) => {
+                        this.hide_modals();
+                        if (callback_cancel) {
+                            callback_cancel();
+                        }
                     });
                 }
 
@@ -253,6 +323,8 @@
                     document.getElementById("modal-background").classList.add('hidden');
                     document.getElementById("modal-loading-root").classList.add('hidden');
                     document.getElementById("modal-notification-root").classList.add('hidden');
+                    document.getElementById("modal-server-info").classList.add('hidden');
+                    document.getElementById("modal-verify-yes-cancel").classList.add('hidden');
                 }
 
                 set_working_dir_path(path) {
@@ -304,6 +376,31 @@
                     }
                 }
 
+                render_file_info(
+                    name,
+                    node_id,
+                    revision,
+                ) {
+                    document.getElementById("file-info-name").textContent = name;
+                    document.getElementById("file-info-node-id").textContent = node_id;
+                    document.getElementById("file-info-revision").textContent = revision;
+                    document.getElementById("file-info").classList.remove('hidden');
+
+                }
+
+                hide_file_info() {
+                    document.getElementById("file-info").classList.add('hidden');
+                }
+
+                sort_filesystem_elements(a, b) {
+                    if (a.is_file() && !b.is_file()) {
+                        return -1;
+                    } else if (!a.is_file() && b.is_file()) {
+                        return 1;
+                    }
+                    return ('' + a.name).localeCompare(b.name);
+                }
+
                 render_filesystem_elements(
                     elements,
                     element_to_handler,
@@ -314,7 +411,7 @@
                     let listing_element = document.getElementById("sidebar-filesystem-listing");
                     listing_element.innerHTML = '';
 
-                    for (let e of elements) {
+                    for (let e of elements.sort(this.sort_filesystem_elements)) {
 
                         let handler = element_to_handler(e.name);
                         let button_edit = null;
