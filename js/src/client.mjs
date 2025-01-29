@@ -287,6 +287,10 @@ class Client {
 
   handle_file_done_clicked() {
     if (this._file !== null) {
+      if (this._file.has_changes()) {
+        this._ui.nothing_to_do_sittuation_modal('File has changes, please save them first');
+        return ;
+      }
       this._file.set_mode(OpenMode.read);
     }
   }

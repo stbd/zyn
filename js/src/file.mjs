@@ -308,9 +308,6 @@ class MarkdownFile extends Base {
   }
 
   save() {
-    this._client.ui().show_save_button_indication();
-    return ;
-
     let edited_content = this._client.ui().get_file_textarea_content();
     let modifications = []
     let offset = 0;
@@ -335,6 +332,10 @@ class MarkdownFile extends Base {
       } else {
         offset += mod.count;
       }
+    }
+
+    if (modifications.length == 0) {
+      return ;
     }
 
     this._client.ui().show_loading_modal();
