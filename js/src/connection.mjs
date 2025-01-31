@@ -88,21 +88,22 @@ class BatchModificationState {
     this._callback = callback;
     this._connection = connection;
     this._operation_index = 0;
+    this._state_callback = state_callback;
     this._connection.edit_ra_file_preamble_batch_edit(this._node_id, this._revision, this._modifications.length, (rsp_preamble) => {
       if (rsp_preamble.is_error()) {
         return this._complete_operation(rsp_preamble);
       }
-      this.apply(state_callback);
+      this.apply();
     });
   }
 
-  apply(state_callback=null) {
+  apply() {
     this._connection._expected_msg.set_callback_for_rsp(MSG_HANDLER_BATCH_EDIT, (rsp) => {
       return this.complete_operation(rsp);
     });
 
-    if (state_callback !== null) {
-      state_callback(this._operation_index + 1, this._modifications.length);
+    if (this._state_callback !== null) {
+      this._state_callback(this._operation_index + 1, this._modifications.length);
     }
 
     let mod = this._modifications[this._operation_index];

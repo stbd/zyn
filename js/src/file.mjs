@@ -308,6 +308,7 @@ class MarkdownFile extends Base {
   }
 
   save() {
+    const scroll = this._client.ui().get_file_text_area_scroll();
     let edited_content = this._client.ui().get_file_textarea_content();
     let modifications = []
     let offset = 0;
@@ -343,14 +344,14 @@ class MarkdownFile extends Base {
       this._node_id,
       this._revision,
       modifications,
-      (rsp) => this.handle_edit_completed(rsp, encode_to_bytes(edited_content)),
+      (rsp) => this.handle_edit_completed(rsp, encode_to_bytes(edited_content), scroll),
       (operation_number, total_operations) => {
         this._client.ui().show_loading_modal(`Applying modification ${operation_number} / ${total_operations}`);
       },
     )
   }
 
-  handle_edit_completed(rsp, new_content) {
+  handle_edit_completed(rsp, new_content, scroll) {
     this._client.ui().hide_modals();
     if (rsp.is_error()) {
       this._client.ui().unhandled_sittuation_modal(`server replied with error code ${rsp.error_code}`)
@@ -361,6 +362,7 @@ class MarkdownFile extends Base {
     this._edited = false;
     this._client.ui().show_save_button_indication();
     this.render();
+    this._client.ui().set_file_text_area_scroll(scroll);
   }
 
   render() {

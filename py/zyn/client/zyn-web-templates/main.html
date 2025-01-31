@@ -516,6 +516,14 @@
                     return document.getElementById("file-content-textarea").value;
                 }
 
+                get_file_text_area_scroll() {
+                    return e.scrollTop;
+                }
+
+                set_file_text_area_scroll(value) {
+                    document.getElementById("file-content-textarea").scrollTop = value;
+                }
+
                 _file_area_button_enabled(button_id, enabled) {
                     let b = document.getElementById(button_id);
                     if (enabled) {
