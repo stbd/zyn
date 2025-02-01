@@ -155,7 +155,7 @@ class MarkdownFile extends Base {
     this._content = null;
     this._mode = null;
     this._mode_server = null;
-    this._converter = new showdown.Converter();
+    this._converter = new showdown.Converter({'simplifiedAutoLink': true});
     this._set_mode(mode);
     this._edited = false;
 
