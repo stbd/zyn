@@ -30,7 +30,6 @@ class Client {
       filename = null;
     }
 
-
     console.log(`Initializing client with parent "${path_parent}", file "${filename}", root url "${root_url}" to server at "${server_address}"`)
 
     this._path_dir = path_parent;
@@ -421,9 +420,17 @@ class Client {
   }
 
   handle_file_clicked(element, mode) {
+    let _open_file = () => {
+      console.log(`Opening element "${element.name}" with node id ${element.node_id}`)
+      this._connection.open_file(element.node_id, mode, (rsp) => this.handle_open_file_rsp(rsp, mode, element));
+    };
+
     this._ui.show_loading_modal(`Loading file ${element.name}`);
-    console.log(`Opening element "${element.name}" with node id ${element.node_id}`)
-    this._connection.open_file(element.node_id, mode, (rsp) => this.handle_open_file_rsp(rsp, mode, element));
+    if (this._file !== null) {
+      this._connection.close_file(this._file.node_id(), (rsp) => _open_file());
+    } else {
+      _open_file();
+    }
   }
 
   handle_directory_clicked(element) {

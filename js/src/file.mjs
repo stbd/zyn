@@ -425,7 +425,7 @@ class PdfFile extends Base {
     let context = canvas.getContext('2d');
     var scale = 1.5;
 
-    GlobalWorkerOptions.workerSrc = 'http://localhost:8081/static/pdf.worker.mjs' // todo
+    GlobalWorkerOptions.workerSrc = `${this._client.ui().get_browser_url().origin}/static/pdf.worker.mjs`
 
     getDocument({data: this._content}).promise.then(function(pdf) {
       console.log('PDF loaded');

@@ -15,7 +15,10 @@
         <div class="m-5 relative">
             <span id="modal-header" class="block text-4xl text-center"></span>
             <span id="modal-text" class="block mt-[2rem] text-center"></span>
-            <button id="modal-button" class="zyn-button px-[3rem] mt-[2rem] mx-auto block bg-zinc-100">Ok</button>
+            <div class="flex">
+                <button id="modal-notification-button-close" class="zyn-button px-[3rem] mt-[2rem] mx-auto bg-zinc-100">Close</button>
+                <button id="modal-notification-button-ok" class="zyn-button px-[3rem] mt-[2rem] mx-auto bg-zinc-100">Ok</button>
+            </div>
         </div>
     </div>
 
@@ -262,11 +265,15 @@
                     document.getElementById("modal-header").innerHTML = header;
                     document.getElementById("modal-text").innerHTML = description;
                     
-                    let button = document.getElementById("modal-button");
-                    button.innerHTML = button_text;
-                    button.addEventListener("click", (event) => {
-                        document.getElementById("modal-background").classList.add('hidden');
-                        document.getElementById("modal-notification-root").classList.add('hidden');
+                    let button_close = document.getElementById("modal-notification-button-close");
+                    button_close.addEventListener("click", (event) => {
+                        this.hide_modals();
+                    });
+
+                    let button_ok = document.getElementById("modal-notification-button-ok");
+                    button_ok.innerHTML = button_text;
+                    button_ok.addEventListener("click", (event) => {
+                        this.hide_modals();
                         if (button_callback) {
                             button_callback();
                         }
@@ -348,7 +355,7 @@
                     window.history.replaceState(null, null, url.href);
                 }
 
-                get_browser_url() {
+                get_browser_url() {  // todo: rename: get_window_url?
                     return new URL(window.location.href);    
                 }
 
