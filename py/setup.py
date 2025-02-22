@@ -24,6 +24,7 @@ setup(
         ('zyn-web-static', [
             "zyn/client/zyn-web-static/zyn.css",
             "zyn/client/zyn-web-static/zyn.js",
+            "zyn/client/zyn-web-static/pdf.worker.mjs",
         ]),
         ('zyn-web-templates', [
             'zyn/client/zyn-web-templates/login.html',
