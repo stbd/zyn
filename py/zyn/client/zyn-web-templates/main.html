@@ -473,6 +473,20 @@
                     file_content.innerHTML = content;
                 }
 
+                get_file_content() {
+                    return document.getElementById("file-content");
+                }
+
+                create_canvas() {
+                    let file_content = document.getElementById("file-content");
+                    const computed_style = window.getComputedStyle(file_content);
+                    
+                    const canvas = document.createElement("canvas");
+                    canvas.width = parseInt(computed_style.width);
+                    canvas.height = parseInt(computed_style.height);                    
+                    return canvas;
+                }
+
                 create_file_content_canvas() {
                     const output_scale = window.devicePixelRatio || 1;
                     const transform = output_scale !== 1 ? [output_scale, 0, 0, output_scale, 0, 0] : null;
