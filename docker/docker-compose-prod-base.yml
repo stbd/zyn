@@ -24,7 +24,7 @@ services:
     #  - "8082:80"
 
   web-client:
-    image: stbd/zyn-client-web:0.10-rc-7
+    image: stbd/zyn-client-web:0.10-rc-8
     #ports:
     #  - "8082:80"
     networks:
