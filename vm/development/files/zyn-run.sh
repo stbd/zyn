@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+path_scritps="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+path_run_script=$path_scritps/zyn-run.sh
+source "$path_scritps/common.sh"
 
 function usage() {
     echo "Usage: <cmd> <params>"
     echo
     echo "where <cmd> is one of"
+    echo "* dev-env - run all the required services in a single shell"
     echo "* server"
     echo "* docker-server"
     echo "* web-client"
@@ -24,7 +27,57 @@ fi
 cmd=$1
 shift 1
 
-if [ "$cmd" == "server" ]; then
+if [ "$cmd" == "dev-env" ]; then
+
+    pid_serverpid=0
+    pid_ui=0
+    pid_js=0
+    pid_css=0
+
+    "$path_run_script" server &
+    pid_server=$!
+
+    # Give server time to start
+    sleep 1
+
+    "$path_run_script" web-client &
+    pid_ui=$!
+
+    "$path_run_script" web-client-js &
+    pid_js=$!
+
+    "$path_run_script" web-client-css &
+    pid_css=$!
+
+    function _clenup() {
+        echo "Cleaning up"
+
+        if [ $pid_server -ne 0 ]; then
+            echo "Stopping server"
+            pkill -TERM -P "$pid_server"
+        fi
+
+        if [ $pid_ui -ne 0 ]; then
+            echo "Stopping web-ui"
+            pkill -TERM -P "$pid_ui"
+        fi
+
+        if [ $pid_js -ne 0 ]; then
+            echo "Stopping web-ui js"
+            pkill -TERM -P "$pid_js"
+        fi
+
+        if [ $pid_css -ne 0 ]; then
+            echo "Stopping web-ui css"
+            pkill -TERM -P "$pid_css"
+        fi
+    }
+
+    trap _clenup EXIT
+    sleep infinity
+
+
+elif [ "$cmd" == "server" ]; then
 
     path_server_data="${ZYN_DATA_PATH:-/data/server}"
     echo "Running server with data from \"$path_server_data\""
