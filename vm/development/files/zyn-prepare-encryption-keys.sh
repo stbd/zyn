@@ -94,7 +94,7 @@ EOF
 
 }
 
-path_user_home=$path_test_user_gpg_files
+path_user_home="$(zyn_test_data)"
 username=tester
 password=password
 email=$username@invalid.com
@@ -110,7 +110,7 @@ generate_gpg_keys
 install_gpg_development_environment
 configure_gpg
 
-# Cheat cheet
+# Cheat sheet
 # http://irtfweb.ifa.hawaii.edu/~lockhart/gpg/
 
 # To list keys

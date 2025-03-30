@@ -122,3 +122,10 @@
             fi
             # /$tag
             EOF
+
+    - name: "Install NPM"
+      become: true
+      become_user: vagrant
+      shell: /zyn/vm/development/files/zyn-install-npm.sh
+      args:
+        creates: /home/vagrant/.zyn-npm-installed

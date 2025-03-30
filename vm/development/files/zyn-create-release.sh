@@ -20,12 +20,13 @@ if [ $# -ne 2 ]; then
     exit 1
 fi
 
+path_scripts="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+source "$path_scripts/common.sh"
+
 release_type=$1
 version=$2
 tag_image_server=stbd/zyn:$version
 tag_image_web=stbd/zyn-client-web:$version
-
-source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
 
 if [ "$release_type" == "system" ] ; then
 
@@ -40,27 +41,19 @@ EOF
 
 elif [ "$release_type" == "docker-zyn" ] ; then
 
-    docker build \
-           -t "$tag_image_server" \
-           -f "$zyn_project_root/docker/dockerfile-zyn" \
-           "$zyn_project_root"
-
+    "$path_scripts/zyn-build.sh" docker-server "$tag_image_server"
     echo "Docker image \"$tag_image_server\" created, please run \"docker push $tag_image_server\" to publish image"
 
 elif [ "$release_type" == "docker-web" ] ; then
 
-    docker build \
-           -t "$tag_image_web" \
-           -f "$zyn_project_root/docker/dockerfile-web-client" \
-           "$zyn_project_root"
-
+    "$path_scripts/zyn-build.sh" docker-web-client "$tag_image_web"
     echo "Docker image \"$tag_image_web\" created, please run \"docker push $tag_image_web\" to publish image"
 
 elif [ "$release_type" == "py" ] ; then
 
     path_workdir="$(mktemp -d)"
     echo "Using workdir $path_workdir"
-    ZYN_PY_VERSION=$version pip wheel --no-deps -w "$path_workdir" "$zyn_project_root/py"
+    ZYN_PY_VERSION=$version pip wheel --no-deps -w "$path_workdir" "$(zyn_project_root)/py"
     generated_file="$(find "$path_workdir" -name 'PyZyn*whl')"
 
     path_output="$PWD/$(basename $generated_file)"
