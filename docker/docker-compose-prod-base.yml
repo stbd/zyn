@@ -1,7 +1,7 @@
 version: "3"
 services:
   zyn:
-    image: stbd/zyn:0.10-rc-2
+    image: stbd/zyn:0.10
     environment:
       ZYN_DEFAULT_USERNAME:
       ZYN_DEFAULT_USER_PASSWORD:
@@ -24,7 +24,7 @@ services:
     #  - "8082:80"
 
   web-client:
-    image: stbd/zyn-client-web:0.10-rc-8
+    image: stbd/zyn-client-web:0.10
     #ports:
     #  - "8082:80"
     networks:
