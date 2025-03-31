@@ -1,8 +1,6 @@
 import { Connection } from './connection.mjs'
-import {
-  MarkdownFile,
-  PdfFile,
-} from './file.mjs';
+import { MarkdownFile } from './file_markdown.mjs';
+import { PdfFile } from './file_pdf.mjs';
 import {
   OpenMode,
 } from './common.mjs';
