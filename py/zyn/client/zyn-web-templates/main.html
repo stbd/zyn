@@ -83,6 +83,7 @@
                     
                     <button id="button-create-markdown" class="zyn-button px-2 mt-4 mx-1">Markdown</button>
                     <button id="button-create-directory" class="zyn-button px-2 mt-4 mx-1">Directory</button>
+                    <button id="button-create-list" class="zyn-button px-2 mt-4 mx-1">List</button>
 
                     <div id="sidebar-create-element-modal" class="hidden absolute w-[21rem] top-[10%] left-[2%] bg-white rounded-md border-2 z-[5]">
                         <span class="block ml-4 my-2">Name</span>
@@ -175,6 +176,10 @@
                         client.handle_create_directory_clicked();
                     });
 
+                    document.getElementById("button-create-list").addEventListener("click", (event) => {
+                        client.handle_create_list_clicked();
+                    });
+
                     document.getElementById("file-button-done").addEventListener("click", (event) => {
                         client.handle_file_done_clicked();
                     });
@@ -216,6 +221,9 @@
                             document.getElementById("working-dir-path").value
                         );
                     });
+                }
+                document() {
+                    return document;
                 }
 
                 server_info_modal(
@@ -468,9 +476,12 @@
                     }
                 }
 
-                set_file_content(content) {
+                set_file_content(content, callback=null) {
                     let file_content = document.getElementById("file-content");
                     file_content.innerHTML = content;
+                    if (callback !== null) {
+                        callback();
+                    }
                 }
 
                 get_file_content() {

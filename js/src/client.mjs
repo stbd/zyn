@@ -1,8 +1,10 @@
 import { Connection } from './connection.mjs'
 import { MarkdownFile } from './file_markdown.mjs';
 import { PdfFile } from './file_pdf.mjs';
+import { ListFile } from './file_list.mjs';
 import {
   OpenMode,
+  log,
 } from './common.mjs';
 
 const FilesystemElementTypes = Object.freeze({
@@ -28,7 +30,7 @@ class Client {
       filename = null;
     }
 
-    console.log(`Initializing client with parent "${path_parent}", file "${filename}", root url "${root_url}" to server at "${server_address}"`)
+    log(`Initializing client with parent "${path_parent}", file "${filename}", root url "${root_url}" to server at "${server_address}"`)
 
     this._path_dir = path_parent;
     this._root_url = root_url;
@@ -36,7 +38,7 @@ class Client {
     this._server_address = server_address;
     this._file = null;
 
-    this._ui.show_loading_modal('Initializing...')
+    this._ui.show_loading_modal('Loading...')
     this._ui.register_client_callbacks(this);
     this._ui.set_file_content_text('File');
 
@@ -46,7 +48,7 @@ class Client {
 
     this.create_connection_and_auhenticate(
       authentication_token,
-      (rsp) => this.handle_connection_completed(rsp, filename, file_mode)
+      (rsp) => this.handle_connection_completed(rsp, filename, file_mode),
     );
 
     this.update_browser_url();
@@ -142,6 +144,8 @@ class Client {
   map_filename_to_handler(filename) {
     if (filename.endsWith(MarkdownFile.filename_extension)) {
       return MarkdownFile;
+    } else if (filename.endsWith(ListFile.filename_extension)) {
+      return ListFile;
     } else if (filename.endsWith(PdfFile.filename_extension)) {
       return PdfFile;
     } else {
@@ -266,10 +270,19 @@ class Client {
 
   handle_create_markdown_clicked() {
     this._ui.show_create_element_modal(
-      "Filename should end with .md",
+      "Filename which should end with .md",
       "filename.md",
       (name) => this.handle_create_clicked("markdown", "create", name),
       (name) => this.handle_create_clicked("markdown", "cancel", name),
+    );
+  }
+
+  handle_create_list_clicked() {
+    this._ui.show_create_element_modal(
+      "Filename which should end with .ls",
+      "todo.ls",
+      (name) => this.handle_create_clicked("list", "create", name),
+      (name) => this.handle_create_clicked("list", "cancel", name),
     );
   }
 
@@ -326,13 +339,16 @@ class Client {
   }
 
   handle_create_clicked(type_of_element, user_action, name) {
+
     console.log(`handle_create_clicked ${type_of_element}  ${user_action}`);
+
     if (user_action == 'cancel') {
       this._ui.reset_and_hide_create_element_modal();
       return
     }
 
     if (type_of_element == 'markdown') {
+
       if (this.map_filename_to_handler(name) !== MarkdownFile) {
         this._ui.activate_modal_notification(
           'Note',
@@ -352,6 +368,29 @@ class Client {
       console.log(`Creating new Markdown file ${name} in path ${this._path_dir}`);
       this._connection.create_file_ra(name, this._path_dir, (rsp) => this.handle_create_response('markdown', rsp));
       this._ui.show_loading_modal('Creating file...');
+
+    } else if (type_of_element == 'list') {
+
+      if (this.map_filename_to_handler(name) !== ListFile) {
+        this._ui.activate_modal_notification(
+          'Note',
+          `List filename should have extension ${ListFile.filename_extension}
+          <br\>
+          <br\>
+          Plaese try again
+          `,
+          'Ok',
+          () => {
+            this._ui.hide_modals();
+          }
+        );
+        return ;
+      }
+
+      console.log(`Creating new List file ${name} in path ${this._path_dir}`);
+      this._connection.create_file_ra(name, this._path_dir, (rsp) => this.handle_create_response('markdown', rsp));
+      this._ui.show_loading_modal('Creating file...');
+
     } else if (type_of_element == 'directory') {
 
       console.log(`Creating new directory ${name} in path ${this._path_dir}`);
@@ -419,7 +458,7 @@ class Client {
 
   handle_file_clicked(element, mode) {
     let _open_file = () => {
-      console.log(`Opening element "${element.name}" with node id ${element.node_id}`)
+      log(`Opening element "${element.name}" with node id ${element.node_id} with mode "${mode}"`);
       this._connection.open_file(element.node_id, mode, (rsp) => this.handle_open_file_rsp(rsp, mode, element));
     };
 
@@ -465,6 +504,7 @@ class Client {
   }
 
   handle_open_file_rsp(rsp, mode, element) {
+
     // todo: handle case when user does not have edit permissions
     if (rsp.is_error()) {
       this._ui.unhandled_sittuation_modal(`server replied with error code ${rsp.error_code}`);
@@ -476,6 +516,7 @@ class Client {
       this._ui.unhandled_sittuation_modal(`no handler found for elment with name ${element.name}`);
       return ;
     }
+
     this._file = new object(rsp, this, element.name, mode);
     this.update_browser_url();
     this._ui.hide_modals();
