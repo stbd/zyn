@@ -18,6 +18,7 @@
           - 'apt-transport-https'
           - 'software-properties-common'
           - 'ssl-cert'
+          - 'python3-venv'
 
     - name: "Create symlinks to scripts"
       become: yes

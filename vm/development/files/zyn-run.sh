@@ -143,7 +143,7 @@ elif [ "$cmd" == "web-client-css" ]; then
 elif [ "$cmd" == "shell" ]; then
 
     echo
-    echo "Pass \"init admin <path-data> 10.0.2.15 8080\" to initialise client"
+    echo "Pass \"init admin /data/client 10.0.2.15 8080\" to initialise client"
     echo
 
     zyn-shell \
