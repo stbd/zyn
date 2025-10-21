@@ -71,6 +71,9 @@ function log(msg) {
   console.log(msg)
 }
 
+function log_debug(msg) {
+  // console.log(msg)
+}
 
 export {
   Authority,
@@ -82,4 +85,5 @@ export {
   encode_to_bytes,
   decode_from_bytes,
   log,
+  log_debug,
 };

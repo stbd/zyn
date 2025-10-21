@@ -1,8 +1,6 @@
 import {
   OpenMode,
   log,
-  encode_to_bytes,
-  decode_from_bytes,
 } from './common.mjs';
 
 

@@ -19,6 +19,8 @@ import {
   FilesystemElementDirectory,
   Authority,
   OpenMode,
+  log,
+  log_debug,
 } from './common.mjs';
 
 const MSG_TYPE_AUTH = 'A';
@@ -48,6 +50,7 @@ class ModificationState {
   }
 
   apply() {
+    log(`Applying modification to node id ${this._node_id} revision ${this._revision}`);
     let mod = this._modifications[this._operation_index];
     if (mod.type == 'add') {
       this._connection.edit_ra_file_preamble_insert(this._node_id, this._revision, mod.offset, mod.bytes.length, (rsp_preamble) => {
@@ -71,7 +74,9 @@ class ModificationState {
   _complete_operation(rsp) {
     this._operation_index += 1;
     this._revision = rsp.revision;
-    if (this._operation_index == this._modifications.length) {
+    if (rsp.is_error()) {
+      this._callback(rsp);
+    } else if (this._operation_index == this._modifications.length) {
       this._callback(rsp);
     } else {
       this.apply();
@@ -89,9 +94,13 @@ class BatchModificationState {
     this._connection = connection;
     this._operation_index = 0;
     this._state_callback = state_callback;
+    log(`Applying modifications to node id ${this._node_id} revision ${this._revision}`);
+    for (let mod of this._modifications) {
+      log_debug(mod);
+    }
     this._connection.edit_ra_file_preamble_batch_edit(this._node_id, this._revision, this._modifications.length, (rsp_preamble) => {
       if (rsp_preamble.is_error()) {
-        return this._complete_operation(rsp_preamble);
+        return this.complete_operation(rsp_preamble);
       }
       this.apply();
     });

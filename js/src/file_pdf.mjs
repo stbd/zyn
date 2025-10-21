@@ -1,5 +1,6 @@
-import { Base } from 'file';
+import { Base } from './file.mjs';
 import {getDocument, GlobalWorkerOptions} from 'pdfjs-dist';
+
 
 class PdfFile extends Base {
   static filename_extension = '.pdf';
@@ -28,6 +29,7 @@ class PdfFile extends Base {
   }
 
   render() {
+
     console.log(`Rendering PDF`)
     var scale = 1.5;
     let ui = this._client.ui();

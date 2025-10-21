@@ -1,4 +1,4 @@
-import { Base } from 'file';
+import { Base } from './file.mjs';
 import { diffArrays } from 'diff';
 import showdown from 'showdown';
 
@@ -9,7 +9,7 @@ class MarkdownFile extends Base {
   constructor(open_rsp, client, filename, mode) {
     super(open_rsp, client, filename);
     this._content = null;
-    this._mode = null;
+    this._mode = mode;
     this._mode_server = null;
     this._converter = new showdown.Converter({'simplifiedAutoLink': true});
     this._set_mode(mode);
