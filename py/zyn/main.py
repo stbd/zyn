@@ -3,6 +3,7 @@ import argparse
 import getpass
 import os.path
 import traceback
+import sys
 
 import zyn.socket
 import zyn.connection
@@ -227,12 +228,15 @@ def shell():
         except KeyboardInterrupt:
             break
         except SystemExit:
+            # This is thrown by argparse, it should have better type
             pass
         finally:
-            connection.disconnect()
-            print()
-            print('Exiting, saving client state')
             client_state.to_file(path_client_conf)
+
+    connection.disconnect()
+    print()
+    print('Exiting, saving client state')
+    client_state.to_file(path_client_conf)
 
 
 def webserver():
