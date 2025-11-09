@@ -458,6 +458,10 @@ class Client {
 
   handle_file_clicked(element, mode) {
     let _open_file = () => {
+      const file_type = this.map_filename_to_handler(element.name);
+      if (file_type) {
+        mode = file_type.default_open_mode;
+      }
       log(`Opening element "${element.name}" with node id ${element.node_id} with mode "${mode}"`);
       this._connection.open_file(element.node_id, mode, (rsp) => this.handle_open_file_rsp(rsp, mode, element));
     };
@@ -513,7 +517,7 @@ class Client {
 
     const object = this.map_filename_to_handler(element.name);
     if (object === null) {
-      this._ui.unhandled_sittuation_modal(`no handler found for elment with name ${element.name}`);
+      this._ui.unhandled_sittuation_modal(`No handler found for elment with name ${element.name}`);
       return ;
     }
 

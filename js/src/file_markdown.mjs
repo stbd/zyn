@@ -10,6 +10,7 @@ import {
 class MarkdownFile extends Base {
   static filename_extension = '.md';
   static is_editable = true;
+  static default_open_mode = OpenMode.read;
 
   constructor(open_rsp, client, filename, mode) {
     super(open_rsp, client, filename);

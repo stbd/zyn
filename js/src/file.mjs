@@ -69,6 +69,7 @@ class ReadState {
 class Base {
   static filename_extension = null;
   static is_editable = false;
+  static default_open_mode = OpenMode.read;
 
   constructor(open_rsp, client, filename) {
     this._client = client

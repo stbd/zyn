@@ -253,7 +253,8 @@ class List {
 
 class ListFile extends Base {
   static filename_extension = '.ls';
-  static is_editable = true;
+  static is_editable = false;
+  static default_open_mode = OpenMode.edit;
   static ELEMENT_NAME_LIST = 'zyn-list-page-elements';
   static ELEMENT_NAME_ADD_BUTTON = 'zyn-list-page-add-button';
 
@@ -269,6 +270,10 @@ class ListFile extends Base {
     });
 
     this._client.ui().show_loading_modal('Loading file content...');
+    this._client.ui().file_area_button_done(false);
+    this._client.ui().file_area_button_edit(false);
+    this._client.ui().file_area_button_save(false);
+    this._client.ui().file_area_button_cancel(false);
     if (open_rsp.size === 0) {
       this.render();
     } else {

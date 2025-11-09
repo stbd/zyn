@@ -1,9 +1,11 @@
 import { Base } from './file.mjs';
+import { OpenMode } from './common.mjs';
 import {getDocument, GlobalWorkerOptions} from 'pdfjs-dist';
 
 class PdfFile extends Base {
   static filename_extension = '.pdf';
   static is_editable = false;
+  static default_open_mode = OpenMode.read;
 
   constructor(open_rsp, client, filename, mode) {
     super(open_rsp, client, filename);
