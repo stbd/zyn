@@ -1,7 +1,6 @@
 import { Base } from './file.mjs';
 import {getDocument, GlobalWorkerOptions} from 'pdfjs-dist';
 
-
 class PdfFile extends Base {
   static filename_extension = '.pdf';
   static is_editable = false;

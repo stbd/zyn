@@ -1,6 +1,11 @@
 import { Base } from './file.mjs';
 import { diffArrays } from 'diff';
 import showdown from 'showdown';
+import {
+  OpenMode,
+  encode_to_bytes,
+  decode_from_bytes,
+} from './common.mjs';
 
 class MarkdownFile extends Base {
   static filename_extension = '.md';
