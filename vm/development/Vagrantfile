@@ -1,6 +1,6 @@
 Vagrant.configure("2") do |config|
 
-  config.vm.box = "debian/bookworm64"
+  config.vm.box = "ollihuur/debian-13-trixie"
 
   config.vm.network "forwarded_port", guest: 8080, host: 8080
   config.vm.network "forwarded_port", guest: 8081, host: 8081
@@ -32,18 +32,8 @@ Vagrant.configure("2") do |config|
 
   # Install puppet on VM
   config.vm.provision "shell", inline: <<-SHELL
-     ansible_installed=1
-     command -v ansible || ansible_installed=0
-     if [ $ansible_installed -eq 0 ]; then
-         apt update
-         apt install -y gnupg
-         echo "deb http://ppa.launchpad.net/ansible/ansible/ubuntu focal main" > /etc/apt/sources.list.d/ubuntu-ansible.list
-         sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 93C4A3FD7BB9C367
-         apt update
-         apt install -y ansible
-     else
-         echo "Ansible already installed"
-     fi
+     apt update
+     apt install -y gnupg ansible
      sudo -u vagrant ansible-playbook -vv /zyn/vm/development/vm.yml
   SHELL
 

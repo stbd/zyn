@@ -8,7 +8,7 @@
       vars:
         packages:
           - 'build-essential'
-          - 'haveged'            # Used to generate randomness for security operations
+          - 'haveged'            # Used to generate randomness for security operations in development environment
           - 'python3'
           - 'python3-pip'
           - 'shellcheck'         # Static analyser for bash scripts
@@ -16,20 +16,12 @@
           - 'gnupg2'
           - 'gnupg-agent'        # https://unix.stackexchange.com/questions/512173/gpg-gpg-preset-passphrase-installation
           - 'apt-transport-https'
-          - 'software-properties-common'
           - 'ssl-cert'
           - 'python3-venv'
 
-    - name: "Create symlinks to scripts"
+    - name: "Install all scripts under system"
       become: yes
-      shell: |
-        for file in files/*sh; do
-            path_file=$(readlink -f "$file")
-            link=/usr/bin/$(basename "$file")
-            if [ ! -e "$link" ]; then
-                ln -s "$path_file" "$link"
-            fi
-        done
+      shell: install -m 555  files/*sh /usr/bin/
 
     - name: "Install Rust"
       shell: "/usr/bin/zyn-install-rust-debian.sh"
@@ -42,7 +34,9 @@
     - name: "Configure encryption"
       become: yes
       become_user: vagrant
-      shell: "/zyn/vm/development/files/zyn-prepare-encryption-keys.sh"
+      shell: "/zyn/vm/development/files/zyn-prepare-encryption-keys.sh /home/vagrant"
+      args:
+        creates: /home/vagrant/.zyn-test-user-gpg-fingerprint
 
     # Certificates are not used in development at the moment, disable for now
     #- name: "Configure certificates"
@@ -60,8 +54,16 @@
             echo "Docker already installed"
             exit 0
         fi
-        curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add -
-        add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable"
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+
+        tee /etc/apt/sources.list.d/docker.sources <<EOF
+        Types: deb
+        URIs: https://download.docker.com/linux/debian
+        Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
+        Components: stable
+        Signed-By: /etc/apt/keyrings/docker.asc
+        EOF
         apt-get update
         apt-get -y install docker-ce
       args:

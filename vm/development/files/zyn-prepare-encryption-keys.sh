@@ -94,7 +94,12 @@ EOF
 
 }
 
-path_user_home="$(zyn_test_data)"
+if [ $# -ne 1 ]; then
+    echo "Usage: <path-test-folder>"
+    exit 1
+fi
+
+path_user_home="$1"
 username=tester
 password=password
 email=$username@invalid.com

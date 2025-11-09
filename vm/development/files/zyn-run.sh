@@ -82,7 +82,7 @@ elif [ "$cmd" == "server" ]; then
     path_server_data="${ZYN_DATA_PATH:-/data/server}"
     echo "Running server with data from \"$path_server_data\""
 
-    RUST_LOG=trace /zyn/zyn/target/debug/zyn \
+    RUST_LOG=trace $CARGO_TARGET_DIR/debug/zyn \
             --local-port 8080 \
             --local-address 10.0.2.15 \
             --default-user-name admin \
