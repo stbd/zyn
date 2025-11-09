@@ -33,7 +33,7 @@ class ZynCommon(unittest.TestCase):
         self.username = 'admin'
         self.password = 'admin'
         self.path_zyn_binary = os.environ.get(
-            'zyn_tests_path_server_binary',
+            'ZYN_TESTS_PATH_SERVER_BINARY',
             PATH_FILE + '/../zyn/target/debug/zyn',
         )
         self.manage_server = self._parse_boolean_environment_variable(
