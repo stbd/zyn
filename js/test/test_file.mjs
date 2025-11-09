@@ -306,40 +306,89 @@ describe('Markdown', function () {
 });
 
 describe('ListFile', function () {
-    it('should parse simple list content correctly', function () {
-      const data = '"item 1";\n"item 2";\n';
-      const resources = _init_base(data.length);
-      let file = new ListFile(resources.open_rsp, resources.stubs.client, 'test.ls', OpenMode.edit);
+  it('should parse simple list content correctly', function () {
+    const data = '"item 1";\n"item 2";\n';
+    const resources = _init_base(data.length);
+    let file = new ListFile(resources.open_rsp, resources.stubs.client, 'test.ls', OpenMode.edit);
 
-      resources.stubs.connection.read_file.getCall(0).args[3](
-        _create_read_rsp(encode_to_bytes(data), 0, 1)
-      );
+    resources.stubs.connection.read_file.getCall(0).args[3](
+      _create_read_rsp(encode_to_bytes(data), 0, 1)
+    );
 
-      assert.equal(file._list_content.size(), 2);
-      assert.equal(file._list_content.element_at(0).text(), 'item 1');
-      assert.equal(file._list_content.element_at(1).text(), 'item 2');
-    });
+    assert.equal(file._list_content.size(), 2);
+    assert.equal(file._list_content.element_at(0).text(), 'item 1');
+    assert.equal(file._list_content.element_at(1).text(), 'item 2');
+  });
 
-    it('should handle move correctly', function () {
-      const data = '"item 1";\n"item 2";\n"item 3";\n';
-      const resources = _init_base(data.length);
-      let file = new ListFile(resources.open_rsp, resources.stubs.client, 'test.ls', OpenMode.edit);
+  it('should handle move correctly', function () {
+    const data = '"item 1";\n"item 2";\n"item 3";\n';
+    const resources = _init_base(data.length);
+    let file = new ListFile(resources.open_rsp, resources.stubs.client, 'test.ls', OpenMode.edit);
 
-      resources.stubs.connection.read_file.getCall(0).args[3](
-        _create_read_rsp(encode_to_bytes(data), 0, 1)
-      );
+    resources.stubs.connection.read_file.getCall(0).args[3](
+      _create_read_rsp(encode_to_bytes(data), 0, 1)
+    );
 
-      let e = file._list_content.element_at(0);
-      e.move_to_index(1);
-      file._list_content.save_element(e.id(), e.text());
+    let e = file._list_content.element_at(0);
+    e.move_to_index(1);
+    file._list_content.save_element(e.id(), e.text());
 
-      // Assert that system first deletes row 0, then adds it to second place
-      const mods = resources.stubs.connection.apply_modifications.getCall(0).args[2];
-      assert.equal(mods.length, 2)
-      assert.equal(mods[0].type, 'delete')
-      assert.equal(mods[0].offset, 0)
-      assert.equal(mods[0].size, 10)
-      assert.equal(mods[1].type, 'add')
-      assert.equal(mods[1].offset, 10)
-    });
+    // Assert that system first deletes row 0, then adds it to second place
+    const mods = resources.stubs.connection.apply_modifications.getCall(0).args[2];
+    assert.equal(mods.length, 2)
+    assert.equal(mods[0].type, 'delete')
+    assert.equal(mods[0].offset, 0)
+    assert.equal(mods[0].size, 10)
+    assert.equal(mods[1].type, 'add')
+    assert.equal(mods[1].offset, 10)
+  });
+
+  it('should save element with updated text', function () {
+    const data = '"item 1";\n"item 2";\n';
+    const resources = _init_base(data.length);
+    let file = new ListFile(resources.open_rsp, resources.stubs.client, 'test.ls', OpenMode.edit);
+
+    resources.stubs.connection.read_file.getCall(0).args[3](
+      _create_read_rsp(encode_to_bytes(data), 0, 1)
+    );
+
+    const element = file._list_content.element_at(0);
+    const updated = file._list_content.save_element(element.id(), 'updated text');
+
+    assert.equal(updated.text(), 'updated text');
+    assert.equal(file._list_content.element_at(0).text(), 'updated text');
+
+    // Verify backend call
+    const mods = resources.stubs.connection.apply_modifications.getCall(0).args[2];
+    assert.equal(mods.length, 2);
+    assert.equal(mods[0].type, 'delete');
+    assert.equal(mods[1].type, 'add');
+  });
+
+  it('should not make backend call if text unchanged', function () {
+    const data = '"item 1";\n"item 2";\n';
+    const resources = _init_base(data.length);
+    let file = new ListFile(resources.open_rsp, resources.stubs.client, 'test.ls', OpenMode.edit);
+
+    resources.stubs.connection.read_file.getCall(0).args[3](
+      _create_read_rsp(encode_to_bytes(data), 0, 1)
+    );
+
+    const element = file._list_content.element_at(0);
+    file._list_content.save_element(element.id(), 'item 1');
+
+    assert.equal(resources.stubs.connection.apply_modifications.callCount, 0);
+  });
+
+  it('should encode semicolons correctly when saving', function () {
+    const resources = _init_base(0);
+    let file = new ListFile(resources.open_rsp, resources.stubs.client, 'test.ls', OpenMode.edit);
+
+    const element = file._list_content.add_new_empty_element();
+    file._list_content.save_element(element.id(), 'text with ; semicolon');
+
+    const mods = resources.stubs.connection.apply_modifications.getCall(0).args[2];
+    assert.equal(decode_from_bytes(mods[0].bytes), '"text with %59 semicolon";\n');
+    assert.equal(file._list_content.element_at(0).text(), 'text with ; semicolon');
+  });
 });
