@@ -14,12 +14,12 @@ Fileformat:
 "content for element 1";\n
 */
 
-CHAR_LINE_FEED = 10;
-CHAR_SEMICOLON = 59;
-ELEMENT_ID = "zyn-list-element";
-ELEMENT_TEXT_ID = "zyn-list-element-text";
-ELEMENT_BUTTON_SAVE_ID = "zyn-list-element-save";
-ELEMENT_BUTTON_DELETE_ID = "zyn-list-element-delete";
+const CHAR_LINE_FEED = 10;
+const CHAR_SEMICOLON = 59;
+const ELEMENT_ID = "zyn-list-element";
+const ELEMENT_TEXT_ID = "zyn-list-element-text";
+const ELEMENT_BUTTON_SAVE_ID = "zyn-list-element-save";
+const ELEMENT_BUTTON_DELETE_ID = "zyn-list-element-delete";
 
 class ListElement {
   constructor(id, data) {
@@ -101,6 +101,8 @@ class List {
 
   is_empty() { return this._elements.length == 0; }
   elements() { return this._elements.entries(); }
+  element_at(index) { return this._elements[index]; }
+  size() { return this._elements.length; }
   delete_element(element_id) {
 
     this._file._client.ui().show_loading_modal();

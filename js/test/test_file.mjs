@@ -12,8 +12,13 @@ import {
 import {
   ReadState,
   Base,
-  MarkdownFile,
 } from '../src/file.mjs';
+import {
+  MarkdownFile,
+} from '../src/file_markdown.mjs';
+import {
+  ListFile,
+} from '../src/file_list.mjs';
 import { init_client_stub } from './common.mjs';
 
 import assert from 'assert';
@@ -298,4 +303,43 @@ describe('Markdown', function () {
       assert.equal(decode_from_bytes(file._content), 'd12a');
     });
   });
+});
+
+describe('ListFile', function () {
+    it('should parse simple list content correctly', function () {
+      const data = '"item 1";\n"item 2";\n';
+      const resources = _init_base(data.length);
+      let file = new ListFile(resources.open_rsp, resources.stubs.client, 'test.ls', OpenMode.edit);
+
+      resources.stubs.connection.read_file.getCall(0).args[3](
+        _create_read_rsp(encode_to_bytes(data), 0, 1)
+      );
+
+      assert.equal(file._list_content.size(), 2);
+      assert.equal(file._list_content.element_at(0).text(), 'item 1');
+      assert.equal(file._list_content.element_at(1).text(), 'item 2');
+    });
+
+    it('should handle move correctly', function () {
+      const data = '"item 1";\n"item 2";\n"item 3";\n';
+      const resources = _init_base(data.length);
+      let file = new ListFile(resources.open_rsp, resources.stubs.client, 'test.ls', OpenMode.edit);
+
+      resources.stubs.connection.read_file.getCall(0).args[3](
+        _create_read_rsp(encode_to_bytes(data), 0, 1)
+      );
+
+      let e = file._list_content.element_at(0);
+      e.move_to_index(1);
+      file._list_content.save_element(e.id(), e.text());
+
+      // Assert that system first deletes row 0, then adds it to second place
+      const mods = resources.stubs.connection.apply_modifications.getCall(0).args[2];
+      assert.equal(mods.length, 2)
+      assert.equal(mods[0].type, 'delete')
+      assert.equal(mods[0].offset, 0)
+      assert.equal(mods[0].size, 10)
+      assert.equal(mods[1].type, 'add')
+      assert.equal(mods[1].offset, 10)
+    });
 });
