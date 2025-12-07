@@ -460,7 +460,11 @@ class Client {
     let _open_file = () => {
       const file_type = this.map_filename_to_handler(element.name);
       if (file_type) {
-        mode = file_type.default_open_mode;
+        // This is bit of an hax, but allow file to be opened in
+        // read mode by default. Especially for usefull for list files
+        if (file_type.default_open_mode === OpenMode.edit) {
+          mode = file_type.default_open_mode;
+        }
       }
       log(`Opening element "${element.name}" with node id ${element.node_id} with mode "${mode}"`);
       this._connection.open_file(element.node_id, mode, (rsp) => this.handle_open_file_rsp(rsp, mode, element));
