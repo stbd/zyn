@@ -16,6 +16,7 @@ Fileformat:
 
 const CHAR_LINE_FEED = 10;
 const CHAR_SEMICOLON = 59;
+const CHAR_DOUBLE_QUOTES = 34;
 const ELEMENT_ID = "zyn-list-element";
 const ELEMENT_TEXT_ID = "zyn-list-element-text";
 const ELEMENT_BUTTON_SAVE_ID = "zyn-list-element-save";
@@ -24,12 +25,22 @@ const ELEMENT_BUTTON_DELETE_ID = "zyn-list-element-delete";
 class ListElement {
   constructor(id, data) {
     this._data = data
+    this._tags = [];
     this._id = id;
     this._move_to_index = null;
     if (this.is_initialized()) {
-      log(`List element created, id: ${this._id}, size: ${this.data_size()}`)
+      log(`List element created, id: ${this._id}, size: ${this.data_size()}`);
+      
+      const end_of_text = this._data.indexOf(CHAR_DOUBLE_QUOTES, 1);
+      if (this._data[end_of_text + 1] != CHAR_SEMICOLON) {
+        const end_of_tags = this._data.indexOf(CHAR_DOUBLE_QUOTES, end_of_text + 2);
+        if (end_of_tags !== -1) {
+          const tags = decode_from_bytes(this._data.slice(end_of_text + 2, end_of_tags));
+          this._tags = tags.split(',').map((tag) => this._unescape_text(tag));
+        }
+      }
     } else {
-      log(`Empty list element created, id: ${this._id}`)
+      log(`Empty list element created, id: ${this._id}`);
     }
   }
 
@@ -40,16 +51,40 @@ class ListElement {
   is_moved() { return this._move_to_index !== null; }
   moved_index() { return this._move_to_index; }
   clear_move() { this._move_to_index = null; }
+  tags() { return this._tags; }
+  add_tag(tag) {
+    this._tags.push(tag);
+    this._tags = [...new Set(this._tags)]; 
+  }
   data_size() { 
     if (!this.is_initialized()) {
       throw "ListElement not initialized";
     }
     return this._data.length;
-  } 
+  }
+
+  _escape_text(text) {
+    return text.replaceAll('%', '%%').replaceAll('"', "%34").replaceAll(';', '%59');
+  }
+
+  _unescape_text(text) {
+    return text.trim().replaceAll('"', '').replaceAll('%59', ';').replaceAll('%34', '"').replaceAll('%%', '%');
+  }
+
+  _tags_to_text() {
+    let text = ''
+    for (let tag of this._tags) {
+      if (text) {
+        text += ', ';
+      }
+      text += this._escape_text(tag);
+    }
+    return text
+  }
 
   update_text(text) { 
-    const escaped = `"${text.replaceAll('%', '%%').replaceAll('"', "%34").replaceAll(';', '%59')}";\n`;
-    const data = encode_to_bytes(escaped);
+    const escaped = this._escape_text(text);
+    const data = encode_to_bytes(`"${escaped}""${this._tags_to_text()}";\n`);
 
     if (this._data !== null) {
       if (data.toString() === this._data.toString()) {
@@ -61,8 +96,9 @@ class ListElement {
   }
 
   text() {
-    const text = decode_from_bytes(this._data.slice(1, -2));  // Drop " from beginning and "\n from end
-    return text.trim().replaceAll('"', '').replaceAll('%59', ';').replaceAll('%34', '"').replaceAll('%%', '%');
+    const end_of_text = this._data.indexOf(CHAR_DOUBLE_QUOTES, 1);
+    const text = decode_from_bytes(this._data.slice(1, end_of_text));
+    return this._unescape_text(text);
   }
 }
 
@@ -315,6 +351,7 @@ class ListFile extends Base {
         );
         throw('Malformed data');
       }
+
       const d = data.slice(index_start, index_end);
       let row = new Uint8Array(d.length + 2);
       row.set(d, 0);

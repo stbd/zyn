@@ -307,7 +307,7 @@ describe('Markdown', function () {
 
 describe('ListFile', function () {
   it('should parse simple list content correctly', function () {
-    const data = '"item 1";\n"item 2";\n';
+    const data = '"item 1""tag-1, tag-2";\n"item 2";\n';
     const resources = _init_base(data.length);
     let file = new ListFile(resources.open_rsp, resources.stubs.client, 'test.ls', OpenMode.edit);
 
@@ -318,6 +318,20 @@ describe('ListFile', function () {
     assert.equal(file._list_content.size(), 2);
     assert.equal(file._list_content.element_at(0).text(), 'item 1');
     assert.equal(file._list_content.element_at(1).text(), 'item 2');
+  });
+
+  it('should save tags correctly', function () {
+
+    const resources = _init_base(0);
+    let file = new ListFile(resources.open_rsp, resources.stubs.client, 'test.ls', OpenMode.edit);
+    let e1 = file._list_content.add_new_empty_element();
+    e1.add_tag('tag-1');
+    e1.add_tag('tag-1');
+    e1.add_tag('tag-2');
+
+    file._list_content.save_element(e1.id(), 'Some text');
+    const mods = resources.stubs.connection.apply_modifications.getCall(0).args[2]
+    assert.equal(decode_from_bytes(mods[0].bytes), '"Some text""tag-1, tag-2";\n');
   });
 
   it('should handle move correctly', function () {
@@ -366,7 +380,7 @@ describe('ListFile', function () {
   });
 
   it('should not make backend call if text unchanged', function () {
-    const data = '"item 1";\n"item 2";\n';
+    const data = '"item 1""";\n"item 2""";\n';
     const resources = _init_base(data.length);
     let file = new ListFile(resources.open_rsp, resources.stubs.client, 'test.ls', OpenMode.edit);
 
@@ -388,7 +402,7 @@ describe('ListFile', function () {
     file._list_content.save_element(element.id(), 'text with ; semicolon');
 
     const mods = resources.stubs.connection.apply_modifications.getCall(0).args[2];
-    assert.equal(decode_from_bytes(mods[0].bytes), '"text with %59 semicolon";\n');
+    assert.equal(decode_from_bytes(mods[0].bytes), '"text with %59 semicolon""";\n');
     assert.equal(file._list_content.element_at(0).text(), 'text with ; semicolon');
   });
 });
