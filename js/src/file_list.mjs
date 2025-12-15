@@ -626,6 +626,9 @@ class ListFile extends Base {
       text.addEventListener('dblclick', (event) => this._handle_row_text_element_clicked(event.srcElement), {once: true});
     } else {
       this._set_row_editable(row, true);
+      // Set date as default text
+      const d = new Date();
+      text.innerText = `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}: `
     }
 
     let list = this._client.ui().document().getElementById(ListFile.ELEMENT_NAME_LIST);
