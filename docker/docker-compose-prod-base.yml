@@ -1,7 +1,7 @@
 version: "3"
 services:
   zyn:
-    image: stbd/zyn:0.11-rc-1
+    image: stbd/zyn:0.11-rc-2
     environment:
       ZYN_DEFAULT_USERNAME:
       ZYN_DEFAULT_USER_PASSWORD:
