@@ -37,7 +37,7 @@ class ListElement {
         const end_of_tags = this._data.indexOf(CHAR_DOUBLE_QUOTES, end_of_text + 2);
         if (end_of_tags !== -1) {
           const tags = decode_from_bytes(this._data.slice(end_of_text + 2, end_of_tags));
-          this._tags = tags.split(',').map((tag) => this._unescape_text(tag));
+          this._tags = tags.split(',').map((tag) => this._unescape_text(tag).trim()).filter(tag => tag.length > 0);
         }
       }
     } else {
@@ -561,7 +561,7 @@ class ListFile extends Base {
     save_button.id = ELEMENT_BUTTON_SAVE_ID;
     delete_button.classList.add('flex', 'justify-end', 'zyn-button', 'mx-2', 'px-2', 'my-3');
     delete_button.id = ELEMENT_BUTTON_DELETE_ID;
-    tags_container.classList.add('absolute', '-top-4', 'left-3', 'z-9', 'bg-white', 'px-2', 'inline-block')
+    tags_container.classList.add('absolute', '-top-4', 'left-3', 'bg-white', 'px-2', 'inline-block')
 
     const add_tag_button = this._client.ui().document().createElement('button');
     add_tag_button.classList.add('border', 'rounded-lg', 'hover:bg-zinc-100', 'px-3')
@@ -571,7 +571,7 @@ class ListFile extends Base {
       const add_tag_popup = this._client.ui().document().createElement('div');
       add_tag_popup.classList.add(
         'absolute', 'border', 'rounded-lg', 'p-2', 'left-full', '-top-3', 'min-w-40', 
-        'flex', 'flex-col', 'z-9', 'bg-white'
+        'flex', 'flex-col', 'z-[9]', 'bg-white'
       );
 
       const close_tag_popup_button = this._client.ui().document().createElement('button');
@@ -606,7 +606,6 @@ class ListFile extends Base {
       tags_container.appendChild(add_tag_popup);
     })
     tags_container.appendChild(add_tag_button);
-
     add_tag_to_row(tags_container, element.tags());
 
     save_button.innerText = 'Save';
