@@ -54,7 +54,7 @@ elif [ "$release_type" == "py" ] ; then
     path_workdir="$(mktemp -d)"
     echo "Using workdir $path_workdir"
     ZYN_PY_VERSION=$version pip wheel --no-deps -w "$path_workdir" "$(zyn_project_root)/py"
-    generated_file="$(find "$path_workdir" -name 'PyZyn*whl')"
+    generated_file="$(find "$path_workdir" -name 'pyzyn*whl')"
 
     path_output="$PWD/$(basename $generated_file)"
     mv "$generated_file" "$path_output"
