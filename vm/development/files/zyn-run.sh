@@ -107,7 +107,7 @@ elif [ "$cmd" == "docker-server" ]; then
            -v "$(zyn_project_root):/zyn" \
            -it \
            --env RUST_LOG=trace \
-           -p 8085:80 \
+           -p 10.0.2.15:8080:80 \
            "$@"
 
 elif [ "$cmd" == "web-client" ]; then
