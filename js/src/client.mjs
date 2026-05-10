@@ -253,11 +253,11 @@ class Client {
   }
 
   on_socket_error(e) {
-    console.log(`Error on socket: ${e}`);
+    console.log(`Error on socket: ${JSON.stringify(e)}`);
   }
 
   on_socket_close(e) {
-    console.log(`Socket closed: ${e}`);
+    console.log(`Socket closed: ${JSON.stringify(e)}`);
   }
 
   change_directory(path) {
