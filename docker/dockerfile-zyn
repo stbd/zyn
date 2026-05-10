@@ -11,6 +11,15 @@ RUN mkdir -p /project/src
 # so that dependecies are installed
 COPY zyn/Cargo.toml /project
 RUN echo "fn main() {}" > /project/src/main.rs
+RUN cd /project && cargo fetch
+
+# Embedded websocket has a hardcoded limit of 16 headers by default. Recent udpate from Apple changed
+# behavior in Ios in a way that is not enough anymore. Since embedded-websocket has changed it's
+# interface drastically, it is easier to increase the limit by editing code... with sed
+# It is licensed as MIT
+RUN sed -i 's/EMPTY_HEADER; 16/EMPTY_HEADER; 20/g' /usr/local/cargo/registry/src/*/embedded-websocket-0.3.2/src/http.rs
+
+# Compile dependencies
 RUN cargo install --path /project
 
 COPY zyn/ /project
